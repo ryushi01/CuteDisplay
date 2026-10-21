@@ -102,7 +102,11 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
     private func ensureBluetoothManager() {
         guard central == nil, authorizedIdentifier() != nil else { return }
-        central = CBCentralManager(delegate: self, queue: .main)
+        central = CBCentralManager(
+            delegate: self,
+            queue: .main,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: "online.classic-ragnarok.CuteDisplay.central"]
+        )
     }
     private func rememberAuthorized(_ id: UUID) {
         rememberedDeviceID = id.uuidString
@@ -368,6 +372,23 @@ final class BluetoothManager: NSObject, ObservableObject {
 }
 
 extension BluetoothManager: CBCentralManagerDelegate {
+    // Called if iOS restores a previous BLE central session in the background.
+    func centralManager(_ central: CBCentralManager,
+                        willRestoreState dict: [String: Any]) {
+        guard let id = authorizedIdentifier() else { return }
+        if let devices = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
+           let restored = devices.first(where: { $0.identifier == id }) {
+            peripheral = restored
+            restored.delegate = self
+            status = "Restoring Bluetooth connection..."
+            if restored.state == .connected {
+                restored.discoverServices([controlServiceUUID, batteryServiceUUID, powerServiceUUID])
+            } else if autoReconnect && !intentionalDisconnect {
+                central.connect(restored, options: nil)
+            }
+        }
+    }
+
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         if isSimulator { status = "Simulator / Demo Mode"; return }
         switch central.state {
