@@ -60,6 +60,12 @@ struct ContentView: View {
     @State private var mode: DisplayMode = .message
     @State private var message = UserDefaults.standard.string(forKey: "savedMessage") ?? "こんにちわ"
     @State private var brightness = 75.0
+    @State private var previewOnly = false
+    @State private var autoBrightness = UserDefaults.standard.bool(forKey: "cuteAutoBrightness")
+    @State private var dayStart = UserDefaults.standard.object(forKey: "cuteDayStart") as? Int ?? 8
+    @State private var nightStart = UserDefaults.standard.object(forKey: "cuteNightStart") as? Int ?? 22
+    @State private var dayBrightness = UserDefaults.standard.object(forKey: "cuteDayBrightness") as? Double ?? 80
+    @State private var nightBrightness = UserDefaults.standard.object(forKey: "cuteNightBrightness") as? Double ?? 25
     @State private var drinks: [DrinkItem] = ContentView.loadDrinks()
     @State private var newDrinkName = ""
     @State private var selectedCharacter = CuteCharacter(
@@ -128,6 +134,16 @@ struct ContentView: View {
     private let quickMessages = ["こんにちわ", "乾杯！","CHEERS!", "TEQUILA!", "MORE WINE!", "I WANT CHAMPAGNE!"]
     private let maxDisplayDrinks = 24
 
+    private var shouldAutoSend: Bool { canSend && !previewOnly }
+    private func updateScheduledBrightness() {
+        guard autoBrightness, bluetooth.isConnected else { return }
+        let hour = Calendar.current.component(.hour, from: Date())
+        let isDay = dayStart < nightStart ? (hour >= dayStart && hour < nightStart) :
+            (hour >= dayStart || hour < nightStart)
+        let amount = Int(isDay ? dayBrightness : nightBrightness)
+        brightness = Double(amount)
+        bluetooth.setBrightness(amount)
+    }
     private var canSend: Bool { bluetooth.isSimulator || bluetooth.isConnected }
     private var displayedDrinks: [DrinkItem] { Array(drinks.prefix(maxDisplayDrinks)) }
     private var pageCount: Int { max(1, (displayedDrinks.count + 3) / 4) }
@@ -150,7 +166,7 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
                         .onChange(of: mode) { _, selected in
-                            guard bluetooth.isConnected else { return }
+                            guard bluetooth.isConnected && !previewOnly else { return }
                             if selected == .message {
                                 bluetooth.sendMessage(message)
                             } else {
@@ -160,6 +176,15 @@ struct ContentView: View {
                     }
                     themeSection
                     displayPreview
+                    Toggle("Preview changes before sending", isOn: $previewOnly)
+                        .tint(themeColor)
+                    if previewOnly {
+                        Button("Apply Preview to Device") {
+                            if bluetooth.isConnected { restoreAfterConnection() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!bluetooth.isConnected)
+                    }
                     if mode == .message {
                         messageSection
                     } else {
@@ -206,9 +231,16 @@ struct ContentView: View {
             // Connecting/reconnecting must never overwrite the running LCD display.
             // Battery telemetry is recovered by BluetoothManager independently.
             if !connected { drinkSyncTask?.cancel() }
+            else { updateScheduledBrightness() }
         }
         .onChange(of: message) { _, value in
             UserDefaults.standard.set(value, forKey: "savedMessage")
+        }
+        .task {
+            while !Task.isCancelled {
+                updateScheduledBrightness()
+                try? await Task.sleep(for: .seconds(60))
+            }
         }
         .onDisappear { drinkSyncTask?.cancel() }
     }
@@ -434,7 +466,17 @@ struct ContentView: View {
                                 }
                             }
                         if showMascot {
-                            Text(selectedMood == .sleepy ? "😴" : selectedCharacter.symbol)
+                            VStack(spacing: 0) {
+                                if accessoryStyle > 0 && accessoryStyle < 8 {
+                                    Text(["", "👓", "🎀", "👑", "🧣", "🎉", "🌸", "✨"][accessoryStyle])
+                                        .font(.system(size: 12))
+                                }
+                                Text(selectedMood == .sleepy ? "😴" : selectedCharacter.symbol)
+                                if heldObjectMode == 1 && heldObject > 0 && heldObject < 8 {
+                                    Text(["", "❤️", "💐", "🧁", "🛏️", "🪄", "🧻", "☁️"][heldObject])
+                                        .font(.system(size: 12))
+                                }
+                            }
                                 .font(.system(size: 48 * CGFloat(mascotSize) / 100))
                                 .frame(width: mascotPreviewWidth)
                                 .frame(maxHeight: .infinity)
@@ -520,7 +562,7 @@ struct ContentView: View {
                     Button {
                         selectedTheme = index
                         UserDefaults.standard.set(index, forKey: "displayTheme")
-                        if canSend { bluetooth.setTheme(index) }
+                        if shouldAutoSend { bluetooth.setTheme(index) }
                     } label: {
                         VStack(spacing: 5) {
                             Circle()
@@ -916,8 +958,54 @@ struct ContentView: View {
                 Spacer()
                 Text("\(Int(brightness))%")
             }
+            Toggle("Scheduled day/night brightness", isOn: $autoBrightness)
+                .tint(themeColor)
+                .onChange(of: autoBrightness) { _, v in
+                    UserDefaults.standard.set(v, forKey: "cuteAutoBrightness")
+                    if v { updateScheduledBrightness() }
+                }
+            if autoBrightness {
+                Picker("Day begins", selection: $dayStart) {
+                    ForEach(0..<24, id: \.self) { h in
+                        Text(String(format: "%02d:00", h)).tag(h)
+                    }
+                }
+                .onChange(of: dayStart) { _, v in
+                    UserDefaults.standard.set(v, forKey: "cuteDayStart")
+                    updateScheduledBrightness()
+                }
+                Picker("Night begins", selection: $nightStart) {
+                    ForEach(0..<24, id: \.self) { h in
+                        Text(String(format: "%02d:00", h)).tag(h)
+                    }
+                }
+                .onChange(of: nightStart) { _, v in
+                    UserDefaults.standard.set(v, forKey: "cuteNightStart")
+                    updateScheduledBrightness()
+                }
+                HStack {
+                    Text("Day")
+                    Slider(value: $dayBrightness, in: 5...100, step: 5)
+                    Text("\(Int(dayBrightness))%")
+                }
+                .onChange(of: dayBrightness) { _, v in
+                    UserDefaults.standard.set(v, forKey: "cuteDayBrightness")
+                    updateScheduledBrightness()
+                }
+                HStack {
+                    Text("Night")
+                    Slider(value: $nightBrightness, in: 5...100, step: 5)
+                    Text("\(Int(nightBrightness))%")
+                }
+                .onChange(of: nightBrightness) { _, v in
+                    UserDefaults.standard.set(v, forKey: "cuteNightBrightness")
+                    updateScheduledBrightness()
+                }
+                Text("Time is checked while the app runs. iOS may suspend updates in the background.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             Slider(value: $brightness, in: 5...100, step: 5) { editing in
-                if !editing && canSend { bluetooth.setBrightness(Int(brightness)) }
+                if !editing && shouldAutoSend && !autoBrightness { bluetooth.setBrightness(Int(brightness)) }
             }
             .tint(.yellow)
         }
