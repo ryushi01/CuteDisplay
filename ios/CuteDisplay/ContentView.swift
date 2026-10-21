@@ -61,6 +61,7 @@ struct ContentView: View {
     @State private var message = UserDefaults.standard.string(forKey: "savedMessage") ?? "こんにちわ"
     @State private var brightness = 75.0
     @State private var previewOnly = false
+    @State private var lastAppliedScheduledBrightness: Int?
     @State private var autoBrightness = UserDefaults.standard.bool(forKey: "cuteAutoBrightness")
     @State private var dayStart = UserDefaults.standard.object(forKey: "cuteDayStart") as? Int ?? 8
     @State private var nightStart = UserDefaults.standard.object(forKey: "cuteNightStart") as? Int ?? 22
@@ -95,10 +96,12 @@ struct ContentView: View {
         "Coral", "Turquoise", "Emerald", "Violet", "Magenta", "Amber", "Periwinkle", "Pearl", "Crimson", "Neon"
     ]
     private let themeColors: [Color] = [
-        Color(red: 1, green: 0.35, blue: 0.75), .cyan, .green, .yellow, .purple,
-        Color(red: 1, green: 0.48, blue: 0.62), .blue,
-        Color(red: 1, green: 0.70, blue: 0.47), .green, .red,
-        Color(red: 0.73, green: 0.95, blue: 1), .orange,
+        Color(red: 1, green: 0.35, blue: 0.75),
+        Color(red: 0, green: 1, blue: 1), Color(red: 0, green: 1, blue: 0),
+        Color(red: 1, green: 1, blue: 0), Color(red: 0.5, green: 0, blue: 0.5),
+        Color(red: 1, green: 0.48, blue: 0.62), Color(red: 0, green: 0, blue: 1),
+        Color(red: 1, green: 0.70, blue: 0.47), Color(red: 0, green: 1, blue: 0), Color(red: 1, green: 0, blue: 0),
+        Color(red: 0.73, green: 0.95, blue: 1), Color(red: 1, green: 0.5, blue: 0),
         Color(red: 0.82, green: 0.51, blue: 1),
         Color(red: 1, green: 0.80, blue: 0.28),
         Color(red: 0.36, green: 0.75, blue: 1),
@@ -136,12 +139,14 @@ struct ContentView: View {
 
     private var shouldAutoSend: Bool { canSend && !previewOnly }
     private func updateScheduledBrightness() {
-        guard autoBrightness, bluetooth.isConnected else { return }
+        guard autoBrightness, bluetooth.isConnected, !previewOnly else { return }
         let hour = Calendar.current.component(.hour, from: Date())
         let isDay = dayStart < nightStart ? (hour >= dayStart && hour < nightStart) :
             (hour >= dayStart || hour < nightStart)
         let amount = Int(isDay ? dayBrightness : nightBrightness)
+        guard lastAppliedScheduledBrightness != amount else { return }
         brightness = Double(amount)
+        lastAppliedScheduledBrightness = amount
         bluetooth.setBrightness(amount)
     }
     private var canSend: Bool { bluetooth.isSimulator || bluetooth.isConnected }
@@ -230,7 +235,7 @@ struct ContentView: View {
         .onChange(of: bluetooth.isConnected) { _, connected in
             // Connecting/reconnecting must never overwrite the running LCD display.
             // Battery telemetry is recovered by BluetoothManager independently.
-            if !connected { drinkSyncTask?.cancel() }
+            if !connected { drinkSyncTask?.cancel(); lastAppliedScheduledBrightness = nil }
             else { updateScheduledBrightness() }
         }
         .onChange(of: message) { _, value in
@@ -1058,7 +1063,7 @@ struct ContentView: View {
 
     private func scheduleDrinkSync() {
         drinkSyncTask?.cancel()
-        guard autoSyncEnabled, bluetooth.isConnected else { return }
+        guard autoSyncEnabled, bluetooth.isConnected, !previewOnly else { return }
         let task = DispatchWorkItem { [self] in
             bluetooth.sendDrinks(displayedDrinks.map { (name: $0.name, count: $0.count) })
         }
