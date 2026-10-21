@@ -59,6 +59,8 @@ final class BluetoothManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        // Show the low-battery banner even while the CuteDisplay screen is visible.
+        UNUserNotificationCenter.current().delegate = self
         accessorySession.activate(on: .main) { [weak self] event in
             self?.handleAccessoryEvent(event)
         }
@@ -588,5 +590,12 @@ extension BluetoothManager: CBPeripheralDelegate {
             }
         }
         sendNext()
+    }
+}
+extension BluetoothManager: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
     }
 }
