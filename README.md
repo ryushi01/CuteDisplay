@@ -2,7 +2,7 @@
 
 A Bluetooth-controlled cute display built for the **LILYGO T-Display C5 (ESP32-C5)** with a **320×170 ST7789 LCD** and a companion **iPhone SwiftUI app**.
 
-## Latest version: 3.9
+## Latest version: 4.0
 
 - Six procedural, animated mascots and selectable moods (no sprite-sheet art)
 - Optional randomized surprise animations (sneeze, stretch, startled, look around, butterfly)
@@ -45,7 +45,7 @@ Uses `FFF0` control service and `FFF1` read/write characteristic; battery servic
 
 ## Earlier versions
 
-Historical download packages are in `archive/`. **3.5B is retained only as history**: its sprite-based mascots were intentionally rolled back in favor of the procedural 3.4-style renderer. The latest recommended combination is v3.9 firmware and app source.
+Historical download packages are in `archive/`. **3.5B is retained only as history**: its sprite-based mascots were intentionally rolled back in favor of the procedural 3.4-style renderer. The latest recommended combination is v4.0 firmware and app source.
 
 ## Important notes
 
@@ -57,3 +57,14 @@ Historical download packages are in `archive/`. **3.5B is retained only as histo
 The iPhone app remembers the selected BLE peripheral UUID, automatically attempts reconnection when launched and after disconnection, and offers Pair New Device, Forget Device and an auto-reconnect switch. This is app-level remembered-device pairing, **not an encrypted Bluetooth bond**. Auto-reconnection in the background is subject to iOS execution policies; the app cannot reconnect while the board is in deep sleep. Current and power describe the **battery path**, not the complete USB input consumption. Power is calculated from battery voltage × absolute battery current. Some fuel-gauge estimates may be unavailable or inaccurate depending on calibration and battery conditions.
 
 The changes were not independently compiled or tested on real hardware. Test with the board's original `axp2602.h` and `board_config.h` preserved.
+
+## Native iOS accessory setup (v4.0)
+
+- **Minimum deployment target: iOS 18.0**; add the native `AccessorySetupKit` framework to your app in Xcode.
+- **Required manual Xcode configuration:** add the keys from [AccessorySetup-InfoPlist.xml](ios/CuteDisplay/AccessorySetup-InfoPlist.xml) to the app target's existing Info.plist. This repository does not contain the original Xcode project, so these keys cannot be set automatically. The file is an XML fragment, not a complete Info.plist.
+- On your iPhone, open the app and tap **Pair New Device**. Select **CuteDisplay** in Apple's accessory picker. After pairing, the accessory is registered with the system and the app reconnects through its authorized Bluetooth identifier.
+- Tap **Forget Device** to request removal through Apple's system accessory APIs. The user can also review system-managed accessories in iOS Settings > Privacy & Security > Accessories. Appearance in Bluetooth Settings > My Devices is controlled by iOS and isn't guaranteed for custom BLE hardware.
+- The ESP32-C5 now requests secure-connections bonding and encrypted BLE command writes. The board has no convenient passkey-input mechanism; it uses Just Works bonding, which is encrypted but not MITM authenticated.
+- If your Xcode app deployment target is below iOS 18, increase it; otherwise the AccessorySetupKit imports will not compile for the older target.
+- Background reconnection is iOS-controlled. Additional background mode / state restoration changes would be needed for resilient suspended-app scenarios.
+- Verify on your board and real iPhone; these source changes have not been independently compiled, flashed, or physically tested.
