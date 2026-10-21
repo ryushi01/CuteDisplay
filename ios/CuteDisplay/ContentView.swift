@@ -141,6 +141,14 @@ struct ContentView: View {
                             }
                         }
                         .pickerStyle(.segmented)
+                        .onChange(of: mode) { _, selected in
+                            guard bluetooth.isConnected else { return }
+                            if selected == .message {
+                                bluetooth.sendMessage(message)
+                            } else {
+                                bluetooth.sendDrinks(displayedDrinks.map { (name: $0.name, count: $0.count) })
+                            }
+                        }
                     }
                     themeSection
                     displayPreview
@@ -186,8 +194,9 @@ struct ContentView: View {
             scheduleDrinkSync()
         }
         .onChange(of: bluetooth.isConnected) { _, connected in
-            if connected { restoreAfterConnection() }
-            else { drinkSyncTask?.cancel() }
+            // Connecting/reconnecting must never overwrite the running LCD display.
+            // Battery telemetry is recovered by BluetoothManager independently.
+            if !connected { drinkSyncTask?.cancel() }
         }
         .onChange(of: message) { _, value in
             UserDefaults.standard.set(value, forKey: "savedMessage")
@@ -304,6 +313,19 @@ struct ContentView: View {
                     .font(.subheadline)
                     .lineLimit(3)
                 Spacer()
+            }
+            if bluetooth.isConnected && !bluetooth.isSimulator {
+                Button {
+                    restoreAfterConnection()
+                } label: {
+                    Label("Reapply Saved Display Settings", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(bluetooth.isSendingDrinks)
+                Text("Bluetooth reconnection only refreshes battery telemetry; it does not change the current LCD screen.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             if !bluetooth.isSimulator {
                 Button {
@@ -847,6 +869,8 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: task)
     }
 
+    // Reapply the saved preferences only when explicitly requested, for example
+    // after a firmware restart that reset the board defaults.
     private func restoreAfterConnection() {
         drinkSyncTask?.cancel()
         bluetooth.restoreState(
