@@ -42,7 +42,6 @@ final class BluetoothManager: NSObject, ObservableObject {
     private let powerCharacteristicUUID = CBUUID(string: "FFF4")
     private var intentionalDisconnect = false
     private var restoredPeripherals: [CBPeripheral] = []
-    private var serviceDiscoveryPending = false
 
     // One write at a time. Particularly important for D:RESET / D:ADD / D:SHOW.
     private var pendingCommands: [String] = []
