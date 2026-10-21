@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import AccessorySetupKit
 import Combine
 import UIKit
 
@@ -21,6 +22,10 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var isSendingDrinks = false
 
     private var central: CBCentralManager!
+    private let accessorySession = ASAccessorySession()
+    private var accessorySessionReady = false
+    private var pendingAccessory: ASAccessory?
+    @Published var nativePairingAvailable = true
     private var peripheral: CBPeripheral?
     private var commandCharacteristic: CBCharacteristic?
     private let controlServiceUUID = CBUUID(string: "FFF0")
@@ -49,18 +54,78 @@ final class BluetoothManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        accessorySession.activate(on: .main) { [weak self] event in
+            self?.handleAccessoryEvent(event)
+        }
         central = CBCentralManager(delegate: self, queue: nil)
     }
 
+    // AccessorySetupKit is the authoritative accessory authorization store.
+    private func authorizedIdentifier() -> UUID? {
+        accessorySession.accessories.first(where: { $0.bluetoothIdentifier != nil })?.bluetoothIdentifier
+    }
+    private func handleAccessoryEvent(_ event: ASAccessoryEvent) {
+        switch event.eventType {
+        case .activated:
+            accessorySessionReady = true
+            if let id = authorizedIdentifier() {
+                rememberedDeviceID = id.uuidString
+                UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
+                if autoReconnect { startConnection() }
+            }
+        case .accessoryAdded, .accessoryChanged:
+            pendingAccessory = event.accessory
+            if event.eventType == .accessoryChanged, let id = authorizedIdentifier() {
+                rememberAuthorized(id)
+                if autoReconnect { startConnection() }
+            }
+        case .pickerDidDismiss:
+            if let id = pendingAccessory?.bluetoothIdentifier {
+                rememberAuthorized(id)
+                intentionalDisconnect = false
+                startConnection()
+            }
+            pendingAccessory = nil
+        case .accessoryRemoved:
+            guard authorizedIdentifier() == nil else { return }
+            clearRememberedDevice()
+            intentionalDisconnect = true
+            if let peripheral { central.cancelPeripheralConnection(peripheral) }
+            clearConnection()
+            status = "Accessory removed in iOS settings"
+        default:
+            break
+        }
+    }
+    private func rememberAuthorized(_ id: UUID) {
+        rememberedDeviceID = id.uuidString
+        UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
+    }
+    private func clearRememberedDevice() {
+        rememberedDeviceID = nil
+        UserDefaults.standard.removeObject(forKey: "cutePeripheralID")
+    }
     func connect() {
         intentionalDisconnect = false
+        guard authorizedIdentifier() != nil else { pairNewDevice(); return }
         startConnection()
     }
     func pairNewDevice() {
-        forgetDevice()
-        intentionalDisconnect = false
-        pairingNewDevice = true
-        startConnection()
+        guard accessorySessionReady else {
+            status = "Accessory setup is starting. Try again."
+            return
+        }
+        var descriptor = ASDiscoveryDescriptor()
+        descriptor.bluetoothServiceUUID = controlServiceUUID
+        descriptor.bluetoothNameSubstring = "CuteDisplay"
+        let item = ASPickerDisplayItem(
+            name: "CuteDisplay",
+            productImage: UIImage(systemName: "display") ?? UIImage(),
+            descriptor: descriptor
+        )
+        accessorySession.showPicker(for: [item]) { [weak self] error in
+            if let error { self?.status = "Accessory setup: \(error.localizedDescription)" }
+        }
     }
     func setAutoReconnect(_ enabled: Bool) {
         autoReconnect = enabled
@@ -68,32 +133,30 @@ final class BluetoothManager: NSObject, ObservableObject {
         if enabled && !isConnected { startConnection() }
         if !enabled && isScanning { central.stopScan(); isScanning = false }
     }
+    // Remove authorization through the system UI, not by only deleting UserDefaults.
     func forgetDevice() {
-        intentionalDisconnect = true
-        pairingNewDevice = false
-        if isScanning { central.stopScan(); isScanning = false }
-        if let peripheral { central.cancelPeripheralConnection(peripheral) }
-        rememberedDeviceID = nil
-        UserDefaults.standard.removeObject(forKey: "cutePeripheralID")
-        clearConnection()
-        status = "Device forgotten"
+        status = "Remove CuteDisplay in Settings → Privacy & Security → Accessories"
     }
     private func startConnection() {
         if isSimulator { status = "Simulator / Demo Mode"; return }
-        guard central.state == .poweredOn else { status = "Bluetooth is not ready"; return }
-        guard peripheral == nil, !isScanning else { return }
-        if !pairingNewDevice, let id = rememberedDeviceID,
-           let uuid = UUID(uuidString: id),
-           let known = central.retrievePeripherals(withIdentifiers: [uuid]).first {
-            peripheral = known
-            known.delegate = self
-            status = "Connecting to saved display..."
-            central.connect(known, options: nil)
+        guard accessorySessionReady else { return }
+        guard let id = authorizedIdentifier() else {
+            status = "Pair CuteDisplay with Apple's accessory picker"
             return
         }
-        isScanning = true
-        status = pairingNewDevice ? "Pairing CuteDisplay..." : "Searching for saved CuteDisplay..."
-        central.scanForPeripherals(withServices: [controlServiceUUID], options: nil)
+        guard central.state == .poweredOn else { status = "Bluetooth is not ready"; return }
+        guard peripheral == nil && !isScanning else { return }
+        rememberAuthorized(id)
+        if let known = central.retrievePeripherals(withIdentifiers: [id]).first {
+            peripheral = known
+            known.delegate = self
+            status = "Connecting to paired CuteDisplay..."
+            central.connect(known, options: nil)
+        } else {
+            isScanning = true
+            status = "Finding paired CuteDisplay..."
+            central.scanForPeripherals(withServices: [controlServiceUUID], options: nil)
+        }
     }
     func disconnect() {
         intentionalDisconnect = true
@@ -295,7 +358,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
         switch central.state {
         case .poweredOn:
             status = "Ready to connect"
-            if autoReconnect && rememberedDeviceID != nil && !intentionalDisconnect { startConnection() }
+            if autoReconnect && !intentionalDisconnect { startConnection() }
         case .poweredOff: clearConnection(); status = "Turn on Bluetooth"
         case .unauthorized: clearConnection(); status = "Allow Bluetooth access in Settings"
         case .unsupported: clearConnection(); status = "Bluetooth LE unsupported"
@@ -307,7 +370,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
                         didDiscover found: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         guard peripheral == nil else { return }
-        if !pairingNewDevice, let id = rememberedDeviceID, found.identifier.uuidString != id { return }
+        guard let id = authorizedIdentifier(), found.identifier == id else { return }
         central.stopScan()
         isScanning = false
         peripheral = found
@@ -317,9 +380,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect device: CBPeripheral) {
-        rememberedDeviceID = device.identifier.uuidString
-        UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
-        pairingNewDevice = false
+        rememberAuthorized(device.identifier)
         status = "Discovering services..."
         device.discoverServices([controlServiceUUID, batteryServiceUUID, powerServiceUUID])
     }
