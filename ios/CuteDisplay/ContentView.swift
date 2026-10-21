@@ -229,6 +229,50 @@ struct ContentView: View {
                         .tint(batteryColor)
                 }
             }
+            if bluetooth.isConnected {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("BATTERY & POWER").font(.caption.bold()).foregroundStyle(.secondary)
+                    HStack {
+                        powerMetric("Voltage", bluetooth.batteryVoltage.map { String(format: "%.3f V", $0) } ?? "—")
+                        powerMetric("Current", bluetooth.batteryCurrent.map { String(format: "%+.0f mA", $0 * 1000) } ?? "—")
+                    }
+                    HStack {
+                        powerMetric("Battery power", batteryPowerText)
+                        powerMetric("State", batteryStateText)
+                    }
+                    HStack {
+                        powerMetric("Battery health", bluetooth.batteryHealth.map { "\($0)%" } ?? "—")
+                        powerMetric("Temperature", bluetooth.batteryTemperature.map { "\($0) °C" } ?? "—")
+                    }
+                    HStack {
+                        powerMetric("Time to empty", batteryStateText == "Discharging" ? (bluetooth.minutesToEmpty.map { "\($0) min" } ?? "—") : "—")
+                        powerMetric("Time to full", batteryStateText == "Charging" ? (bluetooth.minutesToFull.map { "\($0) min" } ?? "—") : "—")
+                    }
+                    if let updated = bluetooth.lastPowerUpdate {
+                        Text("Last updated: \(updated.formatted(date: .omitted, time: .standard))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Text("Power is battery-side voltage × current, not total USB input power.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Divider()
+            }
+            HStack {
+                Label(bluetooth.rememberedDeviceID == nil ? "No remembered device" : "CuteDisplay remembered", systemImage: "checkmark.shield")
+                    .font(.subheadline)
+                Spacer()
+            }
+            Toggle("Automatically reconnect", isOn: Binding(
+                get: { bluetooth.autoReconnect },
+                set: { bluetooth.setAutoReconnect($0) }
+            )).tint(.green)
+            HStack {
+                Button("Pair New Device") { bluetooth.pairNewDevice() }.buttonStyle(.bordered)
+                Spacer()
+                Button("Forget Device", role: .destructive) { bluetooth.forgetDevice() }
+                    .buttonStyle(.bordered)
+                    .disabled(bluetooth.rememberedDeviceID == nil)
+            }
             Divider()
             HStack(spacing: 8) {
                 Image(systemName: "antenna.radiowaves.left.and.right")
@@ -259,6 +303,25 @@ struct ContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
+    private var batteryPowerText: String {
+        guard let voltage = bluetooth.batteryVoltage, let current = bluetooth.batteryCurrent else { return "—" }
+        return String(format: "%.2f W", abs(voltage * current))
+    }
+    private var batteryStateText: String {
+        guard let amps = bluetooth.batteryCurrent else { return "—" }
+        return amps > 0.005 ? "Charging" : amps < -0.005 ? "Discharging" : "Idle"
+    }
+    private func powerMetric(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.bold()).monospacedDigit()
+                .minimumScaleFactor(0.75).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.white.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
     private var batteryText: String {
         guard !bluetooth.isSimulator, bluetooth.isConnected, let level = bluetooth.batteryLevel else { return "—" }
         return "\(level)%"
