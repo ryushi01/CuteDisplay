@@ -103,8 +103,25 @@ uint8_t surpriseAction = 0; // 0 idle; 1..12 animated right-panel performances
 unsigned long surpriseStart = 0;
 unsigned long nextSurpriseAt = 0;
 const unsigned long SURPRISE_DURATION_MS = 4100;
+int accessoryStyle=0, objectMode=0, manualObject=0, animationFrequency=1, animationIntensity=1;
+bool personalityEnabled=true;
+const uint8_t moodActions[8][6]={
+ {1,2,3,4,5,10},{2,5,6,7,9,11},{1,4,8,10,11,8},
+ {3,4,10,1,3,4},{2,4,5,10,6,4},{8,8,4,1,8,4},
+ {3,5,6,9,11,7},{7,12,12,6,4,12}
+};
+int choosePerformance(bool personality){
+ if(personalityEnabled && personality){
+  const uint8_t signature[6][3]={{2,9,7},{7,6,12},{1,12,4},
+                                  {2,8,11},{8,2,4},{4,10,5}};
+  return signature[constrain(mascot,0,5)][esp_random()%3];
+ }
+ return moodActions[constrain(mood,0,7)][esp_random()%6];
+}
 void scheduleNextSurprise(unsigned long now) {
- nextSurpriseAt = now + 40000UL + (esp_random() % 50000UL);
+ unsigned long wait=animationFrequency==0?70000UL:animationFrequency==2?15000UL:40000UL;
+ unsigned long spread=animationFrequency==0?60000UL:animationFrequency==2?22000UL:50000UL;
+ nextSurpriseAt=now+wait+(esp_random()%spread);
 }
 uint8_t animPhase = 0;
 unsigned long lastMascotAnimation = 0;
@@ -598,6 +615,58 @@ void drawSurpriseEffects(){
  }
 }
 
+// Accessories and handheld objects remain fully in the 98x170 right sprite.
+void drawMascotFashion(){
+ uint16_t c=themeColor();
+ int bob=animationIntensity==0?0:((animPhase/4)%3-1)*(animationIntensity==2?3:1);
+ switch(accessoryStyle){
+ case 1: // Glasses
+  for(int x=255;x<=287;x+=32){oval(x,104,13,11,OUTLINE);oval(x,104,10,8,WHITE);
+   oval(x+gazeX,104+gazeY,3,5,BLACK);}
+  line(268,103,274,103,OUTLINE);break;
+ case 2: // Ribbon
+  oval(279,66+bob,12,8,c);oval(303,66-bob,12,8,c);oval(290,66,5,5,YELLOW);break;
+ case 3: // Crown
+  rect(251,47,40,11,YELLOW);
+  for(int i=0;i<3;i++){int x=253+i*15;line(x,47,x+6,34,YELLOW);line(x+6,34,x+12,47,YELLOW);}
+  oval(272,52,4,3,c);break;
+ case 4: // Scarf
+  rect(243,130,56,7,c);rect(284,135,8,20,c);break;
+ case 5: // Party hat
+  for(int y=36;y<70;y++){int w=(y-36)*31/34;rect(275-w/2,y,w,1,c);}
+  oval(275,33+bob,4,4,YELLOW);break;
+ case 6: // Flower
+  oval(299,72,5,5,BLUSH);oval(309,72,5,5,BLUSH);
+  oval(299,82,5,5,BLUSH);oval(309,82,5,5,BLUSH);oval(304,77,5,5,YELLOW);break;
+ case 7: // Seasonal ribbon and stars
+  oval(300,70,12,8,c);sparkle(307,48+bob,5,YELLOW);break;
+ }
+ int item=objectMode==1?manualObject:(
+    mood==1?2:mood==2?6:mood==3?7:mood==4?3:
+    mood==5?4:mood==6?5:mood==7?1:0);
+ int x=271,y=145-(animationIntensity==0?0:(animPhase%8<4?2:0));
+ switch(item){
+ case 1: // Heart
+  oval(x-5,y-3,7,7,c);oval(x+5,y-3,7,7,c);
+  line(x-11,y,x,y+13,c);line(x+11,y,x,y+13,c);break;
+ case 2: // Bouquet
+  for(int n=0;n<4;n++)oval(x+(n%2?6:-6),y-4+(n/2?7:-7),5,5,BLUSH);
+  oval(x,y-5,5,5,YELLOW);line(x,y,x,y+13,0x07E0);break;
+ case 3: // Cupcake
+  rect(x-12,y-4,24,14,c);oval(x,y-7,13,8,WHITE);
+  oval(x+2,y-14,3,3,BLUSH);break;
+ case 4: // Pillow
+  rect(x-18,y-9,36,20,LIGHTBLUE);rect(x-14,y-6,28,14,WHITE);break;
+ case 5: // Wand
+  line(x-7,y+12,x+9,y-15,YELLOW);sparkle(x+10,y-16,8,c);break;
+ case 6: // Tissue
+  rect(x-13,y-3,26,13,LIGHTBLUE);
+  for(int n=0;n<8;n++)rect(x-10+n*3,y-13+(n%2)*3,2,12,WHITE);break;
+ case 7: // Cloud
+  oval(x-7,y-5,10,7,OUTLINE);oval(x+7,y-5,10,7,OUTLINE);
+  line(x,y+4,x-3,y+12,YELLOW);line(x-3,y+12,x+5,y+9,YELLOW);break;
+ }
+}
 void mascotExpression(){
  int cx=271, eyeY=104;
  if(mascot==0) eyeY=102;
@@ -697,6 +766,7 @@ void drawMascot(){
  }
  mascotExpression();
  drawSurpriseEffects();
+ drawMascotFashion();
  for(int y=0;y<170;y++)for(int x=0;x<98;x++)
   mascotBackup[y*98+x]=pixels[y*LCD_W+222+x];
  rect(222,0,98,170,themeBackground());
@@ -1008,6 +1078,18 @@ void processCommand(String cmd){
   if(n==0||n==1){bubbleTypewriter=n==1;if(mode==MESSAGE_MODE && bubbleEnabled)showMessage(message);}
   return;
  }
+ if(cmd.startsWith("A:")){int n=cmd.substring(2).toInt();if(n>=0&&n<=7){accessoryStyle=n;redrawCurrent();}return;}
+ if(cmd.startsWith("H:")){int n=cmd.substring(2).toInt();if(n==0||n==1){objectMode=n;redrawCurrent();}return;}
+ if(cmd.startsWith("J:")){int n=cmd.substring(2).toInt();if(n>=0&&n<=7){manualObject=n;redrawCurrent();}return;}
+ if(cmd.startsWith("K:")){int n=cmd.substring(2).toInt();if(n>=0&&n<=2){animationFrequency=n;scheduleNextSurprise(millis());}return;}
+ if(cmd.startsWith("I:")){int n=cmd.substring(2).toInt();if(n>=0&&n<=2){animationIntensity=n;redrawCurrent();}return;}
+ if(cmd.startsWith("N:")){int n=cmd.substring(2).toInt();if(n==0||n==1){personalityEnabled=n==1;}return;}
+ if(cmd.startsWith("R:")){
+  int n=cmd.substring(2).toInt();
+  if(n>=0&&n<=2){surpriseAction=n==0?(1+esp_random()%12):choosePerformance(n==2);
+   surpriseStart=millis();redrawCurrent();}
+  return;
+ }
  if(cmd.startsWith("S:")) {
   int n=cmd.substring(2).toInt();
   if(n==0||n==1){
@@ -1083,21 +1165,7 @@ void loop(){
   if(mascotVisible && !(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }else if(surprisesEnabled && mascotVisible && !surpriseAction
           && (int32_t)(millis()-nextSurpriseAt)>=0){
-  // Select only performances that suit the currently selected mood.
-   // Mood: 0 neutral, 1 happy, 2 sad, 3 angry, 4 hungry,
-   //       5 sleepy, 6 excited, 7 shy.
-   static const uint8_t moodActions[8][6] = {
-    {1,2,3,4,5,10},    // Neutral: everyday little reactions
-    {2,5,6,7,9,11},    // Happy: kisses, winks, celebrations, laughter
-    {1,4,8,10,11,8},   // Sad: quiet glances, sigh-like dreams, tears
-    {3,4,10,1,3,4},    // Angry: startling, scowling and suspicious glances
-    {2,4,5,10,6,4},    // Hungry: restless stretching, curiosity, food-daydreaming
-    {8,8,4,1,8,4},     // Sleepy: dreams, slow glances, tiny sleepy reactions
-    {3,5,6,9,11,7},   // Excited: enthusiastic and energetic performances
-    {7,12,12,6,4,12} // Shy: blushing, timid winks and small hearts
-   };
-   int selectedMood=constrain(mood,0,7);
-   surpriseAction=moodActions[selectedMood][esp_random()%6];
+  surpriseAction=choosePerformance((esp_random()%3)==0);
   surpriseStart=millis();
   if(!(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }
