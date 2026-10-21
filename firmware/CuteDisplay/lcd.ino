@@ -62,6 +62,7 @@ SemaphoreHandle_t lcdSemaphore = nullptr;
 QueueHandle_t commandQueue = nullptr;
 AXP2602 axp;
 BLECharacteristic *batteryCharacteristic = nullptr;
+BLECharacteristic *powerCharacteristic = nullptr;
 bool lcdReady = false;
 bool pwmReady = false;
 bool batteryReady = false;
@@ -797,7 +798,15 @@ void readBattery(){
  int value=(int)axp.getSOC();
  if(value<0||value>100)return;
  batteryLevel=value;
- Serial.printf("[BATTERY] %d%%, %.3f V\n",value,axp.getBatteryVoltage());
+ float volts=axp.getBatteryVoltage(),amps=axp.getBatteryCurrent();
+ Serial.printf("[BATTERY] %d%% %.3f V %.3f A\n",value,volts,amps);
+ if(powerCharacteristic){
+  String data=String(value)+","+String(volts,3)+","+String(amps,3)+","+
+    String(axp.getTemperature())+","+String(axp.getSOH())+","+
+    String(axp.getTimeToEmpty())+","+String(axp.getTimeToFull());
+  powerCharacteristic->setValue(data.c_str());
+  if(bleConnected)powerCharacteristic->notify();
+ }
  if(batteryCharacteristic){
   uint8_t b=(uint8_t)value;
   batteryCharacteristic->setValue(&b,1);
@@ -836,6 +845,10 @@ void initBLE(){
   BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_NOTIFY);
  uint8_t value=batteryLevel>=0?(uint8_t)batteryLevel:255;
  batteryCharacteristic->setValue(&value,1);batteryService->start();
+ BLEService *powerService=server->createService("FFF3");
+ powerCharacteristic=powerService->createCharacteristic("FFF4",BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_NOTIFY);
+ powerCharacteristic->setValue("0,0,0,0,0,0,0");
+ powerService->start();
  BLEAdvertising *ad=BLEDevice::getAdvertising();
  ad->addServiceUUID("FFF0");ad->addServiceUUID("180F");
  ad->setMinPreferred(0x06);ad->setMaxPreferred(0x12);
