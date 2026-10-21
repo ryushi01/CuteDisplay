@@ -99,10 +99,10 @@ int messageSize = 3;    // 1..5; Japanese scale 1..4
 int mood = 1;          // 0 neutral, 1 happy, 2 sad, 3 angry, 4 hungry, 5 sleepy, 6 excited, 7 shy
 // Random, optional short surprise performances. Preserves the selected mood.
 bool surprisesEnabled = true;
-uint8_t surpriseAction = 0; // 0 idle, 1 sneeze, 2 stretch, 3 startle, 4 look around, 5 butterfly
+uint8_t surpriseAction = 0; // 0 idle; 1..12 animated right-panel performances
 unsigned long surpriseStart = 0;
 unsigned long nextSurpriseAt = 0;
-const unsigned long SURPRISE_DURATION_MS = 2900;
+const unsigned long SURPRISE_DURATION_MS = 4100;
 void scheduleNextSurprise(unsigned long now) {
  nextSurpriseAt = now + 40000UL + (esp_random() % 50000UL);
 }
@@ -125,43 +125,6 @@ void updateExpressiveEyes(unsigned long now) {
  else if(gazeX>targetGazeX)--gazeX;
  if(gazeY<targetGazeY)++gazeY;
  else if(gazeY>targetGazeY)--gazeY;
-}
-// Full-size Explorer travels horizontally across the entire LCD. During a
-// crossing, text is always painted on top as a foreground layer.
-int mascotPanelWidth();
-uint8_t explorerAction=0; // 0 idle; 1 sweep left; 2 dash; 3 pause/return; 4 heart chase
-unsigned long nextExplorerAt=0, explorerStarted=0;
-const unsigned long EXPLORER_DURATION_MS=6200;
-int explorerX() {
- int width=mascotPanelWidth();
- if(!explorerAction) return LCD_W-width;
- unsigned long elapsed=min((unsigned long)EXPLORER_DURATION_MS,millis()-explorerStarted);
- int half=EXPLORER_DURATION_MS/2;
- int phase=elapsed<half ? elapsed : EXPLORER_DURATION_MS-elapsed;
- // Progress ranges 0 -> 100 -> 0, so character returns naturally.
- int progress=constrain(phase*100/half,0,100);
- if(explorerAction==2) progress=progress*progress/100;
- if(explorerAction==3) progress=progress<45?0:(progress-45)*100/55;
- return constrain((LCD_W-width)*(100-progress)/100,0,LCD_W-width);
-}
-void updateExplorer(unsigned long now) {
- if(!mascotVisible || mode!=MESSAGE_MODE) {
-  explorerAction=0;
-  nextExplorerAt=now+35000UL;
-  return;
- }
- if(explorerAction) {
-  if(now-explorerStarted>=EXPLORER_DURATION_MS) {
-   explorerAction=0;
-   nextExplorerAt=now+25000UL+(esp_random()%50000UL);
-  }
- } else if(!surpriseAction) {
-  if(!nextExplorerAt) nextExplorerAt=now+18000UL;
-  if((int32_t)(now-nextExplorerAt)>=0) {
-   explorerAction=1+(esp_random()%4);
-   explorerStarted=now;
-  }
- }
 }
 uint16_t mascotBackup[98 * 170];
 int mascotPanelWidth() { return mascotVisible ? max(40, 98 * mascotPercent / 100) : 0; }
@@ -573,6 +536,65 @@ void drawSurpriseEffects(){
     sparkle(231,95+(tick%3)*5,3,accent);
    }
    break;
+  case 6: // Blow a kiss: heart emerges and floats upward.
+   {int h=constrain(tick*4,0,46);
+    int x=272+(tick%5)*2,y=125-h;
+    oval(x-4,y-2,4,4,accent);oval(x+4,y-2,4,4,accent);
+    line(x-7,y,x,y+8,accent);line(x+7,y,x,y+8,accent);
+    sparkle(296,68+(tick%3)*4,3,BLUSH);
+   }
+   break;
+  case 7: // Playful wink and blush pulses.
+   line(247,103,260,105,BLACK);
+   oval(287,103,5,7,BLACK);
+   oval(244,118,8+(tick%3),4,BLUSH);
+   oval(301,118,8+(tick%3),4,BLUSH);
+   if(tick%4<2)sparkle(307,84,4,accent);
+   break;
+  case 8: // Dreamy: three rising dream bubbles and closed eyes.
+   line(248,103,260,103,BLACK);line(281,103,293,103,BLACK);
+   for(int n=0;n<3;n++){
+    int y=90-((tick*4+n*17)%62);
+    int x=305-n*7;
+    oval(x,y,3+n,3+n,WHITE);
+   }
+   break;
+  case 9: // Cheer: rhythmic raised paws and confetti.
+   {int lift=(tick%6<3)?10:4;
+    outlinedOval(239,82-lift,9,12,WHITE);
+    outlinedOval(302,82-lift,9,12,WHITE);
+    for(int n=0;n<6;n++){
+     int x=229+(n*17)%85,y=24+(n*31+tick*7)%55;
+     pixel(x,y,(n%2)?accent:BLUSH);
+     pixel(x+1,y+2,WHITE);
+    }
+   }
+   break;
+  case 10: // Curious head tilt: side glance and question marks.
+   {int dx=(tick%10<5)?-3:3;
+    oval(255+dx,104,4,6,BLACK);oval(287+dx,104,4,6,BLACK);
+    textAt("?",300,46-(tick%4)*2,2,accent);
+    sparkle(230,70,3,accent);
+   }
+   break;
+  case 11: // Happy tears: laughing eyes and drifting sparkles.
+   line(248,104,254,100,BLACK);line(254,100,260,104,BLACK);
+   line(281,104,287,100,BLACK);line(287,100,293,104,BLACK);
+   if(tick%5<3){
+    oval(244,115+(tick%4)*2,2,4,LIGHTBLUE);
+    oval(300,115+(tick%4)*2,2,4,LIGHTBLUE);
+   }
+   sparkle(234,54+(tick%6)*3,4,accent);
+   break;
+  case 12: // Shy: floating mini-hearts and bashful cheeks.
+   oval(244,118,10,5,BLUSH);oval(300,118,10,5,BLUSH);
+   for(int n=0;n<2;n++){
+    int x=234+n*69,y=76-((tick*3+n*12)%32);
+    oval(x-2,y,3,3,accent);oval(x+2,y,3,3,accent);
+    line(x-4,y+2,x,y+6,accent);line(x+4,y+2,x,y+6,accent);
+   }
+   break;
+
  }
 }
 
@@ -679,7 +701,7 @@ void drawMascot(){
   mascotBackup[y*98+x]=pixels[y*LCD_W+222+x];
  rect(222,0,98,170,themeBackground());
  int dstW=mascotPanelWidth();
- int dstX=explorerX();
+ int dstX=LCD_W-dstW;
  int bodyH=max(30,170*mascotPercent/100);
  int breathe=(animPhase/5)%2;
  int bounce=mood==6?(animPhase%8<4?4:0):
@@ -695,14 +717,7 @@ void drawMascot(){
   int sx=x*98/dstW,sy=y*170/bodyH;
   pixel(dstX+x,top+y,mascotBackup[sy*98+sx]);
  }
- if(explorerAction==4) {
-  int hx=constrain(dstX+dstW/2,8,LCD_W-8);
-  int hy=constrain(top+10,8,LCD_H-8);
-  oval(hx-3,hy,3,3,themeColor());
-  oval(hx+3,hy,3,3,themeColor());
-  line(hx-5,hy+2,hx,hy+8,themeColor());
-  line(hx+5,hy+2,hx,hy+8,themeColor());
- }
+
 }
 
 bool lcdTransferred(esp_lcd_panel_io_handle_t io,
@@ -781,17 +796,8 @@ void drawMessage() {
  if(!beginDrawing())return;
  int a=asciiMessageScale(), j=jpMessageScale();
  int height=max(7*a,16*j);
- if(bubbleEnabled){
-  drawMascot();
-  // During Explorer crossings the bubble remains in front and legible.
-  drawSpeechBubble();
- } else {
-  drawMascot();
-  // Foreground text and a black backing prevent the moving sprite from
-  // obscuring message letters, without altering the character's size.
-  if(explorerAction) rect(0,(LCD_H-height)/2-3,contentRight(),height+6,BLACK);
-  richText(message,scrollX,(LCD_H-height)/2,a,j,themeColor(),contentRight());
- }
+ if(bubbleEnabled){drawSpeechBubble();drawMascot();}
+ else {drawMascot();richText(message,scrollX,(LCD_H-height)/2,a,j,themeColor(),contentRight());}
  finishDrawing();
 }
 void showMessage(String s) {
@@ -1055,7 +1061,7 @@ void processCommand(String cmd){
 }
 void setup(){
  Serial.begin(115200);delay(700);
- Serial.println("=== CUTEDISPLAY 3.8 SURPRISE ANIMATIONS ===");
+ Serial.println("=== CUTEDISPLAY 3.9 RIGHT-SIDE ANIMATIONS ===");
  commandQueue=xQueueCreate(32,MAX_CMD+1);
  if(!commandQueue)Serial.println("[BLE] Queue creation failed");
  installStartupGlyphs();initBattery();initLCD();initBLE();Serial.println("READY!");
@@ -1077,14 +1083,13 @@ void loop(){
   if(mascotVisible && !(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }else if(surprisesEnabled && mascotVisible && !surpriseAction
           && (int32_t)(millis()-nextSurpriseAt)>=0){
-  surpriseAction=1+(esp_random()%5);
+  surpriseAction=1+(esp_random()%12);
   surpriseStart=millis();
   if(!(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }
  if(mascotVisible && millis()-lastMascotAnimation>=MASCOT_ANIMATION_MS){
   lastMascotAnimation=millis();animPhase=(animPhase+1)%32;
   updateExpressiveEyes(lastMascotAnimation);
-  updateExplorer(lastMascotAnimation);
   // The scrolling message already redraws frequently; avoid unnecessary transfers.
   if(!(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }
