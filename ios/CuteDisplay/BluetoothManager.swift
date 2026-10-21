@@ -21,7 +21,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var rememberedDeviceID = UserDefaults.standard.string(forKey: "cutePeripheralID")
     @Published var isSendingDrinks = false
 
-    private var central: CBCentralManager!
+    private var central: CBCentralManager?
     private let accessorySession = ASAccessorySession()
     private var accessorySessionReady = false
     private var pendingAccessory: ASAccessory?
@@ -56,7 +56,7 @@ final class BluetoothManager: NSObject, ObservableObject {
         accessorySession.activate(on: .main) { [weak self] event in
             self?.handleAccessoryEvent(event)
         }
-        central = CBCentralManager(delegate: self, queue: nil)
+        // Do not instantiate CBCentralManager before native accessory authorization.
     }
 
     // AccessorySetupKit is the authoritative accessory authorization store.
@@ -71,18 +71,21 @@ final class BluetoothManager: NSObject, ObservableObject {
             if let id = authorizedIdentifier() {
                 rememberedDeviceID = id.uuidString
                 UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
+                ensureBluetoothManager()
                 if autoReconnect { startConnection() }
             }
         case .accessoryAdded, .accessoryChanged:
             pendingAccessory = event.accessory
             if event.eventType == .accessoryChanged, let id = authorizedIdentifier() {
                 rememberAuthorized(id)
+                ensureBluetoothManager()
                 if autoReconnect { startConnection() }
             }
         case .pickerDidDismiss:
             if let id = pendingAccessory?.bluetoothIdentifier {
                 rememberAuthorized(id)
                 intentionalDisconnect = false
+                ensureBluetoothManager()
                 startConnection()
             }
             pendingAccessory = nil
@@ -90,12 +93,16 @@ final class BluetoothManager: NSObject, ObservableObject {
             guard authorizedIdentifier() == nil else { return }
             clearRememberedDevice()
             intentionalDisconnect = true
-            if let peripheral { central.cancelPeripheralConnection(peripheral) }
+            if let peripheral { central?.cancelPeripheralConnection(peripheral) }
             clearConnection()
             status = "Accessory removed in iOS settings"
         default:
             break
         }
+    }
+    private func ensureBluetoothManager() {
+        guard central == nil, authorizedIdentifier() != nil else { return }
+        central = CBCentralManager(delegate: self, queue: .main)
     }
     private func rememberAuthorized(_ id: UUID) {
         rememberedDeviceID = id.uuidString
@@ -131,7 +138,7 @@ final class BluetoothManager: NSObject, ObservableObject {
         autoReconnect = enabled
         UserDefaults.standard.set(enabled, forKey: "cuteAutoReconnect")
         if enabled && !isConnected { startConnection() }
-        if !enabled && isScanning { central.stopScan(); isScanning = false }
+        if !enabled && isScanning { central?.stopScan(); isScanning = false }
     }
     // Remove authorization through the system UI, not by only deleting UserDefaults.
     func forgetDevice() {
@@ -151,7 +158,8 @@ final class BluetoothManager: NSObject, ObservableObject {
             status = "Pair CuteDisplay with Apple's accessory picker"
             return
         }
-        guard central.state == .poweredOn else { status = "Bluetooth is not ready"; return }
+        ensureBluetoothManager()
+        guard let central, central.state == .poweredOn else { status = "Bluetooth is starting or not ready"; return }
         guard peripheral == nil && !isScanning else { return }
         rememberAuthorized(id)
         if let known = central.retrievePeripherals(withIdentifiers: [id]).first {
@@ -167,8 +175,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
     func disconnect() {
         intentionalDisconnect = true
-        if isScanning { central.stopScan(); isScanning = false }
-        if let peripheral { central.cancelPeripheralConnection(peripheral) }
+        if isScanning { central?.stopScan(); isScanning = false }
+        if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         else { clearConnection(); status = "Disconnected" }
     }
 
