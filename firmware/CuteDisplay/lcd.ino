@@ -1020,7 +1020,7 @@ void processCommand(String cmd){
  }
  if(cmd.startsWith("M:")) {
   int n=cmd.substring(2).toInt();
-  if(n>=0&&n<=7){mood=n;animPhase=0;redrawCurrent();}
+  if(n>=0&&n<=7){mood=n;animPhase=0;surpriseAction=0;scheduleNextSurprise(millis());redrawCurrent();}
   return;
  }
  if(cmd.startsWith("V:")) {
@@ -1083,7 +1083,21 @@ void loop(){
   if(mascotVisible && !(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }else if(surprisesEnabled && mascotVisible && !surpriseAction
           && (int32_t)(millis()-nextSurpriseAt)>=0){
-  surpriseAction=1+(esp_random()%12);
+  // Select only performances that suit the currently selected mood.
+   // Mood: 0 neutral, 1 happy, 2 sad, 3 angry, 4 hungry,
+   //       5 sleepy, 6 excited, 7 shy.
+   static const uint8_t moodActions[8][6] = {
+    {1,2,3,4,5,10},    // Neutral: everyday little reactions
+    {2,5,6,7,9,11},    // Happy: kisses, winks, celebrations, laughter
+    {1,4,8,10,11,8},   // Sad: quiet glances, sigh-like dreams, tears
+    {3,4,10,1,3,4},    // Angry: startling, scowling and suspicious glances
+    {2,4,5,10,6,4},    // Hungry: restless stretching, curiosity, food-daydreaming
+    {8,8,4,1,8,4},     // Sleepy: dreams, slow glances, tiny sleepy reactions
+    {3,5,6,9,11,7},   // Excited: enthusiastic and energetic performances
+    {7,12,12,6,4,12} // Shy: blushing, timid winks and small hearts
+   };
+   int selectedMood=constrain(mood,0,7);
+   surpriseAction=moodActions[selectedMood][esp_random()%6];
   surpriseStart=millis();
   if(!(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }
