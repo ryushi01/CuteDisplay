@@ -35,7 +35,6 @@ final class BluetoothManager: NSObject, ObservableObject {
     private let powerServiceUUID = CBUUID(string: "FFF3")
     private let powerCharacteristicUUID = CBUUID(string: "FFF4")
     private var intentionalDisconnect = false
-    private var pairingNewDevice = false
 
     // One write at a time. Particularly important for D:RESET / D:ADD / D:SHOW.
     private var pendingCommands: [String] = []
@@ -68,6 +67,7 @@ final class BluetoothManager: NSObject, ObservableObject {
         switch event.eventType {
         case .activated:
             accessorySessionReady = true
+            if authorizedIdentifier() == nil { clearRememberedDevice() }
             if let id = authorizedIdentifier() {
                 rememberedDeviceID = id.uuidString
                 UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
@@ -135,7 +135,14 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
     // Remove authorization through the system UI, not by only deleting UserDefaults.
     func forgetDevice() {
-        status = "Remove CuteDisplay in Settings → Privacy & Security → Accessories"
+        guard let accessory = accessorySession.accessories.first(where: { $0.bluetoothIdentifier != nil }) else {
+            clearRememberedDevice()
+            status = "No paired accessory"
+            return
+        }
+        accessorySession.removeAccessory(accessory) { [weak self] error in
+            if let error { self?.status = "Remove failed: \(error.localizedDescription)" }
+        }
     }
     private func startConnection() {
         if isSimulator { status = "Simulator / Demo Mode"; return }
