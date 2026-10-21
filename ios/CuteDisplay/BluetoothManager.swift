@@ -347,6 +347,16 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
     func sendDrinksPayload(_ payload: String) { enqueue([payload]) }
 
+    func configureMascot(accessory: Int, objectMode: Int, object: Int,
+                         frequency: Int, intensity: Int, personality: Bool) {
+        enqueue(["A:\(accessory)", "H:\(objectMode)", "J:\(object)",
+                 "K:\(frequency)", "I:\(intensity)", "N:\(personality ? 1 : 0)"])
+    }
+
+    func previewMascotAnimation(_ kind: Int) {
+        enqueue(["R:\(min(2, max(0, kind)))"])
+    }
+
     func setTheme(_ index: Int) {
         enqueue(["T:\(min(24,max(0,index)))"])
     }
