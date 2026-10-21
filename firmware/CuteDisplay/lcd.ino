@@ -126,12 +126,24 @@ void updateExpressiveEyes(unsigned long now) {
  if(gazeY<targetGazeY)++gazeY;
  else if(gazeY>targetGazeY)--gazeY;
 }
+// Full-size Explorer travels horizontally across the entire LCD. During a
+// crossing, text is always painted on top as a foreground layer.
 int mascotPanelWidth();
-// Explorer cycles through four safe movements. The full character always remains
-// within the LCD bounds; no part is ever drawn off-screen.
-uint8_t explorerAction=0; // 0 idle, 1 approach, 2 peek, 3 perch, 4 chase heart
+uint8_t explorerAction=0; // 0 idle; 1 sweep left; 2 dash; 3 pause/return; 4 heart chase
 unsigned long nextExplorerAt=0, explorerStarted=0;
-const unsigned long EXPLORER_DURATION_MS=4200;
+const unsigned long EXPLORER_DURATION_MS=6200;
+int explorerX() {
+ int width=mascotPanelWidth();
+ if(!explorerAction) return LCD_W-width;
+ unsigned long elapsed=min((unsigned long)EXPLORER_DURATION_MS,millis()-explorerStarted);
+ int half=EXPLORER_DURATION_MS/2;
+ int phase=elapsed<half ? elapsed : EXPLORER_DURATION_MS-elapsed;
+ // Progress ranges 0 -> 100 -> 0, so character returns naturally.
+ int progress=constrain(phase*100/half,0,100);
+ if(explorerAction==2) progress=progress*progress/100;
+ if(explorerAction==3) progress=progress<45?0:(progress-45)*100/55;
+ return constrain((LCD_W-width)*(100-progress)/100,0,LCD_W-width);
+}
 void updateExplorer(unsigned long now) {
  if(!mascotVisible || mode!=MESSAGE_MODE) {
   explorerAction=0;
@@ -141,14 +153,12 @@ void updateExplorer(unsigned long now) {
  if(explorerAction) {
   if(now-explorerStarted>=EXPLORER_DURATION_MS) {
    explorerAction=0;
-   nextExplorerAt=now+30000UL+(esp_random()%45000UL);
+   nextExplorerAt=now+25000UL+(esp_random()%50000UL);
   }
  } else if(!surpriseAction) {
   if(!nextExplorerAt) nextExplorerAt=now+18000UL;
   if((int32_t)(now-nextExplorerAt)>=0) {
-   static uint8_t nextAction=1;
-   explorerAction=nextAction;
-   nextAction=nextAction%4+1;
+   explorerAction=1+(esp_random()%4);
    explorerStarted=now;
   }
  }
@@ -668,9 +678,8 @@ void drawMascot(){
  for(int y=0;y<170;y++)for(int x=0;x<98;x++)
   mascotBackup[y*98+x]=pixels[y*LCD_W+222+x];
  rect(222,0,98,170,themeBackground());
- int panelW=mascotPanelWidth();
- // Reserve the original text width regardless of animations.
- int dstW=panelW, dstX=LCD_W-panelW;
+ int dstW=mascotPanelWidth();
+ int dstX=explorerX();
  int bodyH=max(30,170*mascotPercent/100);
  int breathe=(animPhase/5)%2;
  int bounce=mood==6?(animPhase%8<4?4:0):
@@ -678,53 +687,21 @@ void drawMascot(){
             mood==3?(animPhase%4<2?3:0):
             mood==5?(animPhase/10)%2:1+breathe;
  int top=(170-bodyH)/2-bounce;
- if(explorerAction) {
-  unsigned long elapsed=millis()-explorerStarted;
-  // Four staged motions with a smooth outbound and returning arc.
-  int phase=elapsed<EXPLORER_DURATION_MS/2 ? elapsed :
-            EXPLORER_DURATION_MS-elapsed;
-  phase=constrain(phase,0,(int)EXPLORER_DURATION_MS/2);
-  int progress=phase*100/(EXPLORER_DURATION_MS/2);
-  if(explorerAction==1) {
-   // Walk toward the bubble but stay fully in the dedicated mascot panel.
-   dstW=max(28,panelW*75/100);
-   bodyH=max(45,170*mascotPercent*75/10000);
-   dstX=LCD_W-panelW+(panelW-dstW)*(100-progress)/100;
-   top=constrain((170-bodyH)/2-bounce,0,170-bodyH);
-  } else if(explorerAction==2) {
-   // Peek from the edge next to the bubble. Entire sprite remains on screen.
-   dstW=max(24,panelW*65/100);
-   bodyH=max(40,170*mascotPercent*65/10000);
-   dstX=LCD_W-panelW+(panelW-dstW)*(100-progress)/100;
-   top=constrain((170-bodyH)/2,0,170-bodyH);
-  } else if(explorerAction==3) {
-   // Perch above the speech bubble, in the narrow top margin.
-   // Scale uniformly so the full character fits within the safe margin.
-   dstW=12;bodyH=20;
-   dstX=constrain(LCD_W-panelW-(progress*(LCD_W-panelW-24)/100),
-                  5,LCD_W-dstW-5);
-   top=1;
-  } else if(explorerAction==4) {
-   // Chase a heart in the lower margin, without touching message text.
-   dstW=12;bodyH=20;
-   dstX=constrain(LCD_W-panelW-(progress*(LCD_W-panelW-24)/100),
-                  5,LCD_W-dstW-5);
-   top=LCD_H-bodyH-1;
-   int hx=constrain(dstX+dstW+5,2,LCD_W-5);
-   oval(hx,top+5,3,3,themeColor());
-   oval(hx+4,top+5,3,3,themeColor());
-   line(hx-2,top+7,hx+2,top+12,themeColor());
-   line(hx+6,top+7,hx+2,top+12,themeColor());
-  }
- }
- // Clamp both axes: no clipped ears, whiskers, face, or body.
- dstW=constrain(dstW,1,LCD_W);
- bodyH=constrain(bodyH,1,LCD_H);
+ // Fixed character dimensions: no sudden shrinking or stretching.
+ // Clamp the original whole sprite, including ears, to the display.
  dstX=constrain(dstX,0,LCD_W-dstW);
  top=constrain(top,0,LCD_H-bodyH);
  for(int y=0;y<bodyH;y++)for(int x=0;x<dstW;x++) {
   int sx=x*98/dstW,sy=y*170/bodyH;
   pixel(dstX+x,top+y,mascotBackup[sy*98+sx]);
+ }
+ if(explorerAction==4) {
+  int hx=constrain(dstX+dstW/2,8,LCD_W-8);
+  int hy=constrain(top+10,8,LCD_H-8);
+  oval(hx-3,hy,3,3,themeColor());
+  oval(hx+3,hy,3,3,themeColor());
+  line(hx-5,hy+2,hx,hy+8,themeColor());
+  line(hx+5,hy+2,hx,hy+8,themeColor());
  }
 }
 
@@ -804,8 +781,17 @@ void drawMessage() {
  if(!beginDrawing())return;
  int a=asciiMessageScale(), j=jpMessageScale();
  int height=max(7*a,16*j);
- if(bubbleEnabled){drawSpeechBubble();drawMascot();}
- else {drawMascot();richText(message,scrollX,(LCD_H-height)/2,a,j,themeColor(),contentRight());}
+ if(bubbleEnabled){
+  drawMascot();
+  // During Explorer crossings the bubble remains in front and legible.
+  drawSpeechBubble();
+ } else {
+  drawMascot();
+  // Foreground text and a black backing prevent the moving sprite from
+  // obscuring message letters, without altering the character's size.
+  if(explorerAction) rect(0,(LCD_H-height)/2-3,contentRight(),height+6,BLACK);
+  richText(message,scrollX,(LCD_H-height)/2,a,j,themeColor(),contentRight());
+ }
  finishDrawing();
 }
 void showMessage(String s) {
