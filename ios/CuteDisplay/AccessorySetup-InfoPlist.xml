@@ -1,0 +1,11 @@
+<!-- Add these keys to the iPhone app target's existing Info.plist, or in
+     Xcode's Target > Info > Custom iOS Target Properties.
+     This is a fragment, not a replacement Info.plist. -->
+<key>NSAccessorySetupKitSupports</key>
+<array><string>Bluetooth</string></array>
+<key>NSAccessorySetupBluetoothServices</key>
+<array><string>FFF0</string></array>
+<key>NSAccessorySetupBluetoothNames</key>
+<array><string>CuteDisplay</string></array>
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>CuteDisplay communicates with your paired drink display over Bluetooth.</string>
