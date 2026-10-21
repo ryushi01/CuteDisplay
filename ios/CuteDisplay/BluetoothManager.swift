@@ -24,7 +24,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var lowBatteryAlertsEnabled = UserDefaults.standard.object(forKey: "cuteLowBatteryAlerts") as? Bool ?? false
     @Published var lowBatteryThreshold = UserDefaults.standard.object(forKey: "cuteLowBatteryThreshold") as? Int ?? 20
     private var lowBatteryAlertArmed = true
-    private var lastLowBatteryNotice: Date?
+    private var lastLowBatteryNotice: Date? = UserDefaults.standard.object(forKey: "cuteLastLowBatteryAlert") as? Date
 
 
     private var central: CBCentralManager?
@@ -107,6 +107,7 @@ final class BluetoothManager: NSObject, ObservableObject {
            Date().timeIntervalSince(lastLowBatteryNotice) < 6 * 3600 { return }
         lowBatteryAlertArmed = false
         lastLowBatteryNotice = Date()
+        UserDefaults.standard.set(lastLowBatteryNotice, forKey: "cuteLastLowBatteryAlert")
         let content = UNMutableNotificationContent()
         content.title = "CuteDisplay battery low"
         content.body = "Battery is at \(level)%. Charge your display soon."
