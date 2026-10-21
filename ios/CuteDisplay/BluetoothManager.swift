@@ -41,6 +41,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     private let powerServiceUUID = CBUUID(string: "FFF3")
     private let powerCharacteristicUUID = CBUUID(string: "FFF4")
     private var intentionalDisconnect = false
+    private var restoredPeripherals: [CBPeripheral] = []
+    private var serviceDiscoveryPending = false
 
     // One write at a time. Particularly important for D:RESET / D:ADD / D:SHOW.
     private var pendingCommands: [String] = []
@@ -132,9 +134,9 @@ final class BluetoothManager: NSObject, ObservableObject {
             accessorySessionReady = true
             if authorizedIdentifier() == nil { clearRememberedDevice() }
             if let id = authorizedIdentifier() {
-                rememberedDeviceID = id.uuidString
-                UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
+                rememberAuthorized(id)
                 ensureBluetoothManager()
+                recoverRestoredPeripheralIfPossible()
                 if autoReconnect { startConnection() }
             }
         case .accessoryAdded, .accessoryChanged:
@@ -142,6 +144,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             if event.eventType == .accessoryChanged, let id = authorizedIdentifier() {
                 rememberAuthorized(id)
                 ensureBluetoothManager()
+                recoverRestoredPeripheralIfPossible()
                 if autoReconnect { startConnection() }
             }
         case .pickerDidDismiss:
@@ -149,6 +152,7 @@ final class BluetoothManager: NSObject, ObservableObject {
                 rememberAuthorized(id)
                 intentionalDisconnect = false
                 ensureBluetoothManager()
+                recoverRestoredPeripheralIfPossible()
                 startConnection()
             }
             pendingAccessory = nil
@@ -171,6 +175,73 @@ final class BluetoothManager: NSObject, ObservableObject {
             options: [CBCentralManagerOptionRestoreIdentifierKey: "online.classic-ragnarok.CuteDisplay.central"]
         )
     }
+    private func recoverRestoredPeripheralIfPossible() {
+        guard let id = authorizedIdentifier(),
+              let restored = restoredPeripherals.first(where: { $0.identifier == id }) else { return }
+        restoredPeripherals.removeAll()
+        adoptPeripheral(restored)
+    }
+
+    private func adoptPeripheral(_ device: CBPeripheral) {
+        peripheral = device
+        device.delegate = self
+        if device.state == .connected {
+            status = "Restoring connected CuteDisplay..."
+            discoverOrRestoreServices(on: device)
+        } else if autoReconnect && !intentionalDisconnect {
+            status = "Reconnecting to saved CuteDisplay..."
+            central?.connect(device, options: nil)
+        }
+    }
+
+    private func discoverOrRestoreServices(on device: CBPeripheral) {
+        // A restored CBPeripheral can already have cached GATT services. Re-enumerate
+        // their characteristics and resubscribe before treating telemetry as live.
+        guard device.state == .connected else { return }
+        if let services = device.services, !services.isEmpty {
+            inspectServices(on: device, services: services)
+        } else {
+            device.discoverServices([controlServiceUUID, batteryServiceUUID, powerServiceUUID])
+        }
+    }
+
+    private func inspectServices(on device: CBPeripheral, services: [CBService]) {
+        for service in services {
+            let uuids: [CBUUID]
+            switch service.uuid {
+            case controlServiceUUID: uuids = [commandUUID]
+            case batteryServiceUUID: uuids = [batteryLevelUUID]
+            case powerServiceUUID: uuids = [powerCharacteristicUUID]
+            default: continue
+            }
+            if let known = service.characteristics, !known.isEmpty {
+                inspectCharacteristics(on: device, service: service, characteristics: known)
+            } else {
+                device.discoverCharacteristics(uuids, for: service)
+            }
+        }
+    }
+
+    private func inspectCharacteristics(on device: CBPeripheral, service: CBService,
+                                        characteristics: [CBCharacteristic]) {
+        for characteristic in characteristics {
+            if service.uuid == controlServiceUUID && characteristic.uuid == commandUUID {
+                commandCharacteristic = characteristic
+                isConnected = true
+                status = "Connected to CuteDisplay"
+                sendNext()
+            } else if (service.uuid == powerServiceUUID && characteristic.uuid == powerCharacteristicUUID)
+                        || (service.uuid == batteryServiceUUID && characteristic.uuid == batteryLevelUUID) {
+                if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
+                    device.setNotifyValue(true, for: characteristic)
+                }
+                if characteristic.properties.contains(.read) {
+                    device.readValue(for: characteristic)
+                }
+            }
+        }
+    }
+
     private func rememberAuthorized(_ id: UUID) {
         rememberedDeviceID = id.uuidString
         UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
@@ -227,13 +298,15 @@ final class BluetoothManager: NSObject, ObservableObject {
         }
         ensureBluetoothManager()
         guard let central, central.state == .poweredOn else { status = "Bluetooth is starting or not ready"; return }
-        guard peripheral == nil && !isScanning else { return }
+        guard peripheral == nil && !isScanning else {
+            if let peripheral, peripheral.identifier == id && peripheral.state == .connected {
+                discoverOrRestoreServices(on: peripheral)
+            }
+            return
+        }
         rememberAuthorized(id)
         if let known = central.retrievePeripherals(withIdentifiers: [id]).first {
-            peripheral = known
-            known.delegate = self
-            status = "Connecting to paired CuteDisplay..."
-            central.connect(known, options: nil)
+            adoptPeripheral(known)
         } else {
             isScanning = true
             status = "Finding paired CuteDisplay..."
@@ -438,18 +511,10 @@ extension BluetoothManager: CBCentralManagerDelegate {
     // Called if iOS restores a previous BLE central session in the background.
     func centralManager(_ central: CBCentralManager,
                         willRestoreState dict: [String: Any]) {
-        guard let id = authorizedIdentifier() else { return }
-        if let devices = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
-           let restored = devices.first(where: { $0.identifier == id }) {
-            peripheral = restored
-            restored.delegate = self
-            status = "Restoring Bluetooth connection..."
-            if restored.state == .connected {
-                restored.discoverServices([controlServiceUUID, batteryServiceUUID, powerServiceUUID])
-            } else if autoReconnect && !intentionalDisconnect {
-                central.connect(restored, options: nil)
-            }
-        }
+        restoredPeripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral] ?? []
+        // The accessory authorization event can arrive after this callback.
+        // Keep restored peripherals until the system confirms their identity.
+        recoverRestoredPeripheralIfPossible()
     }
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -481,7 +546,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didConnect device: CBPeripheral) {
         rememberAuthorized(device.identifier)
         status = "Discovering services..."
-        device.discoverServices([controlServiceUUID, batteryServiceUUID, powerServiceUUID])
+        discoverOrRestoreServices(on: device)
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -503,37 +568,14 @@ extension BluetoothManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error { status = "Service error: \(error.localizedDescription)"; return }
         guard let services = peripheral.services else { return }
-        for service in services {
-            if service.uuid == controlServiceUUID {
-                peripheral.discoverCharacteristics([commandUUID], for: service)
-            } else if service.uuid == batteryServiceUUID {
-                peripheral.discoverCharacteristics([batteryLevelUUID], for: service)
-            } else if service.uuid == powerServiceUUID {
-                peripheral.discoverCharacteristics([powerCharacteristicUUID], for: service)
-            }
-        }
+        inspectServices(on: peripheral, services: services)
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         if let error { status = "Characteristic error: \(error.localizedDescription)"; return }
-        for characteristic in service.characteristics ?? [] {
-            if service.uuid == controlServiceUUID && characteristic.uuid == commandUUID {
-                commandCharacteristic = characteristic
-                isConnected = true
-                status = "Connected to CuteDisplay"
-            } else if service.uuid == powerServiceUUID && characteristic.uuid == powerCharacteristicUUID {
-                if characteristic.properties.contains(.read) { peripheral.readValue(for: characteristic) }
-                if characteristic.properties.contains(.notify) { peripheral.setNotifyValue(true, for: characteristic) }
-            } else if service.uuid == batteryServiceUUID && characteristic.uuid == batteryLevelUUID {
-                if characteristic.properties.contains(.read) {
-                    peripheral.readValue(for: characteristic)
-                }
-                if characteristic.properties.contains(.notify) {
-                    peripheral.setNotifyValue(true, for: characteristic)
-                }
-            }
-        }
+        inspectCharacteristics(on: peripheral, service: service,
+                               characteristics: service.characteristics ?? [])
     }
 
     func peripheral(_ peripheral: CBPeripheral,
