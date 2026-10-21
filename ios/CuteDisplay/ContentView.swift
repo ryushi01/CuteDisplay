@@ -67,6 +67,14 @@ struct ContentView: View {
     ) ?? .kitty
     @State private var showMascot = UserDefaults.standard.object(forKey: "showMascot") as? Bool ?? true
     @State private var selectedMood = CuteMood(rawValue: UserDefaults.standard.integer(forKey: "mascotMood")) ?? .happy
+    @State private var accessoryStyle = UserDefaults.standard.integer(forKey: "cuteAccessoryStyle")
+    @State private var heldObjectMode = UserDefaults.standard.integer(forKey: "cuteHeldObjectMode")
+    @State private var heldObject = UserDefaults.standard.integer(forKey: "cuteHeldObject")
+    @State private var animationFrequency = UserDefaults.standard.object(forKey: "cuteAnimationFrequency") as? Int ?? 1
+    @State private var animationIntensity = UserDefaults.standard.object(forKey: "cuteAnimationIntensity") as? Int ?? 1
+    @State private var personalityAnimations = UserDefaults.standard.object(forKey: "cutePersonalityAnimations") as? Bool ?? true
+    private let accessoryNames = ["None", "Glasses", "Ribbon", "Crown", "Scarf", "Party Hat", "Flower", "Seasonal"]
+    private let objectNames = ["None", "Heart", "Flowers", "Cupcake", "Pillow", "Wand", "Tissue", "Cloud"]
     @State private var surpriseAnimationsEnabled = UserDefaults.standard.object(forKey: "surpriseAnimationsEnabled") as? Bool ?? true
     @State private var mascotSize = UserDefaults.standard.object(forKey: "mascotSize") as? Int ?? 100
     @State private var messageFontSize = UserDefaults.standard.object(forKey: "messageFontSize") as? Int ?? 3
@@ -159,6 +167,7 @@ struct ContentView: View {
                     }
                     characterSection
                     moodSection
+                    mascotCustomizationSection
                     appearanceSection
                     brightnessSection
                     powerSection
@@ -732,6 +741,96 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Mascot customization
+    private func sendMascotCustomization() {
+        guard canSend else { return }
+        bluetooth.configureMascot(accessory: accessoryStyle,
+                                   objectMode: heldObjectMode,
+                                   object: heldObject,
+                                   frequency: animationFrequency,
+                                   intensity: animationIntensity,
+                                   personality: personalityAnimations)
+    }
+
+    private var mascotCustomizationSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("MASCOT CUSTOMIZATION")
+
+            Picker("Accessory", selection: $accessoryStyle) {
+                ForEach(0..<accessoryNames.count, id: \.self) { index in
+                    Text(accessoryNames[index]).tag(index)
+                }
+            }
+            .onChange(of: accessoryStyle) { _, value in
+                UserDefaults.standard.set(value, forKey: "cuteAccessoryStyle")
+                if canSend { bluetooth.sendDrinksPayload("A:\(value)") }
+            }
+
+            Picker("Held object", selection: $heldObjectMode) {
+                Text("Automatic from mood").tag(0)
+                Text("Choose manually").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: heldObjectMode) { _, value in
+                UserDefaults.standard.set(value, forKey: "cuteHeldObjectMode")
+                if canSend { bluetooth.sendDrinksPayload("H:\(value)") }
+            }
+
+            if heldObjectMode == 1 {
+                Picker("Object", selection: $heldObject) {
+                    ForEach(0..<objectNames.count, id: \.self) { index in
+                        Text(objectNames[index]).tag(index)
+                    }
+                }
+                .onChange(of: heldObject) { _, value in
+                    UserDefaults.standard.set(value, forKey: "cuteHeldObject")
+                    if canSend { bluetooth.sendDrinksPayload("J:\(value)") }
+                }
+            }
+
+            Picker("Animation frequency", selection: $animationFrequency) {
+                Text("Relaxed").tag(0)
+                Text("Normal").tag(1)
+                Text("Lively").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: animationFrequency) { _, value in
+                UserDefaults.standard.set(value, forKey: "cuteAnimationFrequency")
+                if canSend { bluetooth.sendDrinksPayload("K:\(value)") }
+            }
+
+            Picker("Animation intensity", selection: $animationIntensity) {
+                Text("Subtle").tag(0)
+                Text("Normal").tag(1)
+                Text("Expressive").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: animationIntensity) { _, value in
+                UserDefaults.standard.set(value, forKey: "cuteAnimationIntensity")
+                if canSend { bluetooth.sendDrinksPayload("I:\(value)") }
+            }
+
+            Toggle("Individual mascot personality", isOn: $personalityAnimations)
+                .tint(themeColor)
+                .onChange(of: personalityAnimations) { _, value in
+                    UserDefaults.standard.set(value, forKey: "cutePersonalityAnimations")
+                    if canSend { bluetooth.sendDrinksPayload("N:\(value ? 1 : 0)") }
+                }
+
+            HStack(spacing: 8) {
+                Button("Random") { bluetooth.previewMascotAnimation(0) }
+                Button("Mood") { bluetooth.previewMascotAnimation(1) }
+                Button("Personality") { bluetooth.previewMascotAnimation(2) }
+            }
+            .buttonStyle(.bordered)
+            .disabled(!canSend)
+
+            Text("Use the buttons to preview animations immediately. The mascot remains on the right and does not change size.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: - Character visibility, size and Message Mode font
     private var appearanceSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -888,6 +987,7 @@ struct ContentView: View {
             drinks: displayedDrinks.map { (name: $0.name, count: $0.count) }
         )
         bluetooth.sendDrinksPayload("S:\(surpriseAnimationsEnabled ? 1 : 0)")
+        sendMascotCustomization()
         appNotice = "Connected — restoring CuteDisplay settings."
     }
 
