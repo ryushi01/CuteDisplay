@@ -282,14 +282,24 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Low battery notifications", isOn: Binding(
                     get: { bluetooth.lowBatteryAlertsEnabled },
-                    set: { bluetooth.setLowBatteryAlerts($0) }
+                    set: { enabled in
+                        bluetooth.setLowBatteryAlerts(enabled)
+                        if bluetooth.isConnected && !previewOnly {
+                            bluetooth.sendDrinksPayload("L:\(enabled ? bluetooth.lowBatteryThreshold : 0)")
+                        }
+                    }
                 )).tint(.orange)
                 HStack {
                     Text("Alert when battery reaches")
                     Spacer()
                     Picker("Low battery threshold", selection: Binding(
                         get: { bluetooth.lowBatteryThreshold },
-                        set: { bluetooth.setLowBatteryThreshold($0); if bluetooth.isConnected { bluetooth.sendDrinksPayload("L:\($0)") } }
+                        set: { value in
+                            bluetooth.setLowBatteryThreshold(value)
+                            if bluetooth.isConnected && !previewOnly && bluetooth.lowBatteryAlertsEnabled {
+                                bluetooth.sendDrinksPayload("L:\(value)")
+                            }
+                        }
                     )) {
                         Text("10%").tag(10)
                         Text("15%").tag(15)
@@ -1074,7 +1084,7 @@ struct ContentView: View {
             message: message,
             drinks: displayedDrinks.map { (name: $0.name, count: $0.count) }
         )
-        bluetooth.sendDrinksPayload("L:\(bluetooth.lowBatteryThreshold)")
+        bluetooth.sendDrinksPayload("L:\(bluetooth.lowBatteryAlertsEnabled ? bluetooth.lowBatteryThreshold : 0)")
         bluetooth.sendDrinksPayload("S:\(surpriseAnimationsEnabled ? 1 : 0)")
         sendMascotCustomization()
         appNotice = "Connected — restoring CuteDisplay settings."
