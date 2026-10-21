@@ -27,6 +27,7 @@
 #include "esp_heap_caps.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
+#include <BLESecurity.h>
 #include <BLEUtils.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -834,11 +835,16 @@ class CommandEvents:public BLECharacteristicCallbacks{
 };
 void initBLE(){
  if(!BLEDevice::init("CuteDisplay")){Serial.println("[BLE] Failed");return;}
+ // Persistent BLE bonding (Just Works; no physical passkey input on this board).
+ // Encryption is requested when the iPhone accesses the command characteristic.
+ BLESecurity *security = new BLESecurity();
+ security->setCapability(ESP_IO_CAP_NONE);
+ security->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_BOND);
  BLEServer *server=BLEDevice::createServer();
  server->setCallbacks(new ServerEvents());server->advertiseOnDisconnect(true);
  BLEService *control=server->createService("FFF0");
  BLECharacteristic *cmd=control->createCharacteristic("FFF1",
-  BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_WRITE);
+  BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_WRITE|BLECharacteristic::PROPERTY_WRITE_ENC);
  cmd->setValue("HELLO!");cmd->setCallbacks(new CommandEvents());control->start();
  BLEService *batteryService=server->createService("180F");
  batteryCharacteristic=batteryService->createCharacteristic("2A19",
