@@ -339,10 +339,13 @@ final class BluetoothManager: NSObject, ObservableObject {
         peripheral = nil
     }
 
-    // Queue 16x16 Japanese glyphs before the UTF-8 text that refers to them.
+    // Smooth 24x24 glyphs: each pixel uses 2-bit coverage.
+    // Sent as four 36-byte chunks to stay within the BLE command limit.
     func sendMessage(_ text: String) {
-        let data = Array(text.utf8)
-        guard data.count <= 96 else { status = "Message exceeds 96 UTF-8 bytes"; return }
+        guard text.utf8.count <= 96 else {
+            status = "Message exceeds 96 UTF-8 bytes"
+            return
+        }
         enqueue(glyphPackets(for: [text]) + [text])
     }
     func sendDrinksPayload(_ payload: String) { enqueue([payload]) }
@@ -362,18 +365,28 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func glyphPackets(for strings: [String]) -> [String] {
-        let scalars = Set(strings.joined().unicodeScalars.filter { $0.value > 127 })
-        return scalars.sorted { $0.value < $1.value }.compactMap { scalar in
-            guard let bitmap = Self.bitmap(for: scalar) else { return nil }
-            let hex = bitmap.map { String(format: "%02X", $0) }.joined()
-            return "G:\(String(scalar.value, radix: 16).uppercased()):\(hex)"
+        let scalars = Set(strings.joined().unicodeScalars.filter {
+            $0.value >= 33 && !$0.properties.isWhitespace
+        })
+        var packets: [String] = []
+        // Firmware retains 48 high-quality glyphs; earlier ones are evicted
+        // if more are transferred. Keep transfers bounded.
+        for scalar in scalars.sorted(by: { $0.value < $1.value }).prefix(48) {
+            guard let bitmap = Self.smoothBitmap(for: scalar) else { continue }
+            let cp = String(scalar.value, radix: 16).uppercased()
+            for part in 0..<4 {
+                let bytes = bitmap[(part * 36)..<((part + 1) * 36)]
+                let hex = bytes.map { String(format: "%02X", $0) }.joined()
+                packets.append("G2:\(cp):\(part):\(hex)")
+            }
         }
+        return packets
     }
 
-    // Rasterize each Japanese character with the iPhone's installed system fonts.
-    // One foreground bit for each pixel, row-major, 16x16 = 32 bytes.
-    private static func bitmap(for scalar: Unicode.Scalar) -> [UInt8]? {
-        let side = 16
+    // Draw at true 24x24 resolution, preserving antialiased edges.
+    // Each group of 4 pixels occupies a single byte (2 bits each).
+    private static func smoothBitmap(for scalar: Unicode.Scalar) -> [UInt8]? {
+        let side = 24
         var rgb = [UInt8](repeating: 0, count: side * side * 4)
         let ok = rgb.withUnsafeMutableBytes { ptr -> Bool in
             guard let base = ptr.baseAddress,
@@ -387,29 +400,33 @@ final class BluetoothManager: NSObject, ObservableObject {
             context.fill(CGRect(x: 0, y: 0, width: side, height: side))
             UIGraphicsPushContext(context)
             defer { UIGraphicsPopContext() }
-            let string = String(scalar) as NSString
-            let font = UIFont.systemFont(ofSize: 15, weight: .bold)
+            let character = String(scalar) as NSString
+            let font = UIFont.systemFont(
+                ofSize: scalar.value < 128 ? 21 : 22,
+                weight: scalar.value < 128 ? .semibold : .medium
+            )
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: UIColor.white
             ]
-            string.draw(in: CGRect(x: 0, y: -2, width: 16, height: 19),
-                        withAttributes: attributes)
+            character.draw(in: CGRect(x: 0, y: -1, width: 24, height: 27),
+                           withAttributes: attributes)
             return true
         }
         guard ok else { return nil }
-        var data = [UInt8](repeating: 0, count: 32)
-        for y in 0..<16 {
-            for x in 0..<16 {
-                // UIKit text drawing into a raw CoreGraphics bitmap has a
-                // bottom-up row orientation. Flip the sampled rows so
-                // row zero sent to the ESP32 is the top of the glyph.
-                let off = ((15 - y) * 16 + x) * 4
-                let lit = Int(rgb[off]) + Int(rgb[off+1]) + Int(rgb[off+2]) > 330
-                if lit { data[y*2 + x/8] |= UInt8(0x80 >> (x%8)) }
+        var packed = [UInt8](repeating: 0, count: 144)
+        for y in 0..<24 {
+            for x in 0..<24 {
+                // CoreGraphics raw bitmap coordinates are bottom-up.
+                let off = ((23 - y) * 24 + x) * 4
+                let light = (Int(rgb[off]) + Int(rgb[off + 1])
+                             + Int(rgb[off + 2])) / 3
+                let coverage = UInt8(min(3, (light + 42) / 85))
+                let index = y * 24 + x
+                packed[index / 4] |= coverage << (6 - 2 * (index % 4))
             }
         }
-        return data
+        return packed
     }
 
     // Queued after any earlier writes. The board turns its screen off and
