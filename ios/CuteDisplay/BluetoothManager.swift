@@ -9,6 +9,15 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var status = "Starting Bluetooth..."
     @Published var brightness = 75
     @Published var batteryLevel: Int? = nil
+    @Published var batteryVoltage: Double?
+    @Published var batteryCurrent: Double?
+    @Published var batteryTemperature: Int?
+    @Published var batteryHealth: Int?
+    @Published var minutesToEmpty: Int?
+    @Published var minutesToFull: Int?
+    @Published var lastPowerUpdate: Date?
+    @Published var autoReconnect = UserDefaults.standard.object(forKey: "cuteAutoReconnect") as? Bool ?? true
+    @Published var rememberedDeviceID = UserDefaults.standard.string(forKey: "cutePeripheralID")
     @Published var isSendingDrinks = false
 
     private var central: CBCentralManager!
@@ -18,6 +27,10 @@ final class BluetoothManager: NSObject, ObservableObject {
     private let commandUUID = CBUUID(string: "FFF1")
     private let batteryServiceUUID = CBUUID(string: "180F")
     private let batteryLevelUUID = CBUUID(string: "2A19")
+    private let powerServiceUUID = CBUUID(string: "FFF3")
+    private let powerCharacteristicUUID = CBUUID(string: "FFF4")
+    private var intentionalDisconnect = false
+    private var pairingNewDevice = false
 
     // One write at a time. Particularly important for D:RESET / D:ADD / D:SHOW.
     private var pendingCommands: [String] = []
@@ -40,29 +53,66 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
 
     func connect() {
+        intentionalDisconnect = false
+        startConnection()
+    }
+    func pairNewDevice() {
+        forgetDevice()
+        intentionalDisconnect = false
+        pairingNewDevice = true
+        startConnection()
+    }
+    func setAutoReconnect(_ enabled: Bool) {
+        autoReconnect = enabled
+        UserDefaults.standard.set(enabled, forKey: "cuteAutoReconnect")
+        if enabled && !isConnected { startConnection() }
+        if !enabled && isScanning { central.stopScan(); isScanning = false }
+    }
+    func forgetDevice() {
+        intentionalDisconnect = true
+        pairingNewDevice = false
+        if isScanning { central.stopScan(); isScanning = false }
+        if let peripheral { central.cancelPeripheralConnection(peripheral) }
+        rememberedDeviceID = nil
+        UserDefaults.standard.removeObject(forKey: "cutePeripheralID")
+        clearConnection()
+        status = "Device forgotten"
+    }
+    private func startConnection() {
         if isSimulator { status = "Simulator / Demo Mode"; return }
         guard central.state == .poweredOn else { status = "Bluetooth is not ready"; return }
-        if peripheral != nil { disconnect(); return }
-        batteryLevel = nil
+        guard peripheral == nil, !isScanning else { return }
+        if !pairingNewDevice, let id = rememberedDeviceID,
+           let uuid = UUID(uuidString: id),
+           let known = central.retrievePeripherals(withIdentifiers: [uuid]).first {
+            peripheral = known
+            known.delegate = self
+            status = "Connecting to saved display..."
+            central.connect(known, options: nil)
+            return
+        }
         isScanning = true
-        status = "Searching for CuteDisplay..."
+        status = pairingNewDevice ? "Pairing CuteDisplay..." : "Searching for saved CuteDisplay..."
         central.scanForPeripherals(withServices: [controlServiceUUID], options: nil)
     }
-
     func disconnect() {
+        intentionalDisconnect = true
         if isScanning { central.stopScan(); isScanning = false }
-        if let peripheral {
-            central.cancelPeripheralConnection(peripheral)
-        } else {
-            clearConnection()
-            status = "Disconnected"
-        }
+        if let peripheral { central.cancelPeripheralConnection(peripheral) }
+        else { clearConnection(); status = "Disconnected" }
     }
 
     private func clearConnection() {
         isConnected = false
         isScanning = false
         batteryLevel = nil
+        batteryVoltage = nil
+        batteryCurrent = nil
+        batteryTemperature = nil
+        batteryHealth = nil
+        minutesToEmpty = nil
+        minutesToFull = nil
+        lastPowerUpdate = nil
         commandCharacteristic = nil
         pendingCommands.removeAll()
         waitingForWrite = false
@@ -243,7 +293,9 @@ extension BluetoothManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         if isSimulator { status = "Simulator / Demo Mode"; return }
         switch central.state {
-        case .poweredOn: status = "Ready to connect"
+        case .poweredOn:
+            status = "Ready to connect"
+            if autoReconnect && rememberedDeviceID != nil && !intentionalDisconnect { startConnection() }
         case .poweredOff: clearConnection(); status = "Turn on Bluetooth"
         case .unauthorized: clearConnection(); status = "Allow Bluetooth access in Settings"
         case .unsupported: clearConnection(); status = "Bluetooth LE unsupported"
@@ -255,6 +307,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
                         didDiscover found: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         guard peripheral == nil else { return }
+        if !pairingNewDevice, let id = rememberedDeviceID, found.identifier.uuidString != id { return }
         central.stopScan()
         isScanning = false
         peripheral = found
@@ -264,20 +317,25 @@ extension BluetoothManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect device: CBPeripheral) {
+        rememberedDeviceID = device.identifier.uuidString
+        UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
+        pairingNewDevice = false
         status = "Discovering services..."
-        device.discoverServices([controlServiceUUID, batteryServiceUUID])
+        device.discoverServices([controlServiceUUID, batteryServiceUUID, powerServiceUUID])
     }
 
     func centralManager(_ central: CBCentralManager,
                         didFailToConnect device: CBPeripheral, error: Error?) {
         clearConnection()
         status = error?.localizedDescription ?? "Connection failed"
+        if autoReconnect && !intentionalDisconnect { startConnection() }
     }
 
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral device: CBPeripheral, error: Error?) {
         clearConnection()
         status = error == nil ? "Disconnected" : "Disconnected: \(error!.localizedDescription)"
+        if autoReconnect && !intentionalDisconnect { startConnection() }
     }
 }
 
@@ -290,6 +348,8 @@ extension BluetoothManager: CBPeripheralDelegate {
                 peripheral.discoverCharacteristics([commandUUID], for: service)
             } else if service.uuid == batteryServiceUUID {
                 peripheral.discoverCharacteristics([batteryLevelUUID], for: service)
+            } else if service.uuid == powerServiceUUID {
+                peripheral.discoverCharacteristics([powerCharacteristicUUID], for: service)
             }
         }
     }
@@ -302,6 +362,9 @@ extension BluetoothManager: CBPeripheralDelegate {
                 commandCharacteristic = characteristic
                 isConnected = true
                 status = "Connected to CuteDisplay"
+            } else if service.uuid == powerServiceUUID && characteristic.uuid == powerCharacteristicUUID {
+                if characteristic.properties.contains(.read) { peripheral.readValue(for: characteristic) }
+                if characteristic.properties.contains(.notify) { peripheral.setNotifyValue(true, for: characteristic) }
             } else if service.uuid == batteryServiceUUID && characteristic.uuid == batteryLevelUUID {
                 if characteristic.properties.contains(.read) {
                     peripheral.readValue(for: characteristic)
@@ -315,6 +378,24 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if characteristic.uuid == powerCharacteristicUUID {
+            guard error == nil, let data = characteristic.value,
+                  let string = String(data: data, encoding: .utf8) else { return }
+            let f = string.split(separator: ",")
+            guard f.count == 7, let level = Int(f[0]), let voltage = Double(f[1]),
+                  let current = Double(f[2]), let temperature = Int(f[3]),
+                  let health = Int(f[4]), let empty = Int(f[5]), let full = Int(f[6]),
+                  (0...100).contains(level), voltage > 0 else { return }
+            batteryLevel = level
+            batteryVoltage = voltage
+            batteryCurrent = current
+            batteryTemperature = temperature
+            batteryHealth = health
+            minutesToEmpty = empty
+            minutesToFull = full
+            lastPowerUpdate = Date()
+            return
+        }
         guard characteristic.uuid == batteryLevelUUID else { return }
         if error != nil { batteryLevel = nil; return }
         if let data = characteristic.value, data.count == 1,
