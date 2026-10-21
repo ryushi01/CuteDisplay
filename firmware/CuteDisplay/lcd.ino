@@ -126,6 +126,7 @@ void updateExpressiveEyes(unsigned long now) {
  if(gazeY<targetGazeY)++gazeY;
  else if(gazeY>targetGazeY)--gazeY;
 }
+int mascotPanelWidth();
 // Peek-a-boo: sometimes the mascot briefly hides beyond the right screen edge.
 // Only moves the mascot bitmap; message/drink contents and display mode are untouched.
 int peekOffset=0;
