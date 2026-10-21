@@ -2,7 +2,7 @@
 
 A Bluetooth-controlled cute display built for the **LILYGO T-Display C5 (ESP32-C5)** with a **320×170 ST7789 LCD** and a companion **iPhone SwiftUI app**.
 
-## Latest version: 3.8
+## Latest version: 3.9
 
 - Six procedural, animated mascots and selectable moods (no sprite-sheet art)
 - Optional randomized surprise animations (sneeze, stretch, startled, look around, butterfly)
@@ -11,7 +11,8 @@ A Bluetooth-controlled cute display built for the **LILYGO T-Display C5 (ESP32-C
 - Message Mode with optional speech bubble and typewriter effect
 - 25 color choices; black screen background with light-tinted speech bubble
 - Drinks Mode with contrasting rows, pagination and automatic updates from iPhone
-- AXP2602 battery percentage read over BLE
+- Live AXP2602 battery percentage, voltage, charging/discharging current, health, temperature, time estimates, and calculated battery-side watts
+- Remembered device pairing and automatic BLE reconnection when iOS permits the app to run
 - Brightness and deep-sleep button
 
 ## Project layout
@@ -40,14 +41,19 @@ archive/                           Earlier downloadable versions
 
 ## BLE protocol
 
-Uses `FFF0` control service and `FFF1` read/write characteristic; battery service `180F` with characteristic `2A19`. Example commands include `D:RESET` / `D:ADD:NAME,COUNT` / `D:SHOW`, `C:<id>`, `T:<id>`, `B:<percent>`, and `S:0` / `S:1` for surprise animations.
+Uses `FFF0` control service and `FFF1` read/write characteristic; battery service `180F` with characteristic `2A19`. Additional power telemetry is exposed by `FFF3`/`FFF4` (read/notify) as `SOC,volts,amps,tempC,healthPercent,minutesToEmpty,minutesToFull`. Positive amps = charging, negative amps = discharging. Example commands include `D:RESET` / `D:ADD:NAME,COUNT` / `D:SHOW`, `C:<id>`, `T:<id>`, `B:<percent>`, and `S:0` / `S:1` for surprise animations.
 
 ## Earlier versions
 
-Historical download packages are in `archive/`. **3.5B is retained only as history**: its sprite-based mascots were intentionally rolled back in favor of the procedural 3.4-style renderer. The latest recommended combination is v3.8 firmware and app source.
+Historical download packages are in `archive/`. **3.5B is retained only as history**: its sprite-based mascots were intentionally rolled back in favor of the procedural 3.4-style renderer. The latest recommended combination is v3.9 firmware and app source.
 
 ## Important notes
 
 - Code in this repository is not independently hardware- or Xcode-verified; test on your device and keep backups of your working build.
 - Don't commit private credentials, Apple signing certificates, or provisioning profiles.
 - The app's deep sleep disables BLE until the board is physically restarted.
+## Pairing and power notes
+
+The iPhone app remembers the selected BLE peripheral UUID, automatically attempts reconnection when launched and after disconnection, and offers Pair New Device, Forget Device and an auto-reconnect switch. This is app-level remembered-device pairing, **not an encrypted Bluetooth bond**. Auto-reconnection in the background is subject to iOS execution policies; the app cannot reconnect while the board is in deep sleep. Current and power describe the **battery path**, not the complete USB input consumption. Power is calculated from battery voltage × absolute battery current. Some fuel-gauge estimates may be unavailable or inaccurate depending on calibration and battery conditions.
+
+The changes were not independently compiled or tested on real hardware. Test with the board's original `axp2602.h` and `board_config.h` preserved.
