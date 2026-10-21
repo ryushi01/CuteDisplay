@@ -126,6 +126,32 @@ void updateExpressiveEyes(unsigned long now) {
  if(gazeY<targetGazeY)++gazeY;
  else if(gazeY>targetGazeY)--gazeY;
 }
+// Peek-a-boo: sometimes the mascot briefly hides beyond the right screen edge.
+// Only moves the mascot bitmap; message/drink contents and display mode are untouched.
+int peekOffset=0;
+uint8_t peekPhase=0; // 0 waiting, 1 hiding, 2 waiting hidden, 3 returning
+unsigned long nextPeekAt=0, peekHoldUntil=0;
+void updatePeekaboo(unsigned long now) {
+ if(!mascotVisible) { peekOffset=0; peekPhase=0; return; }
+ int maxHide=max(10,mascotPanelWidth()*45/100);
+ if(peekPhase==0) {
+  if(!nextPeekAt) nextPeekAt=now+22000UL+(esp_random()%22000UL);
+  if((int32_t)(now-nextPeekAt)>=0 && !surpriseAction) {
+   peekPhase=1;
+  }
+ } else if(peekPhase==1) {
+  peekOffset=min(maxHide,peekOffset+4);
+  if(peekOffset>=maxHide) { peekPhase=2; peekHoldUntil=now+950UL; }
+ } else if(peekPhase==2) {
+  if((int32_t)(now-peekHoldUntil)>=0) peekPhase=3;
+ } else if(peekPhase==3) {
+  peekOffset=max(0,peekOffset-4);
+  if(peekOffset==0) {
+   peekPhase=0;
+   nextPeekAt=now+28000UL+(esp_random()%38000UL);
+  }
+ }
+}
 uint16_t mascotBackup[98 * 170];
 int mascotPanelWidth() { return mascotVisible ? max(40, 98 * mascotPercent / 100) : 0; }
 int contentRight() { return LCD_W - mascotPanelWidth() - (mascotVisible ? 3 : 0); }
@@ -641,7 +667,7 @@ void drawMascot(){
  for(int y=0;y<170;y++)for(int x=0;x<98;x++)
   mascotBackup[y*98+x]=pixels[y*LCD_W+222+x];
  rect(222,0,98,170,themeBackground());
- int dstW=mascotPanelWidth(),dstX=LCD_W-dstW;
+ int dstW=mascotPanelWidth(),dstX=LCD_W-dstW+peekOffset;
  rect(dstX,0,dstW,170,BLACK);
  int bodyH=max(30,170*mascotPercent/100);
  // Gentle breathing (2px), mood-dependent bouncing / drifting.
@@ -1027,6 +1053,7 @@ void loop(){
  if(mascotVisible && millis()-lastMascotAnimation>=MASCOT_ANIMATION_MS){
   lastMascotAnimation=millis();animPhase=(animPhase+1)%32;
   updateExpressiveEyes(lastMascotAnimation);
+  updatePeekaboo(lastMascotAnimation);
   // The scrolling message already redraws frequently; avoid unnecessary transfers.
   if(!(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }
