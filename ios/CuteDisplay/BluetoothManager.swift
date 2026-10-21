@@ -3,6 +3,7 @@ import CoreBluetooth
 import AccessorySetupKit
 import Combine
 import UIKit
+import UserNotifications
 
 final class BluetoothManager: NSObject, ObservableObject {
     @Published var isConnected = false
@@ -20,6 +21,11 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var autoReconnect = UserDefaults.standard.object(forKey: "cuteAutoReconnect") as? Bool ?? true
     @Published var rememberedDeviceID = UserDefaults.standard.string(forKey: "cutePeripheralID")
     @Published var isSendingDrinks = false
+    @Published var lowBatteryAlertsEnabled = UserDefaults.standard.object(forKey: "cuteLowBatteryAlerts") as? Bool ?? false
+    @Published var lowBatteryThreshold = UserDefaults.standard.object(forKey: "cuteLowBatteryThreshold") as? Int ?? 20
+    private var lowBatteryAlertArmed = true
+    private var lastLowBatteryNotice: Date?
+
 
     private var central: CBCentralManager?
     private let accessorySession = ASAccessorySession()
@@ -57,6 +63,60 @@ final class BluetoothManager: NSObject, ObservableObject {
             self?.handleAccessoryEvent(event)
         }
         // Do not instantiate CBCentralManager before native accessory authorization.
+    }
+
+    // Local alerts are driven by actual BLE notifications, not by a timer
+    // pretending the app can execute continuously while force-closed.
+    func setLowBatteryAlerts(_ enabled: Bool) {
+        lowBatteryAlertsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "cuteLowBatteryAlerts")
+        if enabled {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { [weak self] granted, _ in
+                DispatchQueue.main.async {
+                    if !granted {
+                        self?.lowBatteryAlertsEnabled = false
+                        UserDefaults.standard.set(false, forKey: "cuteLowBatteryAlerts")
+                        self?.status = "Enable CuteDisplay notifications in iPhone Settings"
+                    } else if let level = self?.batteryLevel {
+                        self?.checkLowBattery(level)
+                    }
+                }
+            }
+        } else {
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["cute-low-battery"])
+        }
+    }
+
+    func setLowBatteryThreshold(_ level: Int) {
+        lowBatteryThreshold = min(50, max(5, level))
+        UserDefaults.standard.set(lowBatteryThreshold, forKey: "cuteLowBatteryThreshold")
+        lowBatteryAlertArmed = true
+        if let batteryLevel { checkLowBattery(batteryLevel) }
+    }
+
+    private func checkLowBattery(_ level: Int) {
+        guard (0...100).contains(level) else { return }
+        if level >= lowBatteryThreshold + 5 {
+            lowBatteryAlertArmed = true
+            return
+        }
+        guard lowBatteryAlertsEnabled, level <= lowBatteryThreshold,
+              lowBatteryAlertArmed else { return }
+        // Avoid repeatedly alerting on reconnects or noisy SOC estimates.
+        if let lastLowBatteryNotice,
+           Date().timeIntervalSince(lastLowBatteryNotice) < 6 * 3600 { return }
+        lowBatteryAlertArmed = false
+        lastLowBatteryNotice = Date()
+        let content = UNMutableNotificationContent()
+        content.title = "CuteDisplay battery low"
+        content.body = "Battery is at \(level)%. Charge your display soon."
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "cute-low-battery",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
     }
 
     // AccessorySetupKit is the authoritative accessory authorization store.
@@ -484,6 +544,7 @@ extension BluetoothManager: CBPeripheralDelegate {
                   let health = Int(f[4]), let empty = Int(f[5]), let full = Int(f[6]),
                   (0...100).contains(level), voltage > 0 else { return }
             batteryLevel = level
+            checkLowBattery(level)
             batteryVoltage = voltage
             batteryCurrent = current
             batteryTemperature = temperature
@@ -498,6 +559,7 @@ extension BluetoothManager: CBPeripheralDelegate {
         if let data = characteristic.value, data.count == 1,
            let level = data.first, level <= 100 {
             batteryLevel = Int(level)
+            checkLowBattery(Int(level))
         } else {
             batteryLevel = nil
         }
