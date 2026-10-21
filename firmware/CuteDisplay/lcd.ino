@@ -127,29 +127,29 @@ void updateExpressiveEyes(unsigned long now) {
  else if(gazeY>targetGazeY)--gazeY;
 }
 int mascotPanelWidth();
-// Peek-a-boo: sometimes the mascot briefly hides beyond the right screen edge.
-// Only moves the mascot bitmap; message/drink contents and display mode are untouched.
-int peekOffset=0;
-uint8_t peekPhase=0; // 0 waiting, 1 hiding, 2 waiting hidden, 3 returning
-unsigned long nextPeekAt=0, peekHoldUntil=0;
-void updatePeekaboo(unsigned long now) {
- if(!mascotVisible) { peekOffset=0; peekPhase=0; return; }
- int maxHide=max(10,mascotPanelWidth()*45/100);
- if(peekPhase==0) {
-  if(!nextPeekAt) nextPeekAt=now+22000UL+(esp_random()%22000UL);
-  if((int32_t)(now-nextPeekAt)>=0 && !surpriseAction) {
-   peekPhase=1;
+// Explorer cycles through four safe movements. The full character always remains
+// within the LCD bounds; no part is ever drawn off-screen.
+uint8_t explorerAction=0; // 0 idle, 1 approach, 2 peek, 3 perch, 4 chase heart
+unsigned long nextExplorerAt=0, explorerStarted=0;
+const unsigned long EXPLORER_DURATION_MS=4200;
+void updateExplorer(unsigned long now) {
+ if(!mascotVisible || mode!=MESSAGE_MODE) {
+  explorerAction=0;
+  nextExplorerAt=now+35000UL;
+  return;
+ }
+ if(explorerAction) {
+  if(now-explorerStarted>=EXPLORER_DURATION_MS) {
+   explorerAction=0;
+   nextExplorerAt=now+30000UL+(esp_random()%45000UL);
   }
- } else if(peekPhase==1) {
-  peekOffset=min(maxHide,peekOffset+4);
-  if(peekOffset>=maxHide) { peekPhase=2; peekHoldUntil=now+950UL; }
- } else if(peekPhase==2) {
-  if((int32_t)(now-peekHoldUntil)>=0) peekPhase=3;
- } else if(peekPhase==3) {
-  peekOffset=max(0,peekOffset-4);
-  if(peekOffset==0) {
-   peekPhase=0;
-   nextPeekAt=now+28000UL+(esp_random()%38000UL);
+ } else if(!surpriseAction) {
+  if(!nextExplorerAt) nextExplorerAt=now+18000UL;
+  if((int32_t)(now-nextExplorerAt)>=0) {
+   static uint8_t nextAction=1;
+   explorerAction=nextAction;
+   nextAction=nextAction%4+1;
+   explorerStarted=now;
   }
  }
 }
@@ -668,17 +668,61 @@ void drawMascot(){
  for(int y=0;y<170;y++)for(int x=0;x<98;x++)
   mascotBackup[y*98+x]=pixels[y*LCD_W+222+x];
  rect(222,0,98,170,themeBackground());
- int dstW=mascotPanelWidth(),dstX=LCD_W-dstW+peekOffset;
- rect(dstX,0,dstW,170,BLACK);
+ int panelW=mascotPanelWidth();
+ // Reserve the original text width regardless of animations.
+ int dstW=panelW, dstX=LCD_W-panelW;
  int bodyH=max(30,170*mascotPercent/100);
- // Gentle breathing (2px), mood-dependent bouncing / drifting.
  int breathe=(animPhase/5)%2;
  int bounce=mood==6?(animPhase%8<4?4:0):
             mood==2?(animPhase/8)%2:
             mood==3?(animPhase%4<2?3:0):
             mood==5?(animPhase/10)%2:1+breathe;
  int top=(170-bodyH)/2-bounce;
- for(int y=0;y<bodyH;y++)for(int x=0;x<dstW;x++){
+ if(explorerAction) {
+  unsigned long elapsed=millis()-explorerStarted;
+  // Four staged motions with a smooth outbound and returning arc.
+  int phase=elapsed<EXPLORER_DURATION_MS/2 ? elapsed :
+            EXPLORER_DURATION_MS-elapsed;
+  phase=constrain(phase,0,(int)EXPLORER_DURATION_MS/2);
+  int progress=phase*100/(EXPLORER_DURATION_MS/2);
+  if(explorerAction==1) {
+   // Walk toward the bubble but stay fully in the dedicated mascot panel.
+   dstW=max(28,panelW*75/100);
+   bodyH=max(45,170*mascotPercent*75/10000);
+   dstX=LCD_W-panelW+(panelW-dstW)*(100-progress)/100;
+   top=constrain((170-bodyH)/2-bounce,0,170-bodyH);
+  } else if(explorerAction==2) {
+   // Peek from the edge next to the bubble. Entire sprite remains on screen.
+   dstW=max(24,panelW*65/100);
+   bodyH=max(40,170*mascotPercent*65/10000);
+   dstX=LCD_W-panelW+(panelW-dstW)*(100-progress)/100;
+   top=constrain((170-bodyH)/2,0,170-bodyH);
+  } else if(explorerAction==3) {
+   // Perch above the speech bubble, in the narrow top margin.
+   // Scale uniformly so the full character fits within the safe margin.
+   dstW=12;bodyH=20;
+   dstX=constrain(LCD_W-panelW-(progress*(LCD_W-panelW-24)/100),
+                  5,LCD_W-dstW-5);
+   top=1;
+  } else if(explorerAction==4) {
+   // Chase a heart in the lower margin, without touching message text.
+   dstW=12;bodyH=20;
+   dstX=constrain(LCD_W-panelW-(progress*(LCD_W-panelW-24)/100),
+                  5,LCD_W-dstW-5);
+   top=LCD_H-bodyH-1;
+   int hx=constrain(dstX+dstW+5,2,LCD_W-5);
+   oval(hx,top+5,3,3,themeColor());
+   oval(hx+4,top+5,3,3,themeColor());
+   line(hx-2,top+7,hx+2,top+12,themeColor());
+   line(hx+6,top+7,hx+2,top+12,themeColor());
+  }
+ }
+ // Clamp both axes: no clipped ears, whiskers, face, or body.
+ dstW=constrain(dstW,1,LCD_W);
+ bodyH=constrain(bodyH,1,LCD_H);
+ dstX=constrain(dstX,0,LCD_W-dstW);
+ top=constrain(top,0,LCD_H-bodyH);
+ for(int y=0;y<bodyH;y++)for(int x=0;x<dstW;x++) {
   int sx=x*98/dstW,sy=y*170/bodyH;
   pixel(dstX+x,top+y,mascotBackup[sy*98+sx]);
  }
@@ -1054,7 +1098,7 @@ void loop(){
  if(mascotVisible && millis()-lastMascotAnimation>=MASCOT_ANIMATION_MS){
   lastMascotAnimation=millis();animPhase=(animPhase+1)%32;
   updateExpressiveEyes(lastMascotAnimation);
-  updatePeekaboo(lastMascotAnimation);
+  updateExplorer(lastMascotAnimation);
   // The scrolling message already redraws frequently; avoid unnecessary transfers.
   if(!(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }
