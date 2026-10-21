@@ -289,7 +289,7 @@ struct ContentView: View {
                     Spacer()
                     Picker("Low battery threshold", selection: Binding(
                         get: { bluetooth.lowBatteryThreshold },
-                        set: { bluetooth.setLowBatteryThreshold($0) }
+                        set: { bluetooth.setLowBatteryThreshold($0); if bluetooth.isConnected { bluetooth.sendDrinksPayload("L:\($0)") } }
                     )) {
                         Text("10%").tag(10)
                         Text("15%").tag(15)
@@ -595,14 +595,14 @@ struct ContentView: View {
                 .tint(.pink)
                 .onChange(of: speechBubbleEnabled) { _, enabled in
                     UserDefaults.standard.set(enabled, forKey: "speechBubbleEnabled")
-                    if canSend { bluetooth.sendDrinksPayload("Q:\(enabled ? 1 : 0)") }
+                    if shouldAutoSend { bluetooth.sendDrinksPayload("Q:\(enabled ? 1 : 0)") }
                 }
             if speechBubbleEnabled {
                 Toggle("Typewriter animation", isOn: $speechTypewriter)
                     .tint(.pink)
                     .onChange(of: speechTypewriter) { _, enabled in
                         UserDefaults.standard.set(enabled, forKey: "speechTypewriter")
-                        if canSend { bluetooth.sendDrinksPayload("Y:\(enabled ? 1 : 0)") }
+                        if shouldAutoSend { bluetooth.sendDrinksPayload("Y:\(enabled ? 1 : 0)") }
                     }
                 Text("Shows the message in a bubble beside the animated mascot. The bubble can be turned off at any time.")
                     .font(.caption)
@@ -629,7 +629,7 @@ struct ContentView: View {
                 ForEach(quickMessages, id: \.self) { text in
                     Button {
                         message = text
-                        if canSend { bluetooth.sendMessage(text) }
+                        if shouldAutoSend { bluetooth.sendMessage(text) }
                     } label: {
                         Text(text)
                             .font(.caption.bold())
@@ -724,7 +724,7 @@ struct ContentView: View {
                     Button {
                         selectedCharacter = character
                         UserDefaults.standard.set(character.rawValue, forKey: "selectedCharacter")
-                        if canSend { bluetooth.sendMessage("C:\(character.rawValue)") }
+                        if shouldAutoSend { bluetooth.sendMessage("C:\(character.rawValue)") }
                     } label: {
                         VStack(spacing: 8) {
                             Text(character.symbol).font(.system(size: 35))
@@ -757,7 +757,7 @@ struct ContentView: View {
                     Button {
                         selectedMood = mood
                         UserDefaults.standard.set(mood.rawValue, forKey: "mascotMood")
-                        if canSend { bluetooth.sendMessage("M:\(mood.rawValue)") }
+                        if shouldAutoSend { bluetooth.sendMessage("M:\(mood.rawValue)") }
                     } label: {
                         VStack(spacing: 4) {
                             Text(mood.symbol).font(.title2)
@@ -774,7 +774,7 @@ struct ContentView: View {
                 .tint(themeColor)
                 .onChange(of: surpriseAnimationsEnabled) { _, enabled in
                     UserDefaults.standard.set(enabled, forKey: "surpriseAnimationsEnabled")
-                    if canSend { bluetooth.sendDrinksPayload("S:\(enabled ? 1 : 0)") }
+                    if shouldAutoSend { bluetooth.sendDrinksPayload("S:\(enabled ? 1 : 0)") }
                 }
             Text("Occasionally, the mascot sneezes, stretches, looks around, gets startled or notices a butterfly. Turn this off to keep only the regular mood animations.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -785,7 +785,7 @@ struct ContentView: View {
 
     // MARK: - Mascot customization
     private func sendMascotCustomization() {
-        guard canSend else { return }
+        guard canSend && !previewOnly else { return }
         bluetooth.configureMascot(accessory: accessoryStyle,
                                    objectMode: heldObjectMode,
                                    object: heldObject,
@@ -805,7 +805,7 @@ struct ContentView: View {
             }
             .onChange(of: accessoryStyle) { _, value in
                 UserDefaults.standard.set(value, forKey: "cuteAccessoryStyle")
-                if canSend { bluetooth.sendDrinksPayload("A:\(value)") }
+                if shouldAutoSend { bluetooth.sendDrinksPayload("A:\(value)") }
             }
 
             Picker("Held object", selection: $heldObjectMode) {
@@ -815,7 +815,7 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .onChange(of: heldObjectMode) { _, value in
                 UserDefaults.standard.set(value, forKey: "cuteHeldObjectMode")
-                if canSend { bluetooth.sendDrinksPayload("H:\(value)") }
+                if shouldAutoSend { bluetooth.sendDrinksPayload("H:\(value)") }
             }
 
             if heldObjectMode == 1 {
@@ -826,7 +826,7 @@ struct ContentView: View {
                 }
                 .onChange(of: heldObject) { _, value in
                     UserDefaults.standard.set(value, forKey: "cuteHeldObject")
-                    if canSend { bluetooth.sendDrinksPayload("J:\(value)") }
+                    if shouldAutoSend { bluetooth.sendDrinksPayload("J:\(value)") }
                 }
             }
 
@@ -838,7 +838,7 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .onChange(of: animationFrequency) { _, value in
                 UserDefaults.standard.set(value, forKey: "cuteAnimationFrequency")
-                if canSend { bluetooth.sendDrinksPayload("K:\(value)") }
+                if shouldAutoSend { bluetooth.sendDrinksPayload("K:\(value)") }
             }
 
             Picker("Animation intensity", selection: $animationIntensity) {
@@ -849,14 +849,14 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .onChange(of: animationIntensity) { _, value in
                 UserDefaults.standard.set(value, forKey: "cuteAnimationIntensity")
-                if canSend { bluetooth.sendDrinksPayload("I:\(value)") }
+                if shouldAutoSend { bluetooth.sendDrinksPayload("I:\(value)") }
             }
 
             Toggle("Individual mascot personality", isOn: $personalityAnimations)
                 .tint(themeColor)
                 .onChange(of: personalityAnimations) { _, value in
                     UserDefaults.standard.set(value, forKey: "cutePersonalityAnimations")
-                    if canSend { bluetooth.sendDrinksPayload("N:\(value ? 1 : 0)") }
+                    if shouldAutoSend { bluetooth.sendDrinksPayload("N:\(value ? 1 : 0)") }
                 }
 
             HStack(spacing: 8) {
@@ -881,7 +881,7 @@ struct ContentView: View {
                 .tint(themeColor)
                 .onChange(of: showMascot) { _, value in
                     UserDefaults.standard.set(value, forKey: "showMascot")
-                    if canSend { bluetooth.sendMessage("V:\(value ? 1 : 0)") }
+                    if shouldAutoSend { bluetooth.sendMessage("V:\(value ? 1 : 0)") }
                 }
             if showMascot {
                 HStack {
@@ -898,7 +898,7 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .onChange(of: mascotSize) { _, value in
                     UserDefaults.standard.set(value, forKey: "mascotSize")
-                    if canSend { bluetooth.sendMessage("Z:\(value)") }
+                    if shouldAutoSend { bluetooth.sendMessage("Z:\(value)") }
                 }
             }
             if mode == .message {
@@ -913,7 +913,7 @@ struct ContentView: View {
                 ), in: 1...5, step: 1) { editing in
                     if !editing {
                         UserDefaults.standard.set(messageFontSize, forKey: "messageFontSize")
-                        if canSend { bluetooth.sendMessage("F:\(messageFontSize)") }
+                        if shouldAutoSend { bluetooth.sendMessage("F:\(messageFontSize)") }
                     }
                 }
                 .tint(themeColor)
@@ -1074,6 +1074,7 @@ struct ContentView: View {
             message: message,
             drinks: displayedDrinks.map { (name: $0.name, count: $0.count) }
         )
+        bluetooth.sendDrinksPayload("L:\(bluetooth.lowBatteryThreshold)")
         bluetooth.sendDrinksPayload("S:\(surpriseAnimationsEnabled ? 1 : 0)")
         sendMascotCustomization()
         appNotice = "Connected — restoring CuteDisplay settings."
