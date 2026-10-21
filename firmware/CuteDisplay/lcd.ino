@@ -109,6 +109,23 @@ void scheduleNextSurprise(unsigned long now) {
 uint8_t animPhase = 0;
 unsigned long lastMascotAnimation = 0;
 const unsigned long MASCOT_ANIMATION_MS = 220;
+// Expressive eyes: independent, occasional glances with one-pixel smoothing.
+int gazeX=0, gazeY=0, targetGazeX=0, targetGazeY=0;
+unsigned long nextGazeAt=0;
+void updateExpressiveEyes(unsigned long now) {
+ if(!nextGazeAt || (int32_t)(now-nextGazeAt)>=0) {
+  const int8_t positions[9][2]={{0,0},{-3,0},{3,0},{-2,-2},{2,-2},
+                                 {0,-3},{-3,1},{3,1},{0,1}};
+  int choice=esp_random()%9;
+  targetGazeX=positions[choice][0];
+  targetGazeY=positions[choice][1];
+  nextGazeAt=now+1800UL+(esp_random()%3600UL);
+ }
+ if(gazeX<targetGazeX)++gazeX;
+ else if(gazeX>targetGazeX)--gazeX;
+ if(gazeY<targetGazeY)++gazeY;
+ else if(gazeY>targetGazeY)--gazeY;
+}
 uint16_t mascotBackup[98 * 170];
 int mascotPanelWidth() { return mascotVisible ? max(40, 98 * mascotPercent / 100) : 0; }
 int contentRight() { return LCD_W - mascotPanelWidth() - (mascotVisible ? 3 : 0); }
@@ -534,6 +551,8 @@ void mascotExpression(){
  bool angry=(mood==3);
  bool hungry=(mood==4);
  bool excited=(mood==6);
+ // Existing facial moods, eyelid animation and surprise actions are preserved.
+ int gx=gazeX, gy=gazeY;
  // Clear only the face's features region (not ears, whiskers or bow).
  // Panda patches are restored after the face's white rectangle.
  rect(cx-23,eyeY-10,48,22,WHITE);
@@ -546,18 +565,19 @@ void mascotExpression(){
   line(cx+11,eyeY+2,cx+21,eyeY+2,BLACK);
   if(sleepy){pixel(cx-20,eyeY+5,BLACK);pixel(cx+20,eyeY+5,BLACK);}
  }else if(angry){
-  oval(cx-16,eyeY+3,4,5,BLACK);oval(cx+16,eyeY+3,4,5,BLACK);
+  oval(cx-16+gx,eyeY+3+gy,4,5,BLACK);oval(cx+16+gx,eyeY+3+gy,4,5,BLACK);
   line(cx-25,eyeY-8,cx-11,eyeY-2,BLACK);
   line(cx+11,eyeY-2,cx+25,eyeY-8,BLACK);
- }else if(excited){  oval(cx-16,eyeY,5,8,BLACK);oval(cx+16,eyeY,5,8,BLACK);
-  oval(cx-17,eyeY-3,2,3,WHITE);oval(cx+15,eyeY-3,2,3,WHITE);
+ }else if(excited){
+  oval(cx-16+gx,eyeY+gy,5,8,BLACK);oval(cx+16+gx,eyeY+gy,5,8,BLACK);
+  oval(cx-17+gx,eyeY-3+gy,2,3,WHITE);oval(cx+15+gx,eyeY-3+gy,2,3,WHITE);
  }else if(shy){
-  oval(cx-16,eyeY+3,3,3,BLACK);oval(cx+16,eyeY+3,3,3,BLACK);
+  oval(cx-16+gx,eyeY+3+gy,3,3,BLACK);oval(cx+16+gx,eyeY+3+gy,3,3,BLACK);
   line(cx-22,eyeY-3,cx-10,eyeY-3,OUTLINE);
   line(cx+10,eyeY-3,cx+22,eyeY-3,OUTLINE);
  }else{
-  oval(cx-16,eyeY,4,6,BLACK);oval(cx+16,eyeY,4,6,BLACK);
-  pixel(cx-17,eyeY-2,WHITE);pixel(cx+15,eyeY-2,WHITE);
+  oval(cx-16+gx,eyeY+gy,4,6,BLACK);oval(cx+16+gx,eyeY+gy,4,6,BLACK);
+  pixel(cx-17+gx,eyeY-2+gy,WHITE);pixel(cx+15+gx,eyeY-2+gy,WHITE);
  }
  // Mouth is low enough to avoid the eyes while preserving a small nose.
  rect(cx-12,eyeY+13,25,21,WHITE);
@@ -1006,6 +1026,7 @@ void loop(){
  }
  if(mascotVisible && millis()-lastMascotAnimation>=MASCOT_ANIMATION_MS){
   lastMascotAnimation=millis();animPhase=(animPhase+1)%32;
+  updateExpressiveEyes(lastMascotAnimation);
   // The scrolling message already redraws frequently; avoid unnecessary transfers.
   if(!(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
  }
