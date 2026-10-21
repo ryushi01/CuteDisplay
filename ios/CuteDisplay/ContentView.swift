@@ -830,7 +830,7 @@ struct ContentView: View {
 
     // MARK: - Mascot customization
     private func sendMascotCustomization() {
-        guard canSend && !previewOnly else { return }
+        guard canSend else { return }
         bluetooth.configureMascot(accessory: accessoryStyle,
                                    objectMode: heldObjectMode,
                                    object: heldObject,
