@@ -229,6 +229,29 @@ struct ContentView: View {
                         .tint(batteryColor)
                 }
             }
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Low battery notifications", isOn: Binding(
+                    get: { bluetooth.lowBatteryAlertsEnabled },
+                    set: { bluetooth.setLowBatteryAlerts($0) }
+                )).tint(.orange)
+                HStack {
+                    Text("Alert when battery reaches")
+                    Spacer()
+                    Picker("Low battery threshold", selection: Binding(
+                        get: { bluetooth.lowBatteryThreshold },
+                        set: { bluetooth.setLowBatteryThreshold($0) }
+                    )) {
+                        Text("10%").tag(10)
+                        Text("15%").tag(15)
+                        Text("20%").tag(20)
+                        Text("25%").tag(25)
+                        Text("30%").tag(30)
+                    }.pickerStyle(.menu)
+                }
+                Text("Notifications use actual Bluetooth battery updates. iOS may delay updates while the app is suspended or force-closed.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Divider()
             if bluetooth.isConnected {
                 VStack(alignment: .leading, spacing: 9) {
                     Text("BATTERY & POWER").font(.caption.bold()).foregroundStyle(.secondary)
