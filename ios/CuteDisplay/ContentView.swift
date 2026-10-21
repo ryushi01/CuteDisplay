@@ -55,12 +55,41 @@ enum CuteCharacter: Int, CaseIterable, Identifiable {
     }
 }
 
+struct CuteDisplayProfile: Codable, Identifiable {
+    var id: UUID = UUID()
+    var name: String
+    var message: String
+    var mode: String
+    var theme: Int
+    var character: Int
+    var mood: Int
+    var visible: Bool
+    var mascotSize: Int
+    var accessory: Int
+    var objectMode: Int
+    var heldObject: Int
+    var frequency: Int
+    var intensity: Int
+    var personality: Bool
+    var fontSize: Int
+    var bubble: Bool
+    var typewriter: Bool
+    var brightness: Double
+    var drinks: [DrinkItem]
+}
+
 struct ContentView: View {
     @StateObject private var bluetooth = BluetoothManager()
     @State private var mode: DisplayMode = .message
     @State private var message = UserDefaults.standard.string(forKey: "savedMessage") ?? "こんにちわ"
     @State private var brightness = 75.0
     @State private var previewOnly = false
+    @State private var displayProfiles: [CuteDisplayProfile] = {
+        guard let d=UserDefaults.standard.data(forKey: "cuteSavedProfiles"),
+              let v=try? JSONDecoder().decode([CuteDisplayProfile].self,from:d) else { return [] }
+        return v
+    }()
+    @State private var newProfileName = ""
     @State private var lastAppliedScheduledBrightness: Int?
     @State private var autoBrightness = UserDefaults.standard.bool(forKey: "cuteAutoBrightness")
     @State private var dayStart = UserDefaults.standard.object(forKey: "cuteDayStart") as? Int ?? 8
@@ -198,6 +227,7 @@ struct ContentView: View {
                     characterSection
                     moodSection
                     mascotCustomizationSection
+                    displayProfilesSection
                     appearanceSection
                     brightnessSection
                     powerSection
@@ -886,6 +916,106 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    // MARK: - Saved display profiles
+    private func saveProfile() {
+        let proposed=newProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label=proposed.isEmpty ? "Profile \(displayProfiles.count + 1)" : proposed
+        let profile=CuteDisplayProfile(
+            name: label, message: message, mode: mode.rawValue,
+            theme: selectedTheme, character: selectedCharacter.rawValue,
+            mood: selectedMood.rawValue, visible: showMascot,
+            mascotSize: mascotSize, accessory: accessoryStyle,
+            objectMode: heldObjectMode, heldObject: heldObject,
+            frequency: animationFrequency, intensity: animationIntensity,
+            personality: personalityAnimations, fontSize: messageFontSize,
+            bubble: speechBubbleEnabled, typewriter: speechTypewriter,
+            brightness: brightness, drinks: drinks)
+        displayProfiles.append(profile)
+        persistProfiles()
+        newProfileName=""
+    }
+
+    private func persistProfiles() {
+        if let data=try? JSONEncoder().encode(displayProfiles) {
+            UserDefaults.standard.set(data,forKey:"cuteSavedProfiles")
+        }
+    }
+
+    private func loadProfile(_ profile: CuteDisplayProfile) {
+        // Apply settings locally first; the optional preview mode prevents
+        // changing the hardware until the user explicitly taps Apply.
+        drinkSyncTask?.cancel()
+        message=profile.message
+        mode=DisplayMode(rawValue:profile.mode) ?? .message
+        selectedTheme=max(0,min(24,profile.theme))
+        selectedCharacter=CuteCharacter(rawValue:profile.character) ?? .kitty
+        selectedMood=CuteMood(rawValue:profile.mood) ?? .happy
+        showMascot=profile.visible
+        mascotSize=profile.mascotSize
+        accessoryStyle=profile.accessory
+        heldObjectMode=profile.objectMode
+        heldObject=profile.heldObject
+        animationFrequency=profile.frequency
+        animationIntensity=profile.intensity
+        personalityAnimations=profile.personality
+        messageFontSize=profile.fontSize
+        speechBubbleEnabled=profile.bubble
+        speechTypewriter=profile.typewriter
+        brightness=profile.brightness
+        drinks=profile.drinks
+        UserDefaults.standard.set(selectedTheme,forKey:"displayTheme")
+        UserDefaults.standard.set(selectedCharacter.rawValue,forKey:"selectedCharacter")
+        UserDefaults.standard.set(selectedMood.rawValue,forKey:"mascotMood")
+        UserDefaults.standard.set(showMascot,forKey:"showMascot")
+        UserDefaults.standard.set(mascotSize,forKey:"mascotSize")
+        UserDefaults.standard.set(accessoryStyle,forKey:"cuteAccessoryStyle")
+        UserDefaults.standard.set(heldObjectMode,forKey:"cuteHeldObjectMode")
+        UserDefaults.standard.set(heldObject,forKey:"cuteHeldObject")
+        UserDefaults.standard.set(animationFrequency,forKey:"cuteAnimationFrequency")
+        UserDefaults.standard.set(animationIntensity,forKey:"cuteAnimationIntensity")
+        UserDefaults.standard.set(personalityAnimations,forKey:"cutePersonalityAnimations")
+        UserDefaults.standard.set(messageFontSize,forKey:"messageFontSize")
+        UserDefaults.standard.set(speechBubbleEnabled,forKey:"speechBubbleEnabled")
+        UserDefaults.standard.set(speechTypewriter,forKey:"speechTypewriter")
+        if !previewOnly && bluetooth.isConnected { restoreAfterConnection() }
+    }
+
+    private var displayProfilesSection: some View {
+        VStack(alignment:.leading,spacing:10) {
+            sectionTitle("SAVED DISPLAY PROFILES")
+            HStack {
+                TextField("Profile name",text:$newProfileName)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save") { saveProfile() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(displayProfiles.count>=12)
+            }
+            ForEach(displayProfiles) { profile in
+                HStack {
+                    VStack(alignment:.leading,spacing:2) {
+                        Text(profile.name).font(.subheadline.bold())
+                        Text("\(profile.mode) • \(profile.message)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button("Load") { loadProfile(profile) }
+                        .buttonStyle(.bordered)
+                    Button(role:.destructive) {
+                        displayProfiles.removeAll{$0.id==profile.id}
+                        persistProfiles()
+                    } label:{ Image(systemName:"trash") }
+                        .buttonStyle(.borderless)
+                }
+            }
+            Text("Save up to 12 profiles on your iPhone. Load applies immediately unless Preview changes before sending is enabled.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(.white.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius:16))
     }
 
     // MARK: - Character visibility, size and Message Mode font
