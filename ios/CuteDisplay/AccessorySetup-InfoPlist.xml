@@ -12,3 +12,7 @@
 <array><string>CuteDisplay</string></array>
 <key>NSBluetoothAlwaysUsageDescription</key>
 <string>CuteDisplay communicates with your paired drink display over Bluetooth.</string>
+
+<!-- Required by iOS when connecting to CuteDisplay over the local Wi-Fi network. -->
+<key>NSLocalNetworkUsageDescription</key>
+<string>Connect to CuteDisplay on your local Wi-Fi network if Bluetooth is unavailable.</string>
