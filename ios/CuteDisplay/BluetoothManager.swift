@@ -261,13 +261,15 @@ final class BluetoothManager: NSObject, ObservableObject {
                 isConnected = true
                 status = "Connected to CuteDisplay"
                 stopLANFallback()
-                enqueue(["W:GET:KEY", "W:GET:IP"])
                 sendNext()
             } else if service.uuid == networkServiceUUID && characteristic.uuid == networkCharacteristicUUID {
                 networkCharacteristic = characteristic
                 networkDetailsAvailable = true
                 if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
                     device.setNotifyValue(true, for: characteristic)
+                } else if characteristic.isNotifying && !networkRefreshStarted {
+                    networkRefreshStarted = true
+                    refreshNetworkDetails()
                 }
                 if characteristic.properties.contains(.read) {
                     device.readValue(for: characteristic)
@@ -443,7 +445,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     func refreshNetworkDetails() {
         // Request one field per acknowledged BLE write instead of relying on
         // a burst of notifications from the ESP32.
-        enqueue(["W:GET:LINK","W:GET:MODE","W:GET:IP","W:GET:MASK",
+        enqueue(["W:GET:KEY","W:GET:LINK","W:GET:MODE","W:GET:IP","W:GET:MASK",
                  "W:GET:GW","W:GET:DNS","W:GET:RSSI","W:GET:SSID"])
     }
     func ping(address: String) {
