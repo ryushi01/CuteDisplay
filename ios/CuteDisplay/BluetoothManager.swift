@@ -289,6 +289,12 @@ final class BluetoothManager: NSObject, ObservableObject {
         UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
     }
     private func clearRememberedDevice() {
+        // Forgetting the accessory must also revoke its saved LAN fallback credentials.
+        stopLANFallback()
+        lanToken = nil
+        lanIP = ""
+        UserDefaults.standard.removeObject(forKey: "cuteLanToken")
+        UserDefaults.standard.removeObject(forKey: "cuteLanIP")
         rememberedDeviceID = nil
         UserDefaults.standard.removeObject(forKey: "cutePeripheralID")
     }
@@ -318,7 +324,11 @@ final class BluetoothManager: NSObject, ObservableObject {
         autoReconnect = enabled
         UserDefaults.standard.set(enabled, forKey: "cuteAutoReconnect")
         if enabled && !isConnected { startConnection() }
-        if !enabled && isScanning { central?.stopScan(); isScanning = false }
+        if !enabled {
+            stopLANFallback()
+            if isScanning { central?.stopScan(); isScanning = false }
+            if !bleReady() { isConnected = false }
+        }
     }
     // Remove authorization through the system UI, not by only deleting UserDefaults.
     func forgetDevice() {
