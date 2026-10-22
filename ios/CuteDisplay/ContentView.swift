@@ -85,6 +85,7 @@ struct ContentView: View {
     @State private var brightness = 75.0
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
     @State private var wifiPassword = ""
+    @State private var showingIPSettings = false
     @State private var pingAddress = UserDefaults.standard.string(forKey: "cutePingAddress") ?? "1.1.1.1"
     @State private var wifiDHCPSelection = true
     @State private var staticIP = ""
@@ -342,21 +343,15 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(!bluetooth.isConnected)
             Divider()
-            Toggle("Automatic IP (DHCP)", isOn: $wifiDHCPSelection)
-            if !wifiDHCPSelection {
-                TextField("IPv4 address",text:$staticIP).textFieldStyle(.roundedBorder)
-                TextField("Subnet mask",text:$staticMask).textFieldStyle(.roundedBorder)
-                TextField("Gateway",text:$staticGateway).textFieldStyle(.roundedBorder)
-                TextField("DNS",text:$staticDNS).textFieldStyle(.roundedBorder)
-            }
             HStack {
-                Button("Apply IP Settings") {
-                    bluetooth.configureIP(dhcp:wifiDHCPSelection,ip:staticIP,
-                        mask:staticMask,gateway:staticGateway,dns:staticDNS)
-                }.disabled(!bluetooth.isConnected)
+                Button("IP Settings") {
+                    wifiDHCPSelection = bluetooth.wifiDHCP
+                    showingIPSettings = true
+                }
                 Button("Refresh Details") { bluetooth.refreshNetworkDetails() }
-                    .disabled(!bluetooth.isConnected)
-            }.buttonStyle(.bordered)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!bluetooth.isConnected)
             VStack(alignment:.leading,spacing:5) {
                 Text("Current connection").font(.subheadline.bold())
                 Text("Network: \(bluetooth.wifiSSID.isEmpty ? "—" : bluetooth.wifiSSID)")
@@ -395,6 +390,48 @@ struct ContentView: View {
         .padding()
         .background(.white.opacity(0.07))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .sheet(isPresented: $showingIPSettings) { ipSettingsPopup }
+    }
+
+    private var ipSettingsPopup: some View {
+        NavigationStack {
+            Form {
+                Section("Address assignment") {
+                    Toggle("Automatic (DHCP)", isOn: $wifiDHCPSelection)
+                }
+                if !wifiDHCPSelection {
+                    Section("Static IPv4") {
+                        TextField("IP address", text:$staticIP)
+                            .keyboardType(.numbersAndPunctuation)
+                        TextField("Subnet mask", text:$staticMask)
+                            .keyboardType(.numbersAndPunctuation)
+                        TextField("Default gateway", text:$staticGateway)
+                            .keyboardType(.numbersAndPunctuation)
+                        TextField("DNS server", text:$staticDNS)
+                            .keyboardType(.numbersAndPunctuation)
+                    }
+                }
+                Section {
+                    Text("Settings are sent over Bluetooth. Reconnect Wi-Fi after applying to activate the new address.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Wi-Fi IP Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement:.cancellationAction) {
+                    Button("Cancel") { showingIPSettings = false }
+                }
+                ToolbarItem(placement:.confirmationAction) {
+                    Button("Apply") {
+                        bluetooth.configureIP(dhcp:wifiDHCPSelection,
+                             ip:staticIP,mask:staticMask,
+                             gateway:staticGateway,dns:staticDNS)
+                        showingIPSettings = false
+                    }
+                }
+            }
+        }
     }
 
     // MARK: Device Status
