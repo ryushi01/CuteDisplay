@@ -350,30 +350,6 @@ final class BluetoothManager: NSObject, ObservableObject {
         enqueue(glyphPackets(for: [text]) + [text])
     }
     func sendDrinksPayload(_ payload: String) { enqueue([payload]) }
-    // Configure the board's Wi-Fi over the existing BLE control channel.
-    // Keep credentials out of app logs and status messages.
-    func configureWiFi(ssid: String, password: String) {
-        let clean = ssid.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean.utf8.count <= 32,
-              !clean.contains("|"), !clean.contains(":"),
-              password.utf8.count <= 63, !password.contains("|") else {
-            status = "Wi-Fi SSID/password format is invalid"
-            return
-        }
-        let command = "W:\(clean)|\(password)"
-        guard command.utf8.count <= 96 else {
-            status = "Wi-Fi configuration exceeds BLE size limit"
-            return
-        }
-        enqueue([command])
-    }
-
-    func forgetWiFi() {
-        enqueue(["W:OFF"])
-        wifiConnected = false
-    }
-
-
     // Wi-Fi credentials are provisioned over the connected BLE link.
     // Only use a network that you control. Password is never logged.
     func connectWiFi(ssid: String, password: String) {
