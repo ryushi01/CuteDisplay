@@ -83,6 +83,9 @@ struct ContentView: View {
     @State private var mode: DisplayMode = .message
     @State private var message = UserDefaults.standard.string(forKey: "savedMessage") ?? "こんにちわ"
     @State private var brightness = 75.0
+    @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
+    @State private var wifiPassword = ""
+    @State private var showWiFiPassword = false
     @State private var previewOnly = false
     @State private var displayProfiles: [CuteDisplayProfile] = {
         guard let d=UserDefaults.standard.data(forKey: "cuteSavedProfiles"),
@@ -191,6 +194,7 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     deviceStatusSection
+                    wifiSection
                     VStack(alignment: .leading, spacing: 10) {
                         sectionTitle("DISPLAY MODE")
                         Picker("Display Mode", selection: $mode) {
@@ -278,6 +282,67 @@ struct ContentView: View {
             }
         }
         .onDisappear { drinkSyncTask?.cancel() }
+    }
+
+    // MARK: - Wi-Fi setup and telemetry
+    private var wifiSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("CUTE DISPLAY WI-FI")
+            HStack(spacing: 8) {
+                Image(systemName: bluetooth.wifiConnected ? "wifi" : "wifi.slash")
+                    .foregroundStyle(bluetooth.wifiConnected ? .green : .orange)
+                Text(!bluetooth.isConnected ? "Connect Bluetooth to check Wi-Fi" :
+                     bluetooth.wifiConnected ? "Wi-Fi connected" : "Wi-Fi disconnected")
+                    .font(.subheadline.bold())
+                Spacer()
+            }
+            TextField("Wi-Fi network (SSID)", text: $wifiName)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Group {
+                    if showWiFiPassword {
+                        TextField("Wi-Fi password", text: $wifiPassword)
+                    } else {
+                        SecureField("Wi-Fi password", text: $wifiPassword)
+                    }
+                }
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                Button {
+                    showWiFiPassword.toggle()
+                } label: {
+                    Image(systemName: showWiFiPassword ? "eye.slash" : "eye")
+                }
+                .accessibilityLabel(showWiFiPassword ? "Hide password" : "Show password")
+            }
+            .textFieldStyle(.roundedBorder)
+            Button("Connect CuteDisplay to Wi-Fi") {
+                UserDefaults.standard.set(wifiName, forKey: "cuteWiFiName")
+                bluetooth.connectWiFi(ssid: wifiName, password: wifiPassword)
+                wifiPassword = ""
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!bluetooth.isConnected || wifiName.isEmpty)
+            HStack(spacing: 8) {
+                Button("Reconnect") { bluetooth.enableWiFi() }
+                Button("Disconnect") { bluetooth.disconnectWiFi() }
+                Button("Forget", role: .destructive) {
+                    bluetooth.forgetWiFi()
+                    wifiPassword = ""
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(!bluetooth.isConnected)
+            Text("Configure while connected by Bluetooth. Credentials remain on the device, and it reconnects after a restart. Status refreshes with battery telemetry (about every 2 seconds).")
+                .font(.caption2).foregroundStyle(.secondary)
+            Text("Personal Hotspot works when the iPhone exposes a compatible Wi-Fi network. For security, use a trusted network; Wi-Fi setup over BLE is not an end-to-end encrypted provisioning protocol.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(.white.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     // MARK: Device Status
