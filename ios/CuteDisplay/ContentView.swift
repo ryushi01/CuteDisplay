@@ -85,6 +85,11 @@ struct ContentView: View {
     @State private var brightness = 75.0
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
     @State private var wifiPassword = ""
+    @State private var wifiDHCPSelection = true
+    @State private var staticIP = ""
+    @State private var staticMask = "255.255.255.0"
+    @State private var staticGateway = ""
+    @State private var staticDNS = ""
     @State private var showWiFiPassword = false
     @State private var previewOnly = false
     @State private var displayProfiles: [CuteDisplayProfile] = {
@@ -335,6 +340,34 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!bluetooth.isConnected)
+            Divider()
+            Toggle("Automatic IP (DHCP)", isOn: $wifiDHCPSelection)
+            if !wifiDHCPSelection {
+                TextField("IPv4 address",text:$staticIP).textFieldStyle(.roundedBorder)
+                TextField("Subnet mask",text:$staticMask).textFieldStyle(.roundedBorder)
+                TextField("Gateway",text:$staticGateway).textFieldStyle(.roundedBorder)
+                TextField("DNS",text:$staticDNS).textFieldStyle(.roundedBorder)
+            }
+            HStack {
+                Button("Apply IP Settings") {
+                    bluetooth.configureIP(dhcp:wifiDHCPSelection,ip:staticIP,
+                        mask:staticMask,gateway:staticGateway,dns:staticDNS)
+                }.disabled(!bluetooth.isConnected)
+                Button("Refresh Details") { bluetooth.refreshNetworkDetails() }
+                    .disabled(!bluetooth.isConnected)
+            }.buttonStyle(.bordered)
+            VStack(alignment:.leading,spacing:5) {
+                Text("Current connection").font(.subheadline.bold())
+                Text("Network: \(bluetooth.wifiSSID.isEmpty ? "—" : bluetooth.wifiSSID)")
+                Text("Address mode: \(bluetooth.wifiDHCP ? "DHCP" : "Static")")
+                Text("IPv4: \(bluetooth.wifiIP)")
+                Text("Mask: \(bluetooth.wifiMask)")
+                Text("Gateway: \(bluetooth.wifiGateway)")
+                Text("DNS: \(bluetooth.wifiDNS)")
+                Text("Signal: \(bluetooth.wifiConnected ? "\(bluetooth.wifiRSSI) dBm" : "—")")
+            }.font(.caption).foregroundStyle(.secondary)
+            Text("Changing DHCP/static configuration requires Wi-Fi reconnection to take effect.")
+                .font(.caption2).foregroundStyle(.secondary)
             Text("Configure while connected by Bluetooth. Credentials remain on the device, and it reconnects after a restart. Status refreshes with battery telemetry (about every 2 seconds).")
                 .font(.caption2).foregroundStyle(.secondary)
             Text("Personal Hotspot works when the iPhone exposes a compatible Wi-Fi network. For security, use a trusted network; Wi-Fi setup over BLE is not an end-to-end encrypted provisioning protocol.")
