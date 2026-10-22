@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import Network
 import AccessorySetupKit
 import Combine
 import UIKit
@@ -7,6 +8,15 @@ import UserNotifications
 
 final class BluetoothManager: NSObject, ObservableObject {
     @Published var isConnected = false
+    @Published var wifiFallbackConnected = false
+    private var lanConnection: NWConnection?
+    private var lanBytes = Data()
+    private var lanTimer: Timer?
+    private var lanLastAttempt: Date = .distantPast
+    private var lanAuthenticated = false
+    private var lanCommandInFlight = false
+    private var lanToken: String? = UserDefaults.standard.string(forKey: "cuteLanToken")
+    private var lanIP: String = UserDefaults.standard.string(forKey: "cuteLanIP") ?? ""
     @Published var isScanning = false
     @Published var status = "Starting Bluetooth..."
     @Published var brightness = 75
@@ -76,6 +86,11 @@ final class BluetoothManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        // Local-network fallback is foreground/best-effort; iOS may suspend sockets.
+        lanTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
+            self?.maintainLAN()
+            self?.pollLANStatus()
+        }
         // Show the low-battery banner even while the CuteDisplay screen is visible.
         UNUserNotificationCenter.current().delegate = self
         accessorySession.activate(on: .main) { [weak self] event in
@@ -245,6 +260,8 @@ final class BluetoothManager: NSObject, ObservableObject {
                 commandCharacteristic = characteristic
                 isConnected = true
                 status = "Connected to CuteDisplay"
+                stopLANFallback()
+                enqueue(["W:GET:KEY", "W:GET:IP"])
                 sendNext()
             } else if service.uuid == networkServiceUUID && characteristic.uuid == networkCharacteristicUUID {
                 networkCharacteristic = characteristic
@@ -341,13 +358,15 @@ final class BluetoothManager: NSObject, ObservableObject {
     func disconnect() {
         intentionalDisconnect = true
         if isScanning { central?.stopScan(); isScanning = false }
+        stopLANFallback()
         if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         else { clearConnection(); status = "Disconnected" }
     }
 
     private func clearConnection() {
-        isConnected = false
+        isConnected = wifiFallbackConnected
         isScanning = false
+        if !wifiFallbackConnected {
         batteryLevel = nil
         batteryVoltage = nil
         batteryCurrent = nil
@@ -356,16 +375,18 @@ final class BluetoothManager: NSObject, ObservableObject {
         minutesToEmpty = nil
         minutesToFull = nil
         lastPowerUpdate = nil
+        }
         commandCharacteristic = nil
         networkCharacteristic = nil
         networkDetailsAvailable = false
         networkRefreshStarted = false
-        pendingCommands.removeAll()
+        if !wifiFallbackConnected { pendingCommands.removeAll() }
         waitingForWrite = false
         uploadsRemaining = 0
         deferredDrinks = nil
         isSendingDrinks = false
         peripheral = nil
+        if !wifiFallbackConnected { isConnected = false }
     }
 
     // Smooth 24x24 glyphs: each pixel uses 2-bit coverage.
@@ -594,7 +615,7 @@ final class BluetoothManager: NSObject, ObservableObject {
 
     private func enqueue(_ commands: [String]) {
         if isSimulator { status = "Demo Mode — no Bluetooth sent"; return }
-        guard isConnected, peripheral != nil, commandCharacteristic != nil else {
+        guard (peripheral != nil && commandCharacteristic != nil && isConnected) || wifiFallbackConnected else {
             status = "Not connected to CuteDisplay"
             return
         }
@@ -607,14 +628,20 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func sendNext() {
-        guard !waitingForWrite,
-              !pendingCommands.isEmpty,
-              let peripheral,
-              let characteristic = commandCharacteristic else { return }
-        let next = pendingCommands.removeFirst()
-        guard let data = next.data(using: .utf8) else { return }
-        waitingForWrite = true
-        peripheral.writeValue(data, for: characteristic, type: .withResponse)
+        guard !waitingForWrite, !pendingCommands.isEmpty else { return }
+        if let peripheral, let characteristic = commandCharacteristic, peripheral.state == .connected {
+            let next = pendingCommands.removeFirst()
+            guard let data = next.data(using: .utf8) else { return }
+            waitingForWrite = true
+            peripheral.writeValue(data, for: characteristic, type: .withResponse)
+        } else if wifiFallbackConnected {
+            let next = pendingCommands.removeFirst()
+            waitingForWrite = true
+            lanConnection?.send(content: Data(("CMD " + next + "\n").utf8),
+                                completion: .contentProcessed { [weak self] error in
+                if let error { self?.lanFailure(error.localizedDescription) }
+            })
+        }
     }
 }
 
@@ -717,7 +744,20 @@ extension BluetoothManager: CBPeripheralDelegate {
                 if fields.count > 2 { wifiConnected = fields[2] == "1" }
             case "MODE":
                 if fields.count > 2 { wifiDHCP = fields[2] == "DHCP" }
-            case "IP": if fields.count > 2 { wifiIP = fields[2] }
+            case "IP":
+                if fields.count > 2 {
+                    wifiIP = fields[2]
+                    if Self.validIPv4(fields[2]) {
+                        lanIP = fields[2]
+                        UserDefaults.standard.set(lanIP, forKey: "cuteLanIP")
+                    }
+                }
+            case "KEY":
+                if fields.count > 2, fields[2].count == 32,
+                   fields[2].allSatisfy({ $0.isHexDigit }) {
+                    lanToken = fields[2]
+                    UserDefaults.standard.set(fields[2], forKey: "cuteLanToken")
+                }
             case "MASK": if fields.count > 2 { wifiMask = fields[2] }
             case "GW": if fields.count > 2 { wifiGateway = fields[2] }
             case "DNS": if fields.count > 2 { wifiDNS = fields[2] }
@@ -791,12 +831,16 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral,
                     didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        commandCompleted(errorMessage: error?.localizedDescription)
+    }
+
+    private func commandCompleted(errorMessage: String?) {
         waitingForWrite = false
-        if let error {
+        if let errorMessage {
             pendingCommands.removeAll()
             uploadsRemaining = 0
             isSendingDrinks = false
-            status = "Send failed: \(error.localizedDescription)"
+            status = "Send failed: \(errorMessage)"
             return
         }
         if uploadsRemaining > 0 {
@@ -812,6 +856,117 @@ extension BluetoothManager: CBPeripheralDelegate {
         }
         sendNext()
     }
+
+    // Wi-Fi fallback: connects only to a previously provisioned, reachable LAN IP.
+    // No automatic enabling of the ESP32 Wi-Fi radio or cloud service.
+    private func bleReady() -> Bool {
+        peripheral?.state == .connected && commandCharacteristic != nil
+    }
+
+    private func maintainLAN() {
+        if bleReady() {
+            if wifiFallbackConnected { stopLANFallback() }
+            return
+        }
+        guard autoReconnect, !intentionalDisconnect,
+              !wifiFallbackConnected, lanConnection == nil,
+              let token = lanToken, token.count == 32,
+              Self.validIPv4(lanIP),
+              Date().timeIntervalSince(lanLastAttempt) >= 8 else { return }
+        lanLastAttempt = Date()
+        guard let port = NWEndpoint.Port(rawValue: 8848) else { return }
+        let conn = NWConnection(host: NWEndpoint.Host(lanIP), port: port, using: .tcp)
+        lanConnection = conn
+        lanAuthenticated = false
+        lanBytes.removeAll()
+        conn.stateUpdateHandler = { [weak self, weak conn] state in
+            guard let self, let conn, self.lanConnection === conn else { return }
+            switch state {
+            case .ready:
+                guard let token = self.lanToken else { return }
+                conn.send(content: Data(("AUTH " + token + "\n").utf8),
+                          completion: .contentProcessed { [weak self] error in
+                    if let error { self?.lanFailure(error.localizedDescription) }
+                })
+                self.receiveLAN(conn)
+            case .failed(let error): self.lanFailure(error.localizedDescription)
+            case .cancelled: break
+            default: break
+            }
+        }
+        conn.start(queue: .main)
+    }
+
+    private func receiveLAN(_ connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { [weak self, weak connection] data, _, complete, error in
+            guard let self, let connection, self.lanConnection === connection else { return }
+            if let data { self.lanBytes.append(data) }
+            while let newline = self.lanBytes.firstIndex(of: 10) {
+                let line = String(decoding: self.lanBytes.prefix(upTo: newline), as: UTF8.self)
+                self.lanBytes.removeSubrange(...newline)
+                self.handleLANLine(line.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            if complete || error != nil { self.lanFailure(error?.localizedDescription ?? "Connection closed") }
+            else { self.receiveLAN(connection) }
+        }
+    }
+
+    private func handleLANLine(_ line: String) {
+        if line == "OK" {
+            lanAuthenticated = true
+            wifiFallbackConnected = true
+            isConnected = true
+            status = "Connected over Wi-Fi (Bluetooth unavailable)"
+            sendNext()
+        } else if line == "ACK" {
+            commandCompleted(errorMessage: nil)
+        } else if line == "NACK" || line == "DENIED" {
+            if line == "DENIED" { lanFailure("Wi-Fi authentication failed; reconnect with Bluetooth") }
+            else { commandCompleted(errorMessage: "Command rejected over Wi-Fi") }
+        } else if line.hasPrefix("S:") {
+            let f = line.dropFirst(2).split(separator: ",")
+            guard f.count >= 8, let level = Int(f[0]),
+                  let voltage = Double(f[1]), let current = Double(f[2]),
+                  let temperature = Int(f[3]), let health = Int(f[4]),
+                  let empty = Int(f[5]), let full = Int(f[6]),
+                  (0...100).contains(level), voltage > 0 else { return }
+            batteryLevel = level
+            checkLowBattery(level)
+            batteryVoltage = voltage
+            batteryCurrent = current
+            batteryTemperature = temperature
+            batteryHealth = health
+            minutesToEmpty = empty
+            minutesToFull = full
+            lastPowerUpdate = Date()
+            wifiConnected = f[7] == "1"
+        }
+    }
+
+    private func stopLANFallback() {
+        lanConnection?.stateUpdateHandler = nil
+        lanConnection?.cancel()
+        lanConnection = nil
+        lanAuthenticated = false
+        wifiFallbackConnected = false
+        lanBytes.removeAll()
+    }
+
+    private func lanFailure(_ reason: String) {
+        guard lanConnection != nil else { return }
+        stopLANFallback()
+        waitingForWrite = false
+        isConnected = bleReady()
+        if !isConnected { status = "Wi-Fi fallback unavailable: " + reason }
+    }
+
+    private func pollLANStatus() {
+        guard wifiFallbackConnected, !bleReady() else { return }
+        lanConnection?.send(content: Data("STATUS\n".utf8), completion: .contentProcessed { [weak self] error in
+            if let error { self?.lanFailure(error.localizedDescription) }
+        })
+    }
+
 }
 extension BluetoothManager: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
