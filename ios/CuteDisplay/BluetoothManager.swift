@@ -395,7 +395,12 @@ final class BluetoothManager: NSObject, ObservableObject {
             && (Int($0).map { (0...255).contains($0) } ?? false)
         }
     }
-    func refreshNetworkDetails() { enqueue(["W:INFO"]) }
+    func refreshNetworkDetails() {
+        // Request one field per acknowledged BLE write instead of relying on
+        // a burst of notifications from the ESP32.
+        enqueue(["W:GET:LINK","W:GET:MODE","W:GET:IP","W:GET:MASK",
+                 "W:GET:GW","W:GET:DNS","W:GET:RSSI","W:GET:SSID"])
+    }
     func ping(address: String) {
         let host = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.validIPv4(host) else {
@@ -405,6 +410,12 @@ final class BluetoothManager: NSObject, ObservableObject {
         pingResult = "Testing \(host)…"
         pingInProgress = true
         enqueue(["W:PING:\(host)"])
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard let self, self.pingInProgress else { return }
+            self.pingInProgress = false
+            self.pingResult = "No ping result received within 8 seconds"
+        }
     }
     func disconnectWiFi() { enqueue(["W:OFF"]) }
     func enableWiFi() { enqueue(["W:ON"]) }
