@@ -210,7 +210,7 @@ final class BluetoothManager: NSObject, ObservableObject {
         if let services = device.services, !services.isEmpty {
             inspectServices(on: device, services: services)
         } else {
-            device.discoverServices([controlServiceUUID, batteryServiceUUID, powerServiceUUID])
+            device.discoverServices([controlServiceUUID, batteryServiceUUID, powerServiceUUID, networkServiceUUID])
         }
     }
 
@@ -221,6 +221,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             case controlServiceUUID: uuids = [commandUUID]
             case batteryServiceUUID: uuids = [batteryLevelUUID]
             case powerServiceUUID: uuids = [powerCharacteristicUUID]
+            case networkServiceUUID: uuids = [networkCharacteristicUUID]
             default: continue
             }
             if let known = service.characteristics, !known.isEmpty {
@@ -239,7 +240,8 @@ final class BluetoothManager: NSObject, ObservableObject {
                 isConnected = true
                 status = "Connected to CuteDisplay"
                 sendNext()
-            } else if (service.uuid == powerServiceUUID && characteristic.uuid == powerCharacteristicUUID)
+            } else if (service.uuid == networkServiceUUID && characteristic.uuid == networkCharacteristicUUID)
+                        || (service.uuid == powerServiceUUID && characteristic.uuid == powerCharacteristicUUID)
                         || (service.uuid == batteryServiceUUID && characteristic.uuid == batteryLevelUUID) {
                 if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
                     device.setNotifyValue(true, for: characteristic)
