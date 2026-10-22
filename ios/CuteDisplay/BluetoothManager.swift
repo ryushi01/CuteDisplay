@@ -19,6 +19,9 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var wifiDNS = "—"
     @Published var wifiRSSI = 0
     @Published var wifiSSID = ""
+    @Published var pingResult = "Not tested"
+    @Published var pingInProgress = false
+    private var ssidFragments: [Int: String] = [:]
     @Published var wifiDHCP = true
     @Published var batteryCurrent: Double?
     @Published var batteryTemperature: Int?
@@ -393,6 +396,16 @@ final class BluetoothManager: NSObject, ObservableObject {
         }
     }
     func refreshNetworkDetails() { enqueue(["W:INFO"]) }
+    func ping(address: String) {
+        let host = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.validIPv4(host) else {
+            pingResult = "Enter a valid IPv4 address"
+            return
+        }
+        pingResult = "Testing \(host)…"
+        pingInProgress = true
+        enqueue(["W:PING:\(host)"])
+    }
     func disconnectWiFi() { enqueue(["W:OFF"]) }
     func enableWiFi() { enqueue(["W:ON"]) }
     func forgetWiFi() { enqueue(["W:FORGET"]) }
@@ -657,16 +670,39 @@ extension BluetoothManager: CBPeripheralDelegate {
             guard error == nil, let data = characteristic.value,
                   let value = String(data: data, encoding: .utf8),
                   value.hasPrefix("N:") else { return }
-            let parts = value.dropFirst(2).split(separator: ",", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count >= 8 else { return }
-            wifiConnected = parts[0] == "1"
-            wifiDHCP = parts[1] == "1"
-            wifiIP = parts[2]
-            wifiMask = parts[3]
-            wifiGateway = parts[4]
-            wifiDNS = parts[5]
-            wifiRSSI = Int(parts[6]) ?? 0
-            wifiSSID = parts[7]
+            let fields = value.split(separator: ":", maxSplits: 3,
+                                     omittingEmptySubsequences: false).map(String.init)
+            guard fields.count >= 2 else { return }
+            switch fields[1] {
+            case "LINK":
+                if fields.count > 2 { wifiConnected = fields[2] == "1" }
+            case "MODE":
+                if fields.count > 2 { wifiDHCP = fields[2] == "DHCP" }
+            case "IP": if fields.count > 2 { wifiIP = fields[2] }
+            case "MASK": if fields.count > 2 { wifiMask = fields[2] }
+            case "GW": if fields.count > 2 { wifiGateway = fields[2] }
+            case "DNS": if fields.count > 2 { wifiDNS = fields[2] }
+            case "RSSI": if fields.count > 2 { wifiRSSI = Int(fields[2]) ?? 0 }
+            case "SSID":
+                if fields.count >= 4, let index = Int(fields[2]) {
+                    if index == 0 { ssidFragments.removeAll() }
+                    ssidFragments[index] = fields[3]
+                    wifiSSID = (0...2).compactMap { ssidFragments[$0] }.joined()
+                }
+            case "PING":
+                if fields.count > 2 {
+                    pingInProgress = false
+                    switch fields[2] {
+                    case "OK":
+                        pingResult = fields.count > 3 ? "Reply received in \(fields[3]) ms" : "Reply received"
+                    case "TIMEOUT": pingResult = "Timed out (no ICMP echo reply)"
+                    case "NO_WIFI": pingResult = "CuteDisplay Wi-Fi disconnected"
+                    case "INVALID": pingResult = "Invalid IP address"
+                    default: pingResult = "Ping failed: \(fields[2])"
+                    }
+                }
+            default: break
+            }
             return
         }
         if characteristic.uuid == powerCharacteristicUUID {
