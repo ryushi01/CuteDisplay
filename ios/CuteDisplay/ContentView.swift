@@ -352,6 +352,10 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!bluetooth.isConnected)
+            if bluetooth.isConnected && !bluetooth.networkDetailsAvailable {
+                Text("Detailed network telemetry is unavailable. Reconnect Bluetooth to rediscover the device's network service (FFF5).")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
             VStack(alignment:.leading,spacing:5) {
                 Text("Current connection").font(.subheadline.bold())
                 Text("Network: \(bluetooth.wifiSSID.isEmpty ? "—" : bluetooth.wifiSSID)")
