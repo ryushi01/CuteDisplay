@@ -21,7 +21,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var wifiSSID = ""
     @Published var pingResult = "Not tested"
     @Published var pingInProgress = false
-    private var ssidFragments: [Int: String] = [:]
+    private var ssidFragments: [Int: [UInt8]] = [:]
     @Published var wifiDHCP = true
     @Published var batteryCurrent: Double?
     @Published var batteryTemperature: Int?
@@ -683,12 +683,26 @@ extension BluetoothManager: CBPeripheralDelegate {
             case "GW": if fields.count > 2 { wifiGateway = fields[2] }
             case "DNS": if fields.count > 2 { wifiDNS = fields[2] }
             case "RSSI": if fields.count > 2 { wifiRSSI = Int(fields[2]) ?? 0 }
-            case "SSID":
-                if fields.count >= 4, let index = Int(fields[2]) {
+            case let name where name.hasPrefix("S") && name.dropFirst().allSatisfy(\.isNumber):
+                if fields.count > 2, let index = Int(name.dropFirst()) {
                     if index == 0 { ssidFragments.removeAll() }
-                    ssidFragments[index] = fields[3]
-                    wifiSSID = (0...2).compactMap { ssidFragments[$0] }.joined()
+                    let hex = fields[2]
+                    if hex.count.isMultiple(of: 2) {
+                        var bytes: [UInt8] = []
+                        var cursor = hex.startIndex
+                        while cursor < hex.endIndex {
+                            let end = hex.index(cursor, offsetBy: 2)
+                            if let byte = UInt8(hex[cursor..<end], radix: 16) {
+                                bytes.append(byte)
+                            }
+                            cursor = end
+                        }
+                        ssidFragments[index] = bytes
+                    }
                 }
+            case "END":
+                let bytes = (0..<6).flatMap { ssidFragments[$0] ?? [] }
+                wifiSSID = String(decoding: bytes, as: UTF8.self)
             case "PING":
                 if fields.count > 2 {
                     pingInProgress = false
