@@ -85,6 +85,7 @@ struct ContentView: View {
     @State private var brightness = 75.0
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
     @State private var wifiPassword = ""
+    @State private var pingAddress = UserDefaults.standard.string(forKey: "cutePingAddress") ?? "1.1.1.1"
     @State private var wifiDHCPSelection = true
     @State private var staticIP = ""
     @State private var staticMask = "255.255.255.0"
@@ -366,6 +367,24 @@ struct ContentView: View {
                 Text("DNS: \(bluetooth.wifiDNS)")
                 Text("Signal: \(bluetooth.wifiConnected ? "\(bluetooth.wifiRSSI) dBm" : "—")")
             }.font(.caption).foregroundStyle(.secondary)
+            Divider()
+            Text("PING FROM CUTEDISPLAY").font(.caption.bold())
+            TextField("IPv4 address to ping", text: $pingAddress)
+                .keyboardType(.numbersAndPunctuation)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Ping address") {
+                    UserDefaults.standard.set(pingAddress, forKey: "cutePingAddress")
+                    bluetooth.ping(address: pingAddress)
+                }
+                .disabled(!bluetooth.isConnected || !bluetooth.wifiConnected || bluetooth.pingInProgress)
+                .buttonStyle(.borderedProminent)
+                if bluetooth.pingInProgress { ProgressView() }
+            }
+            Text(bluetooth.pingResult).font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Runs an ICMP echo request from CuteDisplay over Wi-Fi, not from your iPhone.")
+                .font(.caption2).foregroundStyle(.secondary)
             Text("Changing DHCP/static configuration requires Wi-Fi reconnection to take effect.")
                 .font(.caption2).foregroundStyle(.secondary)
             Text("Configure while connected by Bluetooth. Credentials remain on the device, and it reconnects after a restart. Status refreshes with battery telemetry (about every 2 seconds).")
