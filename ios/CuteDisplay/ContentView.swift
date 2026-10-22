@@ -86,6 +86,8 @@ struct ContentView: View {
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
     @State private var wifiPassword = ""
     @State private var showWiFiPassword = false
+    @State private var wifiSSID = UserDefaults.standard.string(forKey: "cuteWiFiSSID") ?? ""
+    @State private var wifiPassword = ""
     @State private var previewOnly = false
     @State private var displayProfiles: [CuteDisplayProfile] = {
         guard let d=UserDefaults.standard.data(forKey: "cuteSavedProfiles"),
@@ -194,6 +196,7 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     deviceStatusSection
+                    wifiSetupSection
                     wifiSection
                     VStack(alignment: .leading, spacing: 10) {
                         sectionTitle("DISPLAY MODE")
@@ -339,6 +342,48 @@ struct ContentView: View {
                 .font(.caption2).foregroundStyle(.secondary)
             Text("Personal Hotspot works when the iPhone exposes a compatible Wi-Fi network. For security, use a trusted network; Wi-Fi setup over BLE is not an end-to-end encrypted provisioning protocol.")
                 .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(.white.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var wifiSetupSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("WI-FI CONNECTION")
+            HStack(spacing: 8) {
+                Image(systemName: bluetooth.wifiConnected ? "wifi" : "wifi.slash")
+                    .foregroundStyle(bluetooth.wifiConnected ? .green : .orange)
+                Text(bluetooth.wifiConnected ? "Connected to Wi-Fi" : "Wi-Fi disconnected")
+                    .font(.subheadline.bold())
+                Spacer()
+            }
+            TextField("Network name (SSID)", text: $wifiSSID)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            SecureField("Wi-Fi password", text: $wifiPassword)
+                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 8) {
+                Button("Connect Wi-Fi") {
+                    UserDefaults.standard.set(wifiSSID, forKey: "cuteWiFiSSID")
+                    bluetooth.configureWiFi(ssid: wifiSSID, password: wifiPassword)
+                    wifiPassword = ""
+                    appNotice = "Wi-Fi credentials sent. Connection status updates with battery telemetry."
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!bluetooth.isConnected || wifiSSID.isEmpty)
+                Button("Forget Wi-Fi", role: .destructive) {
+                    bluetooth.forgetWiFi()
+                    wifiPassword = ""
+                    appNotice = "Wi-Fi network removed from device."
+                }
+                .buttonStyle(.bordered)
+                .disabled(!bluetooth.isConnected)
+            }
+            Text("For an iPhone hotspot, enable Personal Hotspot and use its Wi-Fi network name and password. Wi-Fi credentials are stored on the device for reconnection after restart.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .padding()
         .background(.white.opacity(0.07))
