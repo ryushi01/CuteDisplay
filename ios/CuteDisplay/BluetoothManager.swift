@@ -12,6 +12,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var brightness = 75
     @Published var batteryLevel: Int? = nil
     @Published var batteryVoltage: Double?
+    @Published var wifiConnected = false
     @Published var batteryCurrent: Double?
     @Published var batteryTemperature: Int?
     @Published var batteryHealth: Int?
@@ -350,6 +351,24 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
     func sendDrinksPayload(_ payload: String) { enqueue([payload]) }
 
+    // Wi-Fi credentials are provisioned over the connected BLE link.
+    // Only use a network that you control. Password is never logged.
+    func connectWiFi(ssid: String, password: String) {
+        let name = ssid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty && name.utf8.count <= 32,
+              password.utf8.count <= 63,
+              (password.isEmpty || password.utf8.count >= 8),
+              !name.contains("\n"), !password.contains("\n") else {
+            status = "Wi-Fi SSID must be 1–32 bytes; password 8–63 bytes (or empty)"
+            return
+        }
+        enqueue(["W:S:\(name)", "W:P:\(password)", "W:C"])
+    }
+
+    func disconnectWiFi() { enqueue(["W:OFF"]) }
+    func enableWiFi() { enqueue(["W:ON"]) }
+    func forgetWiFi() { enqueue(["W:FORGET"]) }
+
     func configureMascot(accessory: Int, objectMode: Int, object: Int,
                          frequency: Int, intensity: Int, personality: Bool) {
         enqueue(["A:\(accessory)", "H:\(objectMode)", "J:\(object)",
@@ -610,10 +629,11 @@ extension BluetoothManager: CBPeripheralDelegate {
             guard error == nil, let data = characteristic.value,
                   let string = String(data: data, encoding: .utf8) else { return }
             let f = string.split(separator: ",")
-            guard f.count == 7, let level = Int(f[0]), let voltage = Double(f[1]),
+            guard f.count >= 7, let level = Int(f[0]), let voltage = Double(f[1]),
                   let current = Double(f[2]), let temperature = Int(f[3]),
                   let health = Int(f[4]), let empty = Int(f[5]), let full = Int(f[6]),
                   (0...100).contains(level), voltage > 0 else { return }
+            if f.count >= 8 { wifiConnected = (f[7] == "1") }
             batteryLevel = level
             checkLowBattery(level)
             batteryVoltage = voltage
