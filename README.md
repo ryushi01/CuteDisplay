@@ -1,15 +1,12 @@
 # CuteDisplay 🎀
 
-## Release synchronization status (2026-10-23)
+## Source synchronization status — 2026-10-23
 
-**Wi-Fi fallback is currently a testing candidate, not verified production.** The iOS `BluetoothManager.swift` includes an authenticated TCP fallback, but the repository's `firmware/CuteDisplay/lcd.ino` is older and does not yet contain the companion LAN server. Until the newer firmware is committed and uploaded to the board, the iOS fallback **will not work**. Use the complete `CuteDisplay_WiFi_BLE_Fallback.ino` provided with the release ZIP, rename it `lcd.ino`, and verify it against the hardware before replacing the repository version.
+The latest ESP32-C5 source (`firmware/CuteDisplay/lcd.ino`) and the iPhone Wi-Fi fallback transport (`ios/CuteDisplay/BluetoothManager.swift`) are **committed together in the default GitHub branch**. Their companion SwiftUI source and iOS local-network permission instructions are present.
 
-In Xcode, add the `NSLocalNetworkUsageDescription` key described in `ios/CuteDisplay/AccessorySetup-InfoPlist.xml` to the actual app target's Info settings. That XML file is an instruction fragment, **not** an installed Info.plist. Ensure that both iPhone and CuteDisplay are on the same trusted LAN, with TCP port 8848 reachable. The fallback is a foreground/best-effort TCP connection (no guarantee while the iOS app is suspended or force-quit) and is authenticated but not encrypted.
+**Production validation is pending:** GitHub synchronization does not flash the ESP32 or install the iPhone app. This repository lacks a complete Xcode project and the external board-specific headers/libraries, so firmware and iOS compilation cannot be verified here. Keep a backup of the last known-working build until the new versions pass device tests.
 
-The repository doesn't include a complete Xcode project or the external ESP32 board/library dependencies. Neither the iPhone build nor Arduino firmware has been compiled and hardware-tested in this environment, so it is not appropriate to claim a production deployment.
-
-
-A Bluetooth-controlled cute display built for the **LILYGO T-Display C5 (ESP32-C5)** with a **320×170 ST7789 LCD** and a companion **iPhone SwiftUI app**.
+Wi-Fi fallback requires: the device connected to an existing trusted Wi-Fi network; the iPhone able to reach its local IP on TCP port 8848; an initial BLE connection to retrieve the LAN authentication key/IP; and the `NSLocalNetworkUsageDescription` key in the **actual Xcode app target's Info settings** (the XML file in this repository is an instruction fragment). Fallback is authenticated but **not encrypted**, and foreground/best-effort: iOS can suspend networking in the background or after force-quitting the app. No automatic ESP32 reboot or Wi-Fi activation is introduced.
 
 ## Latest version: 4.0
 
@@ -27,7 +24,7 @@ A Bluetooth-controlled cute display built for the **LILYGO T-Display C5 (ESP32-C
 ## Project layout
 
 ```text
-firmware/CuteDisplay/lcd.ino       Arduino sketch (v3.8)
+firmware/CuteDisplay/lcd.ino       Current synchronized ESP32-C5 sketch with Wi-Fi fallback
 ios/CuteDisplay/ContentView.swift  SwiftUI screen
 ios/CuteDisplay/BluetoothManager.swift  BLE communications
 archive/                           Earlier downloadable versions
@@ -54,7 +51,7 @@ Uses `FFF0` control service and `FFF1` read/write characteristic; battery servic
 
 ## Earlier versions
 
-Historical download packages are in `archive/`. **3.5B is retained only as history**: its sprite-based mascots were intentionally rolled back in favor of the procedural 3.4-style renderer. The latest recommended combination is v4.0 firmware and app source.
+Historical download packages are in `archive/`. **3.5B is retained only as history**: its sprite-based mascots were intentionally rolled back in favor of the procedural 3.4-style renderer. The latest source combination is the synchronized default-branch firmware and iOS files; on-device validation remains pending.
 
 ## Important notes
 
