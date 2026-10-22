@@ -13,6 +13,13 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var batteryLevel: Int? = nil
     @Published var batteryVoltage: Double?
     @Published var wifiConnected = false
+    @Published var wifiIP = "—"
+    @Published var wifiMask = "—"
+    @Published var wifiGateway = "—"
+    @Published var wifiDNS = "—"
+    @Published var wifiRSSI = 0
+    @Published var wifiSSID = ""
+    @Published var wifiDHCP = true
     @Published var batteryCurrent: Double?
     @Published var batteryTemperature: Int?
     @Published var batteryHealth: Int?
@@ -41,6 +48,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     private let batteryLevelUUID = CBUUID(string: "2A19")
     private let powerServiceUUID = CBUUID(string: "FFF3")
     private let powerCharacteristicUUID = CBUUID(string: "FFF4")
+    private let networkServiceUUID = CBUUID(string: "FFF5")
+    private let networkCharacteristicUUID = CBUUID(string: "FFF6")
     private var intentionalDisconnect = false
     private var restoredPeripherals: [CBPeripheral] = []
 
@@ -364,6 +373,24 @@ final class BluetoothManager: NSObject, ObservableObject {
         enqueue(["W:S:\(name)", "W:P:\(password)", "W:C"])
     }
 
+    func configureIP(dhcp: Bool, ip: String, mask: String, gateway: String, dns: String) {
+        if dhcp { enqueue(["W:DHCP", "W:INFO"]); return }
+        let values = [ip, mask, gateway, dns]
+        guard values.allSatisfy({ Self.validIPv4($0) }) else {
+            status = "Enter valid IPv4 address, subnet mask, gateway and DNS"
+            return
+        }
+        enqueue(["W:STATIC:" + values.joined(separator: "|"), "W:INFO"])
+    }
+
+    private static func validIPv4(_ value: String) -> Bool {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 4 && parts.allSatisfy {
+            !$0.isEmpty && $0.count <= 3 && $0.allSatisfy(\.isNumber)
+            && (Int($0).map { (0...255).contains($0) } ?? false)
+        }
+    }
+    func refreshNetworkDetails() { enqueue(["W:INFO"]) }
     func disconnectWiFi() { enqueue(["W:OFF"]) }
     func enableWiFi() { enqueue(["W:ON"]) }
     func forgetWiFi() { enqueue(["W:FORGET"]) }
@@ -624,6 +651,22 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if characteristic.uuid == networkCharacteristicUUID {
+            guard error == nil, let data = characteristic.value,
+                  let value = String(data: data, encoding: .utf8),
+                  value.hasPrefix("N:") else { return }
+            let parts = value.dropFirst(2).split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 8 else { return }
+            wifiConnected = parts[0] == "1"
+            wifiDHCP = parts[1] == "1"
+            wifiIP = parts[2]
+            wifiMask = parts[3]
+            wifiGateway = parts[4]
+            wifiDNS = parts[5]
+            wifiRSSI = Int(parts[6]) ?? 0
+            wifiSSID = parts[7]
+            return
+        }
         if characteristic.uuid == powerCharacteristicUUID {
             guard error == nil, let data = characteristic.value,
                   let string = String(data: data, encoding: .utf8) else { return }
