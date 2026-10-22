@@ -13,6 +13,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var batteryLevel: Int? = nil
     @Published var batteryVoltage: Double?
     @Published var wifiConnected = false
+    @Published var networkDetailsAvailable = false
     @Published var wifiIP = "—"
     @Published var wifiMask = "—"
     @Published var wifiGateway = "—"
@@ -22,6 +23,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var pingResult = "Not tested"
     @Published var pingInProgress = false
     private var ssidFragments: [Int: [UInt8]] = [:]
+    private var networkCharacteristic: CBCharacteristic?
+    private var networkRefreshStarted = false
     @Published var wifiDHCP = true
     @Published var batteryCurrent: Double?
     @Published var batteryTemperature: Int?
@@ -210,11 +213,11 @@ final class BluetoothManager: NSObject, ObservableObject {
         // A restored CBPeripheral can already have cached GATT services. Re-enumerate
         // their characteristics and resubscribe before treating telemetry as live.
         guard device.state == .connected else { return }
-        if let services = device.services, !services.isEmpty {
-            inspectServices(on: device, services: services)
-        } else {
-            device.discoverServices([controlServiceUUID, batteryServiceUUID, powerServiceUUID, networkServiceUUID])
-        }
+        // A cached connection may predate the FFF5 Wi-Fi service.
+        // Always ask CoreBluetooth to discover the full current service set.
+        // Reusing device.services alone can permanently hide new services.
+        device.discoverServices([controlServiceUUID, batteryServiceUUID,
+                                 powerServiceUUID, networkServiceUUID])
     }
 
     private func inspectServices(on device: CBPeripheral, services: [CBService]) {
@@ -243,8 +246,16 @@ final class BluetoothManager: NSObject, ObservableObject {
                 isConnected = true
                 status = "Connected to CuteDisplay"
                 sendNext()
-            } else if (service.uuid == networkServiceUUID && characteristic.uuid == networkCharacteristicUUID)
-                        || (service.uuid == powerServiceUUID && characteristic.uuid == powerCharacteristicUUID)
+            } else if service.uuid == networkServiceUUID && characteristic.uuid == networkCharacteristicUUID {
+                networkCharacteristic = characteristic
+                networkDetailsAvailable = true
+                if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
+                    device.setNotifyValue(true, for: characteristic)
+                }
+                if characteristic.properties.contains(.read) {
+                    device.readValue(for: characteristic)
+                }
+            } else if (service.uuid == powerServiceUUID && characteristic.uuid == powerCharacteristicUUID)
                         || (service.uuid == batteryServiceUUID && characteristic.uuid == batteryLevelUUID) {
                 if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
                     device.setNotifyValue(true, for: characteristic)
@@ -346,6 +357,9 @@ final class BluetoothManager: NSObject, ObservableObject {
         minutesToFull = nil
         lastPowerUpdate = nil
         commandCharacteristic = nil
+        networkCharacteristic = nil
+        networkDetailsAvailable = false
+        networkRefreshStarted = false
         pendingCommands.removeAll()
         waitingForWrite = false
         uploadsRemaining = 0
@@ -673,6 +687,20 @@ extension BluetoothManager: CBPeripheralDelegate {
         if let error { status = "Characteristic error: \(error.localizedDescription)"; return }
         inspectCharacteristics(on: peripheral, service: service,
                                characteristics: service.characteristics ?? [])
+    }
+
+    func peripheral(_ peripheral: CBPeripheral,
+                    didUpdateNotificationStateFor characteristic: CBCharacteristic,
+                    error: Error?) {
+        guard characteristic.uuid == networkCharacteristicUUID else { return }
+        if let error {
+            status = "Wi-Fi detail subscription failed: \(error.localizedDescription)"
+            return
+        }
+        if characteristic.isNotifying && !networkRefreshStarted {
+            networkRefreshStarted = true
+            refreshNetworkDetails()
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
