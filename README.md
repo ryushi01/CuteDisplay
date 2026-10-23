@@ -17,6 +17,14 @@ Wi-Fi fallback requires: the device connected to an existing trusted Wi-Fi netwo
 - News/RSS functionality remains removed. The local-AI/OpenAI gateway is planned for later phases and is not included in Phase 1.
 - Source changes are committed to GitHub, but are **not yet compiled or verified on the hardware**. The full Xcode project and external board dependencies are not in this repository. Keep the working prototype until tomorrow's audio test succeeds.
 
+## iOS app name and source installation (2026-10-23)
+
+Use the **complete files** in `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift` in the existing Xcode application target. The Home Screen app label is controlled by the app target's Info.plist/build settings, **not the SwiftUI source**.
+
+To display **CuteDisplay** (instead of DrinkDisplay), open Xcode → TARGETS → app target → **Info** → Custom iOS Target Properties → **Bundle display name** (`CFBundleDisplayName`) = `CuteDisplay`. For projects using generated Info.plist, use **Build Settings** → `INFOPLIST_KEY_CFBundleDisplayName` = `CuteDisplay`. Ensure there is no existing localized `InfoPlist.strings` display-name override. Optionally rename `PRODUCT_NAME` or the target, but it is not required for the Home Screen label. The `AccessorySetup-InfoPlist.xml` in this repo is only a fragment listing keys to add to the real Xcode target.
+
+Preserve the app's bundle identifier and signing configuration to retain its saved data. Build and install on a physical iPhone, then verify the Home Screen label. This repository doesn't include the actual `.xcodeproj`, so changing the target configuration cannot be performed through these source-only files.
+
 ## AI voice hardware — Phase 1 (unverified)
 
 The ESP32-C5 firmware now removes all RSS/news fetching and uses GPIO28's long press (1.4 seconds) for a **two-second microphone recording followed by immediate speaker playback**. A short GPIO28 press does nothing. GPIO0 Wi-Fi controls are unchanged. This is a hardware-only loopback test: **no model or OpenAI API is accessed in Phase 1**. The eventual backend will support selecting local AI or OpenAI using the same audio transport.
