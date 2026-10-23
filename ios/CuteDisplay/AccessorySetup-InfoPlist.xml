@@ -1,3 +1,7 @@
+<!-- iPhone Home Screen app name. This must be added to the actual app target's Info settings. -->
+<key>CFBundleDisplayName</key>
+<string>CuteDisplay</string>
+
 <!-- Add these keys to the iPhone app target's existing Info.plist, or in
      Xcode's Target > Info > Custom iOS Target Properties.
      This is a fragment, not a replacement Info.plist. -->
