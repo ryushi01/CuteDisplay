@@ -8,9 +8,18 @@ The latest ESP32-C5 source (`firmware/CuteDisplay/lcd.ino`) and the iPhone Wi-Fi
 
 Wi-Fi fallback requires: the device connected to an existing trusted Wi-Fi network; the iPhone able to reach its local IP on TCP port 8848; an initial BLE connection to retrieve the LAN authentication key/IP; and the `NSLocalNetworkUsageDescription` key in the **actual Xcode app target's Info settings** (the XML file in this repository is an instruction fragment). Fallback is authenticated but **not encrypted**, and foreground/best-effort: iOS can suspend networking in the background or after force-quitting the app. No automatic ESP32 reboot or Wi-Fi activation is introduced.
 
+## Phase 1 button and battery display (2026-10-23)
+
+- GPIO28 **short press: no action**. Hold for 1.4 seconds to run the two-second microphone-to-speaker loopback test.
+- GPIO0 retains its existing short-press status display and long-press Wi-Fi toggle.
+- Both Time to Full and Time to Empty render as **N hours M min** in the iPhone app. On the ESP32 LCD, the battery-status overlay uses the same format.
+- The BLE wire protocol continues to report integer minutes; no BLE characteristic or battery-learning changes were made.
+- News/RSS functionality remains removed. The local-AI/OpenAI gateway is planned for later phases and is not included in Phase 1.
+- Source changes are committed to GitHub, but are **not yet compiled or verified on the hardware**. The full Xcode project and external board dependencies are not in this repository. Keep the working prototype until tomorrow's audio test succeeds.
+
 ## AI voice hardware — Phase 1 (unverified)
 
-The ESP32-C5 firmware now removes all RSS/news fetching and uses GPIO28's long press (1.4 seconds) for a **two-second microphone recording followed by immediate speaker playback**. A short GPIO28 press shows the battery card. GPIO0 Wi-Fi controls are unchanged. This is a hardware-only loopback test: **no model or OpenAI API is accessed in Phase 1**. The eventual backend will support selecting local AI or OpenAI using the same audio transport.
+The ESP32-C5 firmware now removes all RSS/news fetching and uses GPIO28's long press (1.4 seconds) for a **two-second microphone recording followed by immediate speaker playback**. A short GPIO28 press does nothing. GPIO0 Wi-Fi controls are unchanged. This is a hardware-only loopback test: **no model or OpenAI API is accessed in Phase 1**. The eventual backend will support selecting local AI or OpenAI using the same audio transport.
 
 Candidate shared I²S pin mapping: GPIO1 BCLK, GPIO4 WS/LRCLK, GPIO5 microphone SD (input), GPIO6 amplifier DIN (output); both breakouts at 3.3 V and common GND. Connect speaker only to amplifier OUT+/OUT−. **Check the purchased microphone pin labels and board revision before soldering.**
 
