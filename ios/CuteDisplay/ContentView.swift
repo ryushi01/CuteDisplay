@@ -87,6 +87,12 @@ struct ContentView: View {
         return "\(hours) hours \(remainder) min"
     }
 
+    // Avoid optional.map closures in SwiftUI result-builder expressions.
+    private func displayedBatteryTime(_ minutes: Int?, when state: String) -> String {
+        guard batteryStateText == state, let minutes = minutes else { return "—" }
+        return batteryTimeText(minutes)
+    }
+
     @StateObject private var bluetooth = BluetoothManager()
     @State private var mode: DisplayMode = .message
     @State private var message = UserDefaults.standard.string(forKey: "savedMessage") ?? "こんにちわ"
@@ -496,8 +502,8 @@ struct ContentView: View {
                         powerMetric("Temperature", bluetooth.batteryTemperature.map { "\($0) °C" } ?? "—")
                     }
                     HStack {
-                        powerMetric("Time to empty", batteryStateText == "Discharging" ? (bluetooth.minutesToEmpty.map { batteryTimeText($0) } ?? "—") : "—")
-                        powerMetric("Time to full", batteryStateText == "Charging" ? (bluetooth.minutesToFull.map { batteryTimeText($0) } ?? "—") : "—")
+                        powerMetric("Time to empty", displayedBatteryTime(bluetooth.minutesToEmpty, when: "Discharging"))
+                        powerMetric("Time to full", displayedBatteryTime(bluetooth.minutesToFull, when: "Charging"))
                     }
                     if let updated = bluetooth.lastPowerUpdate {
                         Text("Last updated: \(updated.formatted(date: .omitted, time: .standard))")
