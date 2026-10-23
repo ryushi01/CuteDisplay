@@ -1,5 +1,5 @@
 /*
- CuteDisplay 4.1 adaptive battery - T-Display C5 / ESP32-C5
+ CuteDisplay 4.2 voice hardware loopback / no RSS - T-Display C5 / ESP32-C5
  Message mode, 24 drink entries / four per page, rotating mascot,
  brightness, live AXP2602 battery level (BLE 180F / 2A19).
 
@@ -20,9 +20,7 @@
 #include <WiFiServer.h>
 #include "esp_wifi.h"
 #include "esp_err.h"
-#include <WiFiClientSecure.h>
 #include "esp_heap_caps.h"
-#include <HTTPClient.h>
 #include <lwip/sockets.h>
 #include <lwip/inet.h>
 #include <lwip/ip4_addr.h>
@@ -46,6 +44,7 @@
 #include "freertos/semphr.h"
 #include "esp_system.h"
 #include "esp_idf_version.h"
+#include "driver/i2s_std.h"
 
 // Declare custom types before Arduino IDE auto-generated function prototypes.
 struct Drink;
@@ -60,7 +59,7 @@ bool parseEntry(String entry, Drink &result);
 #define BAT_SDA 2
 #define BAT_SCL 3
 #define PIN_USER_BUTTON 0 // LILYGO T-Display-C5 user button (GPIO0, active LOW)
-#define PIN_NEWS_BUTTON 28 // BOOT / right button, active LOW
+#define PIN_VOICE_BUTTON 28 // BOOT/right button: short battery, hold voice loopback
 #define LCD_W 320
 #define LCD_H 170
 #define MAX_CMD 96
@@ -159,14 +158,10 @@ bool batteryReady = false;
 volatile bool bleConnected = false;
 String wifiSSID="", wifiPassword="";
 bool wifiEnabled=false, wifiLastConnected=false;
-// Radio teardown must not race an in-flight HTTPS news worker.
+// Wi-Fi shutdown is direct; the RSS/HTTPS worker has been removed.
 static volatile bool wifiShutdownPending=false;
-static volatile bool newsCancelRequested=false;
-static unsigned long wifiShutdownRequestedAt=0;
 static bool wifiPowerCheckPending=false;
 static unsigned long wifiPowerCheckAt=0;
-// Defined further down in the news subsystem.
-static volatile bool newsFetching;
 bool wifiUseDHCP=true;
 String staticIP="",staticMask="",staticGateway="",staticDNS="";
 BLECharacteristic *networkCharacteristic=nullptr;
@@ -487,109 +482,21 @@ bool bubbleTypewriter = true;
 size_t revealedCharacters = 0;
 unsigned long lastBubbleReveal = 0;
 const unsigned long BUBBLE_LETTER_MS = 135;
-// Right BOOT button: temporary, non-persistent news bubble.
-// News fetching is dispatched on a separate task, so mascot redraws stay responsive.
-static QueueHandle_t newsQueue = nullptr;
-// newsFetching declared once above; initialized to false automatically.
-static bool newsButtonPrevious = HIGH;
-static unsigned long newsButtonChangedAt = 0;
-static unsigned long newsLastAcceptedAt = 0;
-static bool newsActive = false;
-static bool newsReceived = false;
-static unsigned long newsReceivedAt = 0;
-static const unsigned long NEWS_FINISHED_MS = 7000UL;
-static const unsigned long NEWS_MAX_MS = 150000UL;
-static size_t newsRevealed = 0;
-static size_t newsPageStart = 0;
-static unsigned long newsLastLetterAt = 0;
-static unsigned long newsPageDoneAt = 0;
-static unsigned long newsLastFrameAt = 0;
-static unsigned long newsPageRevealStartAt = 0;
-static const unsigned long NEWS_LETTER_MS = 9UL; // virtual character time; group reveals to avoid full LCD refresh per letter
-static const unsigned long NEWS_PAGE_PAUSE_MS = 650UL; // short transition, without a long dead pause
-static const size_t NEWS_LINE_CHARS = 15;
-static const unsigned long NEWS_FRAME_MS = 35UL; // at most ~28 news redraws per second
-static String newsPageText; // two word-wrapped lines for the current page
-static size_t newsNextPageStart = 0;
-
-// Prepare two lines without cutting a word in the middle.  The only
-// exception is a single word longer than the LCD line width.
-static void prepareNewsPage() {
-  newsPageText = "";
-  size_t pos = newsPageStart;
-  for (int row = 0; row < 2 && pos < message.length(); ++row) {
-    while (pos < message.length() && message[pos] == ' ') ++pos;
-    if (pos >= message.length()) break;
-    size_t end = min(pos + NEWS_LINE_CHARS, (size_t)message.length());
-    if (end < message.length() && message[end] != ' ') {
-      size_t split = end;
-      while (split > pos && message[split - 1] != ' ') --split;
-      if (split > pos) end = split; // preserve complete words
-    }
-    size_t trimmed = end;
-    while (trimmed > pos && message[trimmed - 1] == ' ') --trimmed;
-    if (row && newsPageText.length()) newsPageText += '\n';
-    newsPageText += message.substring(pos, trimmed);
-    pos = end;
-  }
-  newsNextPageStart = pos;
-}
-
-static unsigned long newsStartedAt = 0;
-static DisplayMode newsOldMode = MESSAGE_MODE;
-static String newsOldMessage;
-static bool newsOldBubble = false;
-static bool newsOldScrolling = false;
-static int newsOldScrollX = 0;
-static size_t newsOldRevealed = 0;
-static int newsOldPage = 0;
-static char newsPacket[160] = {};
-static uint32_t newsLastHeadlineHash = 0;
-// Keep a small set of distinct articles in PSRAM. Repeated right-button presses
-// should not start a new TLS handshake each time.
-static constexpr uint8_t NEWS_CACHE_CAPACITY = 12;
-static constexpr uint32_t NEWS_CACHE_TTL_MS = 10UL * 60UL * 1000UL;
-struct NewsCache {
-  uint8_t count;
-  uint16_t usedMask;
-  uint32_t refreshedAt;
-  char titles[NEWS_CACHE_CAPACITY][296];
-};
-static NewsCache *newsCache = nullptr;
-static bool newsCollectingFresh = false;
-static bool initNewsCache() {
-  if(newsCache)return true;
-  newsCache=(NewsCache*)heap_caps_calloc(1,sizeof(NewsCache),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  if(!newsCache)Serial.println("[NEWS] PSRAM cache allocation failed; using direct fetch");
-  return newsCache!=nullptr;
-}
-static void rememberNewsCandidate(const String &candidate) {
-  if(!initNewsCache() || candidate.isEmpty())return;
-  if(newsCollectingFresh) {
-    newsCache->count=0;
-    newsCache->usedMask=0;
-    newsCollectingFresh=false;
-  }
-  for(uint8_t n=0;n<newsCache->count;n++) {
-    if(candidate.equals(newsCache->titles[n]))return;
-  }
-  if(newsCache->count>=NEWS_CACHE_CAPACITY)return;
-  candidate.toCharArray(newsCache->titles[newsCache->count++],296);
-}
-static String pickCachedNews() {
-  if(!newsCache || !newsCache->count)return "";
-  const uint16_t all=(uint16_t)((1u<<newsCache->count)-1u);
-  if((newsCache->usedMask & all)==all)newsCache->usedMask=0;
-  uint8_t available[NEWS_CACHE_CAPACITY]; uint8_t n=0;
-  for(uint8_t i=0;i<newsCache->count;i++) {
-    if(!(newsCache->usedMask & (1u<<i)))available[n++]=i;
-  }
-  if(!n)return "";
-  uint8_t selected=available[esp_random()%n];
-  newsCache->usedMask|=(uint16_t)(1u<<selected);
-  return String(newsCache->titles[selected]);
-}
-
+// Right button: tap battery card; hold 1.4s to record and play back a short phrase.
+static bool voiceButtonRaw=HIGH;
+static bool voiceButtonStable=HIGH;
+static unsigned long voiceButtonChangedAt=0;
+static unsigned long voiceButtonPressedAt=0;
+static bool voiceButtonLongHandled=false;
+static volatile bool voiceBusy=false;
+static constexpr uint32_t VOICE_HOLD_MS=1400;
+static constexpr uint32_t VOICE_SAMPLE_RATE=16000;
+static constexpr uint32_t VOICE_RECORD_MS=2000;
+// Four exposed pins reserved for the shared-clock full-duplex I2S bus.
+static constexpr gpio_num_t VOICE_BCLK=GPIO_NUM_1;
+static constexpr gpio_num_t VOICE_WS=GPIO_NUM_4;
+static constexpr gpio_num_t VOICE_MIC_DIN=GPIO_NUM_5;
+static constexpr gpio_num_t VOICE_AMP_DOUT=GPIO_NUM_6;
 
 bool scrolling = false;
 int scrollX = 0;
@@ -804,9 +711,9 @@ void setGlyph(uint32_t cp, const uint8_t *bits) {
 void saveDisplayState(){
  // The news bubble temporarily swaps the active message/mode. Never persist
  // this transient preview in place of the user's own display settings.
- const String &persistentMessage = newsActive ? newsOldMessage : message;
- const DisplayMode persistentMode = newsActive ? newsOldMode : mode;
- const bool persistentBubble = newsActive ? newsOldBubble : bubbleEnabled;
+ const String &persistentMessage = message;
+ const DisplayMode persistentMode = mode;
+ const bool persistentBubble = bubbleEnabled;
  displayPrefs.begin("cute-display",false);
  displayPrefs.putUChar("v",1);
  displayPrefs.putUChar("theme",theme);
@@ -1749,7 +1656,6 @@ size_t bubbleCharacterCount(const String &s);
 static bool mascotIsSpeaking() {
   // Keep eyes continuously open during the entire news bubble,
   // including page-transition pauses; never fall back to sleepy blink mid-speech.
-  if (newsActive) return newsReceived;
   return mode == MESSAGE_MODE && bubbleEnabled && bubbleTypewriter
       && revealedCharacters < bubbleCharacterCount(message);
 }
@@ -2056,20 +1962,6 @@ void drawSpeechBubble() {
   for(int i=0;i<11;i++) rect(tx+i,ty+i/3,1,max(1,14-i),themeColor());
  }
  const int innerLeft=bx+10,innerRight=bx+bw-10;
- // Fixed height/weight bitmap font: no mixing smooth glyphs with 5x7 glyphs.
- // Two rows of 15 characters, typewriter reveal, then advance the page.
- if(newsActive) {
-   textAt("DID YOU KNOW?",innerLeft,by+11,2,BLACK);
-   const String chunk = newsPageText.substring(0, min(newsRevealed, (size_t)newsPageText.length()));
-   const int newline = chunk.indexOf('\n');
-   if (newline >= 0) {
-     textAt(chunk.substring(0, newline), innerLeft, by+50, 2, BLACK);
-     textAt(chunk.substring(newline+1), innerLeft, by+71, 2, BLACK);
-   } else {
-     textAt(chunk, innerLeft, by+50, 2, BLACK);
-   }
-   return;
- }
  const int avail=max(10,innerRight-innerLeft);
  String shown=(bubbleTypewriter ? bubblePrefix(message,revealedCharacters):message);
  // Scale down long messages so more fits within the bubble.
@@ -2436,26 +2328,18 @@ void loadWifiConfig(){
  }
  // Connection is deferred until BLE finishes initialization.
 }
-// Only the Arduino main loop tears down Wi-Fi, after HTTPS has released
-// its HTTPClient/socket. This prevents an in-flight TLS operation from
-// competing with the driver shutdown and leaving shutdown delayed.
-// Arduino WiFi.mode(WIFI_OFF) already invokes esp_wifi_stop/deinit internally.
-// Do NOT call esp_wifi_deinit() a second time: it bypasses Arduino's internal
-// lowLevelInitDone state and can make the next Wi-Fi ON unreliable.
+// Ordinary Arduino Wi-Fi stop/deinit; no news worker or network reset workaround.
 static void completeWiFiShutdown(){
- if(!wifiShutdownPending || newsFetching)return;
- // First stop application-directed reconnect activity, then disconnect
- // without implicitly toggling the Wi-Fi mode in WiFi.disconnect(true).
+ if(!wifiShutdownPending)return;
  stopLAN();
  WiFi.setAutoReconnect(false);
  if(WiFi.getMode()!=WIFI_OFF)WiFi.disconnect(false,false);
- bool offOK=WiFi.mode(WIFI_OFF);
+ bool ok=WiFi.mode(WIFI_OFF);
  wifiShutdownPending=false;
  wifiPowerCheckPending=true;
- wifiPowerCheckAt=millis()+5000UL; // Driver/network events settle asynchronously.
- if(wifiEnabled){newsCancelRequested=false;nextWiFiAttempt=millis()+1200UL;}
+ wifiPowerCheckAt=millis()+5000UL;
  gatewayProbeKnown=false;gatewayReachable=false;gatewayLatencyMs=0;
- if(!offOK)Serial.println("[WIFI] WARNING: Driver shutdown failed; will recheck in 5s");
+ if(!ok)Serial.println("[WIFI] Shutdown warning");
 }
 static void checkWiFiOffSettled(unsigned long now){
  if(!wifiPowerCheckPending || (int32_t)(now-wifiPowerCheckAt)<0)return;
@@ -2478,21 +2362,13 @@ void setWiFiPower(bool enable,bool showToast){
  gatewayLatencyMs=0;
  if(enable){
   wifiPowerCheckPending=false;
-  // An old TLS worker can still be unwinding after OFF. It will finish
-  // cleanup before another connection is started by updateWiFi().
-  if(newsFetching)wifiShutdownPending=true;
-  else {wifiShutdownPending=false;newsCancelRequested=false;}
+  wifiShutdownPending=false;
   wifiBootReadyAt=millis()+1200UL;
   nextWiFiAttempt=wifiBootReadyAt;
  }else{
   nextWiFiAttempt=0;
-  newsCancelRequested=true;   // RSS stream aborts promptly when possible
-  wifiShutdownRequestedAt=millis();
   wifiShutdownPending=true;
-  // If no HTTPS task runs, turn off radio immediately. Otherwise, avoid
-  // tearing down Wi-Fi underneath an active TLS socket.
   completeWiFiShutdown();
-  if(wifiShutdownPending)Serial.println("[WIFI] OFF requested; waiting for HTTPS cleanup");
  }
  wifiPersist();              // Preserve off/on choice across resets
  Serial.printf("[WIFI] %s by control; radio mode=%d\n",
@@ -2655,271 +2531,70 @@ void processCommand(String cmd){
  showMessage(cmd);
 }
 
-// Read only the first RSS item title; do not allocate the entire RSS body.
-// This demonstration uses an English Japan-news feed so no new Japanese
-// glyphs are required; the eventual AI server can return custom short text.
-static String decodeNewsEntities(String s) {
- s.replace("&amp;", "&"); s.replace("&quot;", "'");
- s.replace("&#39;", "'"); s.replace("&apos;", "'");
- s.replace("&lt;", "<"); s.replace("&gt;", ">");
- s.replace("&nbsp;", " ");
- return s;
-}
-static String asciiShortNews(String title) {
- title=decodeNewsEntities(title);
- int split=title.lastIndexOf(" - ");
- if(split>22)title=title.substring(0,split);
- String out="";
- for(int i=0;i<(int)title.length() && out.length()<270;i++) {
-   unsigned char c=title[i];
-   if(c>=32 && c<=126)out+=(char)c;
-   else if(c=='\n' || c=='\r')out+=' ';
+// Audio hardware loopback: 2 seconds of INMP441 mono I2S capture into PSRAM,
+// followed by MAX98357A playback. No AI or cloud request in Phase 1.
+// Keep the sample buffer off internal heap. The task always releases I2S resources.
+static void voiceLoopbackTask(void*){
+ constexpr size_t sampleCount=(VOICE_SAMPLE_RATE*VOICE_RECORD_MS)/1000;
+ int32_t* audio=(int32_t*)heap_caps_malloc(sampleCount*sizeof(int32_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!audio){Serial.println("[VOICE] PSRAM allocation failed");voiceBusy=false;vTaskDelete(nullptr);return;}
+ i2s_chan_handle_t tx=nullptr,rx=nullptr;
+ i2s_chan_config_t chan=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
+ chan.dma_desc_num=4;chan.dma_frame_num=128;
+ esp_err_t err=i2s_new_channel(&chan,&tx,&rx);
+ if(err!=ESP_OK){Serial.printf("[VOICE] I2S channel error=%d\n",(int)err);goto cleanup;}
+ {
+  i2s_std_config_t conf={};
+  conf.clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(VOICE_SAMPLE_RATE);
+  conf.slot_cfg=I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,I2S_SLOT_MODE_MONO);
+  conf.gpio_cfg.mclk=I2S_GPIO_UNUSED;
+  conf.gpio_cfg.bclk=VOICE_BCLK;conf.gpio_cfg.ws=VOICE_WS;
+  conf.gpio_cfg.dout=VOICE_AMP_DOUT;conf.gpio_cfg.din=VOICE_MIC_DIN;
+  conf.gpio_cfg.invert_flags.mclk_inv=false;
+  conf.gpio_cfg.invert_flags.bclk_inv=false;
+  conf.gpio_cfg.invert_flags.ws_inv=false;
+  err=i2s_channel_init_std_mode(rx,&conf);
+  if(err==ESP_OK)err=i2s_channel_init_std_mode(tx,&conf);
+  if(err!=ESP_OK){Serial.printf("[VOICE] I2S configuration error=%d\n",(int)err);goto cleanup;}
  }
- out.trim();
- if(out.length()>270)out=out.substring(0,267)+"...";
- out.toUpperCase();
- return out;
-}
-static String cleanNewsDescription(String input) {
- input=decodeNewsEntities(input);
- String out; out.reserve(220); bool insideTag=false, lastSpace=false;
- for(size_t i=0;i<input.length() && out.length()<170;i++) {
-  const char c=input[i];
-  if(c=='<') {insideTag=true;continue;}
-  if(c=='>') {insideTag=false;continue;}
-  if(insideTag || (unsigned char)c>126)continue;
-  if(c==' ' || c=='\n' || c=='\r' || c=='\t') {
-   if(!lastSpace && out.length()){out+=' ';lastSpace=true;}
-  } else if(c>=32) {out+=c;lastSpace=false;}
- }
- out.trim();
- return out;
-}
-// Returns an RSS headline from one feed, or empty on HTTP/parse failure.
-// The second source is used if the first source is unavailable.
-// Very small streaming RSS title extractor: no 6-12KB XML String allocation.
-// HTTPS is retained. A certificate chain should be supplied for production use;
-// setInsecure is used ONLY in this public-news connectivity prototype.
-static String readRSSHeadline(const char *url, bool requireJapan) {
- if(newsCancelRequested || !wifiEnabled)return "";
- const uint32_t before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
- const uint32_t largest=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
- WiFiClientSecure client;
- client.setInsecure(); // Public headline demo only; certificate is not validated.
- client.setTimeout(5500);
- HTTPClient http;
- http.setConnectTimeout(6500);
- http.setTimeout(9000);
- http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
- http.setRedirectLimit(3);
- http.setReuse(false);
- if(!http.begin(client,url)) {
-   Serial.println("[NEWS] HTTP begin failed");return "";
- }
- http.addHeader("Accept-Encoding","identity");
- http.addHeader("User-Agent","CuteDisplay/1.1");
- if(newsCancelRequested || !wifiEnabled){http.end();client.stop();return "";}
- int status=http.GET();
- if(status != HTTP_CODE_OK) {
-   if(status>=300 && status<400) Serial.printf("[NEWS] Redirect not completed. Location: %s\n",http.header("Location").c_str());
-   Serial.printf("[NEWS] Transport failed: %s\n",http.errorToString(status).c_str());
-   http.end();return "";
- }
- WiFiClient *stream=http.getStreamPtr();
- const uint32_t deadline=millis()+13000UL;
- // Stream RSS item titles; for regional feeds scan until a Japan-specific item.
- const char *beginItem="<item";
- const char *beginTitle="<title>";
- const char *endTitle="</title>";
- const char *beginDescription="<description>";
- const char *endDescription="</description>";
- uint8_t mode=0; size_t match=0; size_t received=0;
- String title; title.reserve(192);
- String itemHeadline; itemHeadline.reserve(128);
- String description; description.reserve(256);
- String selected; selected.reserve(288);
- unsigned eligible=0;
- // Avoid replaying the previous headline when there are alternatives.
- uint32_t firstRepeatHash=0; String repeatCandidate;
- auto headlineHash=[](const String &str)->uint32_t {
-   uint32_t h=2166136261UL;
-   for(size_t i=0;i<str.length();i++){h^=(uint8_t)str[i];h*=16777619UL;}
-   return h;
- };
- while(!newsCancelRequested && wifiEnabled &&
-       (int32_t)(millis()-deadline)<0 && received<80000) {
-   if(!stream->available()) {
-     if(!http.connected())break;
-     vTaskDelay(pdMS_TO_TICKS(15));continue;
+ if(i2s_channel_enable(rx)!=ESP_OK){Serial.println("[VOICE] RX enable failed");goto cleanup;}
+ {
+  size_t pos=0;
+  uint32_t started=millis();
+  while(pos<sampleCount && millis()-started<VOICE_RECORD_MS+2000UL){
+   size_t got=0;
+   size_t n=min((size_t)128,sampleCount-pos);
+   esp_err_t e=i2s_channel_read(rx,audio+pos,n*sizeof(int32_t),&got,250);
+   if(e==ESP_OK)pos+=got/sizeof(int32_t);
+  }
+  i2s_channel_disable(rx);
+  Serial.printf("[VOICE] Captured %u/%u samples\n",(unsigned)pos,(unsigned)sampleCount);
+  if(pos>0 && i2s_channel_enable(tx)==ESP_OK){
+   // Keep playback quiet: clamp 24-bit microphone data to a modest level.
+   for(size_t i=0;i<pos;i++)audio[i]=audio[i]/2;
+   size_t offset=0;
+   while(offset<pos){
+    size_t wrote=0;size_t n=min((size_t)128,pos-offset);
+    esp_err_t e=i2s_channel_write(tx,audio+offset,n*sizeof(int32_t),&wrote,350);
+    if(e!=ESP_OK)break;
+    offset+=wrote/sizeof(int32_t);
    }
-   int ch=stream->read();if(ch<0)continue;
-   received++;
-   char c=(char)ch;
-   if(mode==0) {
-     match=(c==beginItem[match])?match+1:(c=='<'?1:0);
-     if(match==strlen(beginItem)){mode=1;match=0;}
-   }else if(mode==1) {
-     match=(c==beginTitle[match])?match+1:(c=='<'?1:0);
-     if(match==strlen(beginTitle)){mode=2;match=0;}
-   }else if(mode==2){
-     if(c=='<'){mode=3;match=1;}
-     else if(title.length()<190)title+=c;
-   }else if(mode==3){
-     if(c==endTitle[match])match++;
-     else {mode=2; if(title.length()<190)title+='<'; if(title.length()<190)title+=c;match=0;}
-     if(match==strlen(endTitle)) {
-       itemHeadline=asciiShortNews(title);
-       title=""; description=""; mode=4; match=0;
-     }
-   }else if(mode==4){
-     // Search this item's description; RSS descriptions are generally short.
-     match=(c==beginDescription[match])?match+1:(c=='<'?1:0);
-     if(match==strlen(beginDescription)){mode=5;match=0;}
-   }else if(mode==5){
-     if(c=='<'){mode=6;match=1;}
-     else if(description.length()<450)description+=c;
-   }else if(mode==6){
-     if(c==endDescription[match])match++;
-     else {mode=5; if(description.length()<450)description+='<'; if(description.length()<450)description+=c;match=0;}
-     if(match==strlen(endDescription)) {
-       String candidate=itemHeadline;
-       String summary=cleanNewsDescription(description);
-       summary.toUpperCase();
-       // A news headline is not an article. Use RSS description only when
-       // it supplies genuinely additional context instead of repeating title.
-       if(summary.length()>25 && summary.indexOf(itemHeadline.substring(0,min((size_t)18,itemHeadline.length())))<0){
-         candidate += ". "; candidate += summary;
-       }
-       candidate=asciiShortNews(candidate);
-       bool japanHit = candidate.indexOf("JAPAN")>=0 || candidate.indexOf("TOKYO")>=0 ||
-                       candidate.indexOf("JAPANESE")>=0 || candidate.indexOf("OSAKA")>=0 ||
-                       candidate.indexOf("KYOTO")>=0;
-       if(!candidate.isEmpty() && (!requireJapan || japanHit)) {
-         rememberNewsCandidate(candidate);
-         uint32_t hash=headlineHash(candidate);
-         if(hash==newsLastHeadlineHash) {
-           firstRepeatHash=hash; repeatCandidate=candidate;
-         } else {
-           eligible++;
-           if(eligible==1 || esp_random()%eligible==0)selected=candidate;
-         }
-       }
-       itemHeadline="";description="";mode=0;match=0;
-       if(eligible>=NEWS_CACHE_CAPACITY)break;
-     }
-   }
+   i2s_channel_disable(tx);
+  }
  }
- http.end();
- client.stop();
- if(selected.isEmpty() && !repeatCandidate.isEmpty())selected=repeatCandidate;
- if(!selected.isEmpty())newsLastHeadlineHash=headlineHash(selected);
- if(requireJapan && selected.isEmpty())Serial.println("[NEWS] No Japan-related title in scanned RSS items");
- return selected;
-}
-static String newsRSSHeadline() {
-  const uint32_t now=millis();
-  // Cache allows several different news items with just one HTTPS session.
-  if(initNewsCache() && newsCache->count &&
-     (uint32_t)(now-newsCache->refreshedAt)<NEWS_CACHE_TTL_MS) {
-      return pickCachedNews();
-  }
-  if(newsCancelRequested || !wifiEnabled || WiFi.status()!=WL_CONNECTED) {
-    String old=pickCachedNews();
-    return old.isEmpty()?"WI-FI IS OFFLINE.":old;
-  }
-  newsCollectingFresh=true;
-  String title=readRSSHeadline("https://news.google.com/rss/search?q=Japan&hl=en-US&gl=JP&ceid=JP:en",false);
-  if(title.isEmpty() && !newsCancelRequested && wifiEnabled){
-    Serial.println("[NEWS] Google News unavailable; trying BBC Asia RSS");
-    title=readRSSHeadline("https://feeds.bbci.co.uk/news/world/asia/rss.xml",true);
-  }
-  newsCollectingFresh=false;
-  if(newsCache && newsCache->count && !title.isEmpty()) {
-    newsCache->refreshedAt=millis();
-    title=pickCachedNews();
-  } else if(title.isEmpty()) {
-    title=pickCachedNews(); // retain previously downloaded news on TLS failure
-  }
-  if(title.isEmpty())return "COULD NOT LOAD JAPAN NEWS. TRY AGAIN.";
-  return title;
-}
-static void newsTask(void*) {
- String value=newsRSSHeadline();
- if(value.length()>295)value.remove(295);
- char packet[304]={0};
- value.toCharArray(packet,sizeof(packet));
- if(newsQueue)xQueueOverwrite(newsQueue,packet);
- newsFetching=false;
+cleanup:
+ if(tx)i2s_del_channel(tx);
+ if(rx)i2s_del_channel(rx);
+ heap_caps_free(audio);
+ voiceBusy=false;
  vTaskDelete(nullptr);
 }
-static void startNewsPreview(unsigned long now){
- if(newsActive || newsFetching)return;
- newsOldMode=mode;newsOldMessage=message;
- newsOldBubble=bubbleEnabled;newsOldScrolling=scrolling;
- newsOldScrollX=scrollX;newsOldRevealed=revealedCharacters;
- newsOldPage=currentPage;
- newsActive=true;newsReceived=false;newsStartedAt=now;
- newsReceivedAt=0;
- mode=MESSAGE_MODE;bubbleEnabled=true;
- message="FETCHING NEWS...";
- scrolling=false;revealedCharacters=bubbleCharacterCount(message);
- newsRevealed=0;newsPageStart=0;newsPageText="";newsNextPageStart=0;newsLastLetterAt=now;newsPageDoneAt=0;
- drawMessage();
- newsFetching=true;
- if(xTaskCreate(newsTask,"CuteNews",6144,nullptr,1,nullptr)!=pdPASS){
-   newsFetching=false;
-   const char failure[]="Not enough memory to fetch news.";
-   if(newsQueue)xQueueOverwrite(newsQueue,failure);
+static void startVoiceLoopback(){
+ if(voiceBusy)return;
+ voiceBusy=true;
+ if(xTaskCreate(voiceLoopbackTask,"CuteAudio",6144,nullptr,1,nullptr)!=pdPASS){
+  voiceBusy=false;Serial.println("[VOICE] Task allocation failed");
  }
-}
-static void finishNewsPreview(){
- if(!newsActive)return;
- newsActive=false; newsReceived=false;
- message=newsOldMessage;mode=newsOldMode;bubbleEnabled=newsOldBubble;
- scrolling=newsOldScrolling;scrollX=newsOldScrollX;
- revealedCharacters=newsOldRevealed;currentPage=newsOldPage;
- lastPage=millis();lastScroll=millis();
- redrawCurrent();
-}
-static void pollNewsPreview(unsigned long now){
- char packet[304]={0};
- if(newsQueue && xQueueReceive(newsQueue,packet,0)==pdTRUE){
-   if(newsActive){
-     message=String(packet);message.toUpperCase();
-     newsReceived=true;newsReceivedAt=now;
-     newsPageStart=0;newsRevealed=0;newsPageDoneAt=0;
-     prepareNewsPage();
-     newsLastLetterAt=now;newsLastFrameAt=now;newsPageRevealStartAt=now;
-     drawMessage();
-   }
- }
- if(!newsActive)return;
- // Time-based typewriter: reveal multiple characters per screen refresh.
- // The LCD takes longer than a few milliseconds to transmit a full frame.
- // Redrawing for every single letter made the animation much slower than
- // its configured 12 ms/character rate.  This uses elapsed time and a
- // capped redraw rate so the animation speed is not tied to SPI throughput.
- if(newsReceived && newsPageDoneAt==0){
-   const size_t limit=newsPageText.length();
-   const unsigned long elapsed=now-newsPageRevealStartAt;
-   const size_t target=min(limit,(size_t)(elapsed/NEWS_LETTER_MS));
-   if(target>newsRevealed && (now-newsLastFrameAt>=NEWS_FRAME_MS || target>=limit)){
-     newsRevealed=target;
-     newsLastFrameAt=now;
-     drawMessage();
-   }
-   if(newsRevealed>=limit)newsPageDoneAt=now;
- }
- if(newsPageDoneAt && now-newsPageDoneAt >=
-     ((newsNextPageStart>=message.length()) ? 2100UL : NEWS_PAGE_PAUSE_MS)){
-   newsPageStart=newsNextPageStart;
-   if(newsPageStart>=message.length()){finishNewsPreview();return;}
-   prepareNewsPage();
-   newsRevealed=0;newsPageDoneAt=0;newsLastLetterAt=now;newsLastFrameAt=now;newsPageRevealStartAt=now;
-   drawMessage();
- }
- // Safety timeout is only for stalls, not a normal reason to cut a headline.
- if(now-newsStartedAt>=NEWS_MAX_MS)finishNewsPreview();
 }
 // Static graphics/glyph data belongs in PSRAM, not the scarce internal heap.
 // These allocations happen exactly once, before NVS glyph restoration and BLE init.
@@ -3027,9 +2702,8 @@ void setup(){
  commandQueue=xQueueCreate(32,MAX_CMD+1);
  if(!commandQueue)Serial.println("[BLE] Queue creation failed");
  pinMode(PIN_USER_BUTTON,INPUT_PULLUP);
- pinMode(PIN_NEWS_BUTTON,INPUT_PULLUP);
- newsButtonPrevious=digitalRead(PIN_NEWS_BUTTON);
- newsQueue=xQueueCreate(1,304);
+ pinMode(PIN_VOICE_BUTTON,INPUT_PULLUP);
+ voiceButtonRaw=voiceButtonStable=digitalRead(PIN_VOICE_BUTTON);
 
  userButtonLastRaw=digitalRead(PIN_USER_BUTTON);
  userButtonStable=userButtonLastRaw;
@@ -3061,24 +2735,30 @@ void setup(){
 void loop(){
  char input[MAX_CMD+1]={0};
  for(int q=0;q<8&&commandQueue&&xQueueReceive(commandQueue,input,0)==pdTRUE;q++){
-  if(newsActive)finishNewsPreview();
   processCommand(String(input));
  }
- // Complete a pending Wi-Fi OFF after the HTTPS news worker exits.
+ // Finish pending ordinary Wi-Fi shutdown.
  completeWiFiShutdown();
  unsigned long now=millis();
  checkWiFiOffSettled(now);
- // GPIO28 (right BOOT button): fetch news once on a debounced press.
- // Do not interact with NVS or the user's saved display mode.
- bool rightRaw=digitalRead(PIN_NEWS_BUTTON);
- if(rightRaw!=newsButtonPrevious && now-newsButtonChangedAt>=45UL){
-   newsButtonPrevious=rightRaw;newsButtonChangedAt=now;
-   if(rightRaw==LOW && (newsLastAcceptedAt==0 || now-newsLastAcceptedAt>700UL)){
-     newsLastAcceptedAt=now;
-     if(!newsActive && !newsFetching)startNewsPreview(now);
+ // GPIO28: short press shows battery status; hold >=1.4s starts audio loopback.
+ bool rightRaw=digitalRead(PIN_VOICE_BUTTON);
+ if(rightRaw!=voiceButtonRaw){voiceButtonRaw=rightRaw;voiceButtonChangedAt=now;}
+ if(now-voiceButtonChangedAt>=35 && rightRaw!=voiceButtonStable){
+  voiceButtonStable=rightRaw;
+  if(rightRaw==LOW){voiceButtonPressedAt=now;voiceButtonLongHandled=false;}
+  else{
+   if(voiceButtonPressedAt && !voiceButtonLongHandled){
+    batteryOverlayUntil=now+BATTERY_CARD_MS;redrawCurrent();
    }
+   voiceButtonPressedAt=0;voiceButtonLongHandled=false;
+  }
  }
- pollNewsPreview(now);
+ if(voiceButtonStable==LOW && voiceButtonPressedAt && !voiceButtonLongHandled &&
+    now-voiceButtonPressedAt>=VOICE_HOLD_MS){
+  voiceButtonLongHandled=true;
+  startVoiceLoopback();
+ }
  updateWiFi(now);
  updateLAN();
  if(!wifiOnline()){
@@ -3106,7 +2786,7 @@ void loop(){
   if(lcdReady && now-lastStatusRedraw>=250){lastStatusRedraw=now;redrawCurrent();}
  }
  updatePersonalityPose(now);
- if(stateDirty && !newsActive && now-stateDirtyAt>=3500UL)saveDisplayState();
+ if(stateDirty && now-stateDirtyAt>=3500UL)saveDisplayState();
  bool raw=digitalRead(PIN_USER_BUTTON);
  if(raw!=userButtonLastRaw){userButtonChangedAt=now;userButtonLastRaw=raw;}
  if(now-userButtonChangedAt>=35 && raw!=userButtonStable){
@@ -3178,7 +2858,7 @@ void loop(){
  // Animate mouth independently from the letters in ordinary Message Mode.
  // News already redraws up to ~28 fps while its typewriter is active.
  static unsigned long lastSpeakingFrame = 0;
- if(mascotVisible && !newsActive && mascotIsSpeaking() &&
+ if(mascotVisible && mascotIsSpeaking() &&
     millis()-lastSpeakingFrame >= 105UL) {
    lastSpeakingFrame=millis();
    drawMessage();
@@ -3208,8 +2888,7 @@ void loop(){
     revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+BUBBLE_LETTER_MS);
  if(mascotVisible && mascotIsSpeaking())untilDue(lastSpeakingFrame+105UL);
  if(chargeNoticeUntil)untilDue(lastBatteryOverlayFrame+220UL);
- if(newsActive) sleepMs=min(sleepMs,(uint32_t)10);
- if(newsButtonPrevious==LOW || userButtonStable==LOW)sleepMs=min(sleepMs,(uint32_t)8);
+ if(voiceButtonStable==LOW || userButtonStable==LOW)sleepMs=min(sleepMs,(uint32_t)8);
  if((int32_t)(millis()-(lastBatteryRead+BATTERY_SAMPLE_MS))<0)untilDue(lastBatteryRead+BATTERY_SAMPLE_MS);
  delay(max((uint32_t)1,sleepMs));
 }
