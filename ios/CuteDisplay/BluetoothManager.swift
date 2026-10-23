@@ -310,7 +310,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             status = "Accessory setup is starting. Try again."
             return
         }
-        var descriptor = ASDiscoveryDescriptor()
+        let descriptor = ASDiscoveryDescriptor()
         descriptor.bluetoothServiceUUID = controlServiceUUID
         descriptor.bluetoothNameSubstring = "CuteDisplay"
         let item = ASPickerDisplayItem(
