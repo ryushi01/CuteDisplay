@@ -482,7 +482,7 @@ bool bubbleTypewriter = true;
 size_t revealedCharacters = 0;
 unsigned long lastBubbleReveal = 0;
 const unsigned long BUBBLE_LETTER_MS = 135;
-// Right button: tap battery card; hold 1.4s to record and play back a short phrase.
+// Right button: short press is intentionally inert; hold 1.4s for audio loopback.
 static bool voiceButtonRaw=HIGH;
 static bool voiceButtonStable=HIGH;
 static unsigned long voiceButtonChangedAt=0;
@@ -967,7 +967,7 @@ void drawBatteryOverlay(){
   if(!batteryReady || duration==0 || duration==0xFFFF || duration>10080)
    estimate="--";
   else
-   estimate=String(duration/60)+"H "+String(duration%60)+"M";
+   estimate=String(duration/60)+" hours "+String(duration%60)+" min";
   // Compact diagnostic view: visible for six seconds after GPIO0 press.
   // Keep all lines inside the LCD (320x170) without changing mascot sizes.
   textAt(label+estimate,42,67,1,WHITE);
@@ -2741,16 +2741,14 @@ void loop(){
  completeWiFiShutdown();
  unsigned long now=millis();
  checkWiFiOffSettled(now);
- // GPIO28: short press shows battery status; hold >=1.4s starts audio loopback.
+ // GPIO28: short press does nothing; hold >=1.4s starts audio loopback.
  bool rightRaw=digitalRead(PIN_VOICE_BUTTON);
  if(rightRaw!=voiceButtonRaw){voiceButtonRaw=rightRaw;voiceButtonChangedAt=now;}
  if(now-voiceButtonChangedAt>=35 && rightRaw!=voiceButtonStable){
   voiceButtonStable=rightRaw;
   if(rightRaw==LOW){voiceButtonPressedAt=now;voiceButtonLongHandled=false;}
   else{
-   if(voiceButtonPressedAt && !voiceButtonLongHandled){
-    batteryOverlayUntil=now+BATTERY_CARD_MS;redrawCurrent();
-   }
+   // Short press intentionally has no action.
    voiceButtonPressedAt=0;voiceButtonLongHandled=false;
   }
  }
