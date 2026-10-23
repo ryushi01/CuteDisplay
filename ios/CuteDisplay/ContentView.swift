@@ -496,8 +496,8 @@ struct ContentView: View {
                         powerMetric("Temperature", bluetooth.batteryTemperature.map { "\($0) °C" } ?? "—")
                     }
                     HStack {
-                        powerMetric("Time to empty", batteryStateText == "Discharging" ? (batteryTimeText($0) ?? "—") : "—")
-                        powerMetric("Time to full", batteryStateText == "Charging" ? (batteryTimeText($0) ?? "—") : "—")
+                        powerMetric("Time to empty", batteryStateText == "Discharging" ? (bluetooth.minutesToEmpty.map { batteryTimeText($0) } ?? "—") : "—")
+                        powerMetric("Time to full", batteryStateText == "Charging" ? (bluetooth.minutesToFull.map { batteryTimeText($0) } ?? "—") : "—")
                     }
                     if let updated = bluetooth.lastPowerUpdate {
                         Text("Last updated: \(updated.formatted(date: .omitted, time: .standard))")
