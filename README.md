@@ -8,6 +8,14 @@ The latest ESP32-C5 source (`firmware/CuteDisplay/lcd.ino`) and the iPhone Wi-Fi
 
 Wi-Fi fallback requires: the device connected to an existing trusted Wi-Fi network; the iPhone able to reach its local IP on TCP port 8848; an initial BLE connection to retrieve the LAN authentication key/IP; and the `NSLocalNetworkUsageDescription` key in the **actual Xcode app target's Info settings** (the XML file in this repository is an instruction fragment). Fallback is authenticated but **not encrypted**, and foreground/best-effort: iOS can suspend networking in the background or after force-quitting the app. No automatic ESP32 reboot or Wi-Fi activation is introduced.
 
+## AI voice hardware — Phase 1 (unverified)
+
+The ESP32-C5 firmware now removes all RSS/news fetching and uses GPIO28's long press (1.4 seconds) for a **two-second microphone recording followed by immediate speaker playback**. A short GPIO28 press shows the battery card. GPIO0 Wi-Fi controls are unchanged. This is a hardware-only loopback test: **no model or OpenAI API is accessed in Phase 1**. The eventual backend will support selecting local AI or OpenAI using the same audio transport.
+
+Candidate shared I²S pin mapping: GPIO1 BCLK, GPIO4 WS/LRCLK, GPIO5 microphone SD (input), GPIO6 amplifier DIN (output); both breakouts at 3.3 V and common GND. Connect speaker only to amplifier OUT+/OUT−. **Check the purchased microphone pin labels and board revision before soldering.**
+
+The complete test bundle is also available as `CuteDisplay_AI_Phase1_Audio_NoNews.zip` in the conversation attachments. Audio/I²S compilation and device behavior have **not** been tested here; flash to the spare board first and keep the working prototype unchanged.
+
 ## Latest version: 4.0
 
 - Six procedural, animated mascots and selectable moods (no sprite-sheet art)
