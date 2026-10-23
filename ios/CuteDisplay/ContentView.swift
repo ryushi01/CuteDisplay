@@ -79,6 +79,14 @@ struct CuteDisplayProfile: Codable, Identifiable {
 }
 
 struct ContentView: View {
+    // Keep raw BLE time estimates in minutes; format only when displayed.
+    private func batteryTimeText(_ minutes: Int) -> String {
+        guard minutes > 0 && minutes < 65535 && minutes <= 10080 else { return "—" }
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        return "\(hours) hours \(remainder) min"
+    }
+
     @StateObject private var bluetooth = BluetoothManager()
     @State private var mode: DisplayMode = .message
     @State private var message = UserDefaults.standard.string(forKey: "savedMessage") ?? "こんにちわ"
@@ -488,8 +496,8 @@ struct ContentView: View {
                         powerMetric("Temperature", bluetooth.batteryTemperature.map { "\($0) °C" } ?? "—")
                     }
                     HStack {
-                        powerMetric("Time to empty", batteryStateText == "Discharging" ? (bluetooth.minutesToEmpty.map { "\($0) min" } ?? "—") : "—")
-                        powerMetric("Time to full", batteryStateText == "Charging" ? (bluetooth.minutesToFull.map { "\($0) min" } ?? "—") : "—")
+                        powerMetric("Time to empty", batteryStateText == "Discharging" ? (batteryTimeText($0) ?? "—") : "—")
+                        powerMetric("Time to full", batteryStateText == "Charging" ? (batteryTimeText($0) ?? "—") : "—")
                     }
                     if let updated = bluetooth.lastPowerUpdate {
                         Text("Last updated: \(updated.formatted(date: .omitted, time: .standard))")
