@@ -1,5 +1,35 @@
 # CuteDisplay 🎀
 
+## About CuteDisplay
+
+**CuteDisplay** is a customizable, battery-powered miniature companion display built around the **LILYGO T-Display C5 (ESP32-C5)** and controlled from a companion **iPhone app**. The idea is to turn a small LCD into a playful, expressive accessory: it can show a cute animated character, a personal message, or a rotating list of drinks, while the phone acts as the convenient place to configure and manage it.
+
+Rather than being a passive screen, CuteDisplay is designed as a connected little character that you can personalize and, eventually, **talk to**. The project brings together custom ESP32 firmware, a native SwiftUI iOS interface, Bluetooth communication, optional local Wi-Fi connectivity, and planned AI-powered voice interactions.
+
+### What the ESP32 firmware does
+
+The firmware runs directly on the display hardware, so its screen and core animations do not depend on the iPhone staying open. It handles:
+
+- Rendering six animated mascot styles, moods, accessories, reactions, and optional surprise animations.
+- Displaying custom text with Japanese/Unicode support, speech bubbles, and visual themes, or showing a paginated drinks list.
+- Tracking the onboard battery through the AXP2602: charge level, voltage, current, temperature, health, and estimated time remaining or to full.
+- Managing brightness, on-device button controls, Bluetooth communication, and optional Wi-Fi connectivity.
+- Preparing for two-way audio through an external I²S microphone and speaker amplifier. The current test records a short clip and plays it back locally; **it does not yet talk to an AI model**.
+
+### What the iPhone app does
+
+The **CuteDisplay iOS app** is the control panel for the physical device. From the phone, you can pair and reconnect to the display, customize its mascot and animations, select colors and layout options, write messages, and edit the drinks shown on screen. It also provides battery and power information, brightness controls, saved display profiles, Wi-Fi settings, and optional low-battery alerts.
+
+Communication is primarily over **Bluetooth Low Energy**. The project also supports an optional authenticated local-network fallback when the device and phone are on a reachable Wi-Fi network; this fallback is not end-to-end encrypted and does not guarantee operation while iOS suspends the app.
+
+### General concept and future direction
+
+The long-term goal is a **small physical AI companion with personality**: hold the device's button, speak into its microphone, send the audio to a selectable **local AI backend or OpenAI API**, and hear the response through the speaker, potentially accompanied by expressions or messages on the LCD.
+
+Development is incremental. Today, the animated display, phone controls, battery telemetry, and connectivity form the core product. The microphone-to-speaker loopback is an early hardware test for the planned voice interface, **not a completed AI assistant**. The user can continue enjoying CuteDisplay as a personalized display while the audio and AI components are developed.
+
+---
+
 ## Source synchronization status — 2026-10-23
 
 The latest ESP32-C5 source (`firmware/CuteDisplay/lcd.ino`) and the iPhone Wi-Fi fallback transport (`ios/CuteDisplay/BluetoothManager.swift`) are **committed together in the default GitHub branch**. Their companion SwiftUI source and iOS local-network permission instructions are present.
