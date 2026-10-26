@@ -68,7 +68,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     private var intentionalDisconnect = false
     private var restoredPeripherals: [CBPeripheral] = []
 
-    // One write at a time. Particularly important for D:RESET / D:ADD / D:SHOW.
+    // Keep BLE writes serialized so message, glyph and settings commands preserve order.
     private var pendingCommands: [String] = []
     private var waitingForWrite = false
 
