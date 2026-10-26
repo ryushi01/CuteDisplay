@@ -468,6 +468,7 @@ bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
 unsigned long wifiToastUntil = 0;
 bool wifiToastEnabled = false;
+static String brainWifiToastLabel; // GUI feedback from S3, never from local C5 Wi-Fi.
 
 unsigned long lastScroll = 0;
 int mascot = 1;
@@ -872,8 +873,9 @@ void drawBatteryOverlay(){
   // Centered short notification; no mode change or mascot resizing.
   rect(48,58,224,58,themeColor());
   rect(51,61,218,52,BLACK);
-  textAt(wifiToastEnabled?"WIFI ENABLED":"WIFI DISABLED",63,79,2,
-         wifiToastEnabled?0x07E0:0xFFE0);
+  String title=brainWifiToastLabel.isEmpty()?
+   (wifiToastEnabled?"WIFI ENABLED":"WIFI DISABLED"):brainWifiToastLabel;
+  textAt(title,63,79,2,wifiToastEnabled?0x07E0:0xFFE0);
   return;
  }
  bool batteryCard=batteryOverlayUntil && (int32_t)(batteryOverlayUntil-now)>0;
@@ -2549,14 +2551,14 @@ static void receiveCmdChunk(const CuteLink::Frame &f){
  bool complete=pendingNext==pendingTotal;
  lastAcceptedChunkSeq=f.seq;
  lastAcceptedChunkResponse=complete?"CMD":"PART";
- CuteLink::send(Serial1,f.seq,"ACK",lastAcceptedChunkResponse);
  if(complete){
   String command(pendingCommand);
   resetCmdParts();
-  // The existing command dispatcher already implements Japanese glyphs,
-  // Wi-Fi configuration, message rendering, and all legacy iPhone controls.
+  // Wait until the actual display command is processed before acknowledging,
+  // so the iPhone sends the next glyph only when the Face is ready.
   processCommand(command);
  }
+ CuteLink::send(Serial1,f.seq,"ACK",lastAcceptedChunkResponse);
 }
 
 static void toS3(const char *type,const String &value=""){
@@ -2614,6 +2616,16 @@ static void serviceBrain() {
    // No ACK needed: C5 already sends independent STATUS every 5 seconds.
   }
   else if(f.type=="RADIO")handleRadioFrame(f.payload);
+  else if(f.type=="WIFI_STATE"){
+   // Actual new radio state comes from Brain, not local C5 Wi-Fi.
+   wifiToastEnabled=f.payload=="ON";
+   if(f.payload=="ON")brainWifiToastLabel="S3 WIFI ON";
+   else if(f.payload=="OFF")brainWifiToastLabel="S3 WIFI OFF";
+   else if(f.payload=="NO_CONFIG")brainWifiToastLabel="SET WIFI IN APP";
+   else brainWifiToastLabel="S3 WIFI UNKNOWN";
+   wifiToastUntil=millis()+2500UL;
+   if(lcdReady)redrawCurrent();
+  }
   else if(f.type=="CMDHEX")receiveCmdChunk(f);
   else if(f.type=="GET_STATUS")replyStatus(f.seq);
   else if(f.type=="GET_BATTERY")replyBattery(f.seq);
@@ -2647,6 +2659,7 @@ static void serviceBrain() {
 
 void setup(){
  Serial.begin(115200);delay(700);
+ Serial1.setRxBufferSize(2048);
  Serial1.begin(115200,SERIAL_8N1,1,6);
  Serial.println("[UART] C5 UART1 active TX=GPIO6 RX=GPIO1");
  Serial.println("=== CUTEDISPLAY 3.9 RIGHT-SIDE ANIMATIONS ===");
@@ -2741,7 +2754,18 @@ void loop(){
  if(userButtonStable==LOW && userButtonPressedAt && !userButtonLongHandled &&
     (unsigned long)(now-userButtonPressedAt)>=WIFI_HOLD_MS){
   userButtonLongHandled=true;  // exactly one toggle per physical hold
-  setWiFiPower(!wifiEnabled,true); // draws popup immediately
+  // LILYGO's own Wi-Fi stays OFF. Toggle only the Brain over UART.
+  if(s3Online){
+   brainWifiToastLabel="S3 WIFI...";
+   wifiToastEnabled=false;
+   wifiToastUntil=millis()+3000UL;
+   toS3("WIFI_TOGGLE");
+  }else{
+   brainWifiToastLabel="BRAIN OFFLINE";
+   wifiToastEnabled=false;
+   wifiToastUntil=millis()+2300UL;
+  }
+  if(lcdReady)redrawCurrent();
  }
  if(now-lastBatteryRead>=BATTERY_SAMPLE_MS){
   lastBatteryRead=now;

@@ -2,6 +2,18 @@
 
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
+## Phase 3 Bluetooth + UART flow control fix (source updated, **awaiting hardware retest**)
+
+The user's iPhone connected to **CuteDisplay-Brain-DEV** but FFF1 writes returned **"authentication is insufficient"**; settings/messages/Wi-Fi provisioning failed. S3 logs also showed `WARNING: command queue full; BLE write not delivered` and `Face UART timed out` after repeated C5 STATUS frames. These are **observed user results on the previous Phase 3 build**, not evidence that the repairs below already work.
+
+This update initiates BLE encryption/bonding immediately on S3 connection and activates the command proxy automatically **for that encrypted session** (no `proxy on` needed). In the iPhone app, the FFF1 protected read establishes readiness, and notifications now provide **end-to-end C5 ACK/ERR flow control**: one iPhone command is sent at a time, and the next is not sent until the previous C5 command has been acknowledged. This prevents glyph uploads and Wi-Fi command bursts from filling S3's queue. C5 processes each final UART command **before** acknowledging it. S3 rejects new writes if unavailable instead of buffering indefinitely; both UART RX rings are increased to 2 KB. Timeouts log silence, bad CRC/framing and queued command counts to help identify wiring/power stalls. These changes are *source only, not yet compiled/hardware verified*.
+
+**Physical button:** A 1.4-second hold of the C5's left GPIO0 button now sends a UART `WIFI_TOGGLE` request to the S3 Brain. The S3 changes only its own Wi-Fi state and returns `WIFI_STATE` for display feedback; C5 local Bluetooth and Wi-Fi remain **disabled**. If the S3 has no saved network, the LILYGO prompts **SET WIFI IN APP**.
+
+**Security limitation:** ESP32 Just Works pairing encrypts the BLE link, but without an authenticated passkey/display it does **not** verify the peer against active man-in-the-middle attacks. Treat these builds as a prototype, not production-secure provisioning. If an old iPhone BLE bond blocks the repaired pairing handshake, remove the Brain accessory through the app's **Forget Device** picker (and forget its system Bluetooth bond if listed), then pair the Brain again.
+
+See [Phase 3 staged test and rollback instructions](docs/architecture/ble-brain-proxy-beta.md). Do not connect two USB 5V power inputs to a shared VBUS jumper.
+
 ## Phase 3 Brain-owned wireless — 2026-10-26 (SOURCE ONLY / UNTESTED)
 
 **Architecture updated per hardware decision:** The **ESP32-S3 Brain owns both Bluetooth and Wi-Fi**; the **LILYGO C5's BLE and Wi-Fi are disabled in the new firmware**. The C5's Bluetooth/Wi-Fi icons and button diagnostic panel now display the Brain's real BLE-client and Wi-Fi station status, including S3 IP. An absent Brain/link shows both radios OFF. **The C5 cannot be paired directly in this build.** Reflash the previous C5 firmware via USB to recover old pairing/Wi-Fi. Wi-Fi credentials are provisioned to S3, not C5, and C5 AXP2602 battery samples are mirrored back to the S3's iPhone GATT services. The updated iOS sources contain an explicit authorized-accessory selector; the old C5 TCP LAN fallback is disabled. The S3's 10-minute USB `proxy on` test gate and encrypted Just Works writes are **not production-level device authorization**. All Phase 3 source is **uncompiled/unverified**. [Full flash/test and rollback guide](docs/architecture/ble-brain-proxy-beta.md).

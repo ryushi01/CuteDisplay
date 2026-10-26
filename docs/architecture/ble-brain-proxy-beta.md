@@ -1,35 +1,37 @@
-# Phase 3 — Brain-only BLE/Wi-Fi, app compatibility and status indicators
+# Phase 3 beta — Brain Bluetooth, Wi-Fi, UART and iPhone testing
 
-**IMPORTANT: THIS IS AN UNCOMPILED, UNTESTED BETA SOURCE UPDATE.** Use it only after saving your known-working previous build/commit \`f2e352c\`. The original iPhone-to-LILYGO direct BLE recovery method is intentionally disabled **in this build**, per the user's design decision; recovery requires **USB reflashing the previous C5 firmware**. Neither S3 nor C5 firmware or the Swift app update has been built in this environment.
+**Status: source fixes committed; build and hardware verification pending.** The previous Phase 3 build failed: the iPhone app showed **authentication is insufficient**, commands were lost in a full S3 queue, and S3 occasionally timed out waiting for C5 UART frames. The instructions below apply to the repaired firmware, not the old beta.
 
-## What changes
+## Design and safeguards
 
-**S3 Brain = wireless controller**
-- BLE \`CuteDisplay-Brain-DEV\` FFF0/FFF1 (encrypted writes, bonded Just Works; **not MITM-authenticated**). Battery 180F/2A19, power FFF3/FFF4 mirror real LILYGO AXP2602 samples; network FFF5/FFF6 reports **S3 Wi-Fi**, not C5. In iOS, the user chooses the authorized S3 in the new **Active Bluetooth device** picker. The app's outdated TCP/8848 C5 LAN fallback is disabled, and old C5 LAN credentials cleared when switching accessories.
-- **Wi-Fi credentials now reside only on S3:** iPhone BLE \`W:S:<ssid>\`, \`W:P:<pass>\`, \`W:C\`, \`W:ON/OFF/FORGET\`, \`W:DHCP\`, \`W:STATIC:<ip>|<mask>|<gateway>|<dns>\`, \`W:GET:<field>\` are handled locally by S3. The S3 attempts a station connection (auto-on after boot when saved and enabled); it does not currently run an AI server client, HTTP API, STT/TTS or an iPhone TCP fallback service. Some fields such as \`W:GET:KEY\` and ICMP ping are not fully implemented on Brain, by design.
-- S3 sends \`RADIO\` frames over existing UART approximately every 1.8 s with \`b=0/1;w=0/1;ip=<S3_IP_or_->\`. Bluetooth flag means **phone client connected to S3**, not merely radio enabled. Wi-Fi flag means **S3 station associated**. The S3 UART timeout/HELLO/HEARTBEAT remains.
+- **Only the S3 Brain runs Bluetooth and Wi-Fi.** C5's BLE, Wi-Fi and LAN services remain disabled. The tiny LCD HUD and physical-button status view reflect S3's encrypted iPhone BLE connection and its actual Wi-Fi station connection/IP.
+- The S3 BLE FFF0/FFF1 write/read characteristic requires encryption, using ESP32 Just Works bonding; phone app reads the protected characteristic to initiate iOS pairing. The S3 activates its proxy **automatically once BLE encryption/bonding is confirmed**; do not enter `proxy on`. Just Works lacks MITM protection, so this is **not production-grade secure provisioning**.
+- The phone subscribes to FFF1 notifications and sends **one command at a time**. A GATT write response is not completion: wait for S3 `ACK:CMD` or `ACK:WIFI` after C5 UART completion. On `ERR`, stop the queue and show the reason; on a 20-second timeout, stop instead of blindly replaying. S3 maintains a bounded 16-command queue; each 96-byte UTF-8 command is split into 38-byte hex UART chunks and acknowledged in order. C5 responds only after processing the final command.
+- S3 and C5 UART RX software buffers are now 2048 bytes, and if S3 sees no valid C5 frames for 10s it logs `Face UART timed out: silence=... bad_frames=... queued=...`. A timeout remains an **unresolved possible hardware/power or firmware stall** until reproduced and investigated.
+- **C5 left GPIO0 button:** 1.4-second hold → C5 UART `WIFI_TOGGLE` → S3 enables/disables its own Wi-Fi → C5 receives `WIFI_STATE` to display confirmation. Wi-Fi credentials must first be configured on the S3 through iPhone. C5's radio never activates.
+- The old C5 Wi-Fi TCP/8848 app fallback does not apply to the new S3 and is disabled in the new app. AI/STT/TTS remain not implemented.
 
-**LILYGO C5 = display only**
-- **Does not call \`initBLE()\`, \`WiFi.begin()\`, or \`loadWifiConfig()\`** in this build. C5 Wi-Fi is explicitly put into WIFI_OFF at startup. Its legacy W: commands are rejected, and the old physical-button Wi-Fi toggle does not turn on the local radio. Previous C5 NVS display configuration is preserved.
-- Tiny top-right Bluetooth/Wi-Fi HUD indicators and the battery/diagnostic screen's BT/WIFI indicators reflect the **Brain's flags**, not LILYGO's independent radios. The diagnostic screen now labels \`SOURCE: ESP32-S3 BRAIN\` and shows \`S3 IP:\`. On a stale or lost S3 status/link, both flags display OFF/grey (no misleading C5 fallback). C5 battery SOC remains its own AXP2602 reading; the BLE battery service on S3 mirrors that C5 value.
-- C5 still performs all mascot rendering, messages, Unicode/24x24 glyphs, mood/accessory handling and battery sensing. UART \`CMDHEX\` transports original app commands up to 96 UTF-8 bytes with chunk ACKs.
-- The **5V shared-power arrangement is still only user-observed to boot and function**, not rated/validated. With 5V jumpers attached, power via **S3 USB-C only** and never also plug in C5 USB-C. For firmware flashing, unplug power, remove the 5V jumper, and flash separately.
+## Safe flashing and rollback
 
-## Flash & test — retain safe rollback
+1. Save the **known-working Phase 2 pair** at [f2e352c](https://github.com/ryushi01/CuteDisplay/commit/f2e352c3ccb9bf3e4487c41cb3e2de5d6c3fdf5d) before trying the new source. The Phase 2 C5 can be reflashed over USB if S3 pairing fails.
+2. Disconnect **both USB cables and the S3 5V → C5 5V jumper** before programming either board. Flash each board individually on its own USB cable. Do not connect two USB supplies into a shared 5V rail. Reconnect the established pinout (S3 TX47→C5 RX1, S3 RX21←C5 TX6, GND↔GND) once both are powered off.
+3. Arduino S3: **ESP32S3 Dev Module**, 16MB Flash, OPI PSRAM, `CuteDisplayBrain.ino` with both headers. C5: **ESP32C5 Dev Module**, 16MB Flash, QIO PSRAM, `lcd.ino` with existing LILYGO headers/libraries. Keep the user-verified power arrangement **prototype-only** until rated for current/backfeed. Optionally power boards separately with no positive 5V jumper during diagnosis.
+4. Replace `BluetoothManager.swift` and `ContentView.swift` in the iOS Xcode project with matching main branch versions and rebuild/reinstall. If an earlier failed attempt left an incompatible bond, use **Forget Device** in the app and remove the Brain's old iOS Bluetooth bond if present, then re-authorize/pair through AccessorySetupKit.
 
-1. Back up/save the known-working Phase 2 firmware source, e.g. GitHub commit \`f2e352c3ccb9bf3e4487c41cb3e2de5d6c3fdf5d\`. That old build retained C5 Bluetooth and Wi-Fi, so USB-reflashing it restores standalone C5 connections.
-2. Disconnect shared 5V with all power OFF. Upload **S3 Brain \`CuteDisplayBrain.ino\` + BrainPinPlan.h + CuteLink.h**, then separately upload **C5 \`lcd.ino\` + its CuteLink.h and LILYGO dependencies**. Do not erase all flash / NVS. S3 board: ESP32S3 Dev Module, 16MB Flash, OPI PSRAM. C5: ESP32C5 Dev Module, 16MB Flash, QIO PSRAM.
-3. Power OFF. Reconnect verified UART **S3 GPIO47 TX → C5 GPIO1 RX**, **C5 GPIO6 TX → S3 GPIO21 RX**, **GND ↔ GND**. Use separate USB supplies with no 5V bridge for the safest software bring-up; shared S3→C5 5V is an unqualified prototype-only option and C5 USB-C must remain unplugged if using it.
-4. S3 Serial Monitor 115200, Newline: verify \`[C5] HELLO\`, \`[C5] STATUS ...\`, and that HELLO does not repeatedly restart when idle; type \`status\`. **Confirm C5 Serial Monitor (if separately powered) prints "Local BLE/WiFi disabled"**. If S3 Bluetooth is not connected, the C5 BT icon should be grey; if S3 Wi-Fi is not configured, Wi-Fi icon grey.
-5. On S3 console type **\`proxy on\`**. This enables the beta phone command forwarding for **10 minutes**; repeat after expiry. On iPhone with BLE diagnostic app, bond with \`CuteDisplay-Brain-DEV\`, write \`C:1\` and \`Hello from Brain\` to FFF1; check actual C5 display and UART ACKs. Verify battery FFF4 and FFF6 values.
-6. **Brain Wi-Fi test:** With the S3 still in beta proxy window, provision your own SSID/password from the native iPhone app after choosing S3 (never paste a password into Serial Monitor logs). Expected: S3 prints \`Brain WiFi CONNECTED\`, the C5 Wi-Fi icon turns green and C5 diagnostics show **S3 IP**. Disconnect S3 Wi-Fi using iPhone; C5 Wi-Fi icon should turn grey even though C5 itself never initializes Wi-Fi.
-7. After authorizing the Brain with Apple's picker, use the app's **Active Bluetooth device** menu to select the Brain; note the S3 currently retains the \`-DEV\` BLE name. Test plain text, mood, brightness, settings, then Japanese text/glyphs and power readings. **Do not remove the old C5 accessory record unless you intentionally want to.** Its radio is disabled in new firmware, so switching back will require USB rollback.
-8. If the app or UART fails, restore both old firmware sketches over USB (especially C5) using the known commit. Disconnect shared 5V before using two programming cables.
+## First test: one command, then build up
 
-## Remaining limits
+1. Open S3 Serial Monitor at **115200 + Newline**. Confirm `[S3] C5 UART connected` and periodic `[C5] STATUS ...`. If Face UART times out, retain the entire log, especially the new `bad_frames`/queued counts.
+2. Open the rebuilt iPhone app, choose or pair **CuteDisplay-Brain-DEV**, and wait until it says **Connected securely to CuteDisplay**. S3 should log `BLE encryption/bonding succeeded; app relay READY`. The BLE icon on the C5 now reflects this *secure Brain connection* (not C5's own radio).
+3. Send **one** mascot setting `C:1` (or tap Kitty) and verify that C5 changes and S3 logs `BLE -> C5 command acknowledged`. Do not begin the huge Japanese glyph batch until a single command passes.
+4. Then send **Hello from Brain**; finally try one **Japanese** short text. Watch for `ERR:` or `Face UART timed out`, and confirm no `queue full` warnings appear. Hundreds of G2 glyph fragments may take longer now because the app waits for each C5 ACK, but ordering and safety matter more than raw send throughput.
+5. Set S3 Wi-Fi SSID/password in the iPhone app (only your own network; never paste passwords into diagnostics). Send Connect; verify S3 logs `Brain WiFi CONNECTED`, C5 Wi-Fi icon turns green, and its diagnostic screen displays the **S3 IP**.
+6. Hold the C5 left button for ~1.4 seconds. It must display **S3 WIFI OFF**, the S3 Wi-Fi should disconnect and its icon turns grey. Hold again to reconnect and get **S3 WIFI ON**. If no SSID was saved, C5 displays **SET WIFI IN APP**.
+7. If BLE bond fails again, capture the *new* pairing and S3 logs; do not erase C5 battery or display settings. If the UART timeout recurs, repeat with two independent USB supplies and **no 5V bridge** to distinguish unstable power from software.
 
-- Neither an on-device Arduino build nor an Xcode build was run; compile issues are possible. Send exact compiler diagnostics before assuming a working update.
-- Encryption + Just Works bonding is **not MITM-resistant identity verification**. The 10-minute USB gate is a temporary diagnostic safeguard, not production secure onboarding. Persistent secure authorization and pairing UX still need implementation.
-- BLE GATT writes from iPhone can queue faster than the C5 can fully commit many glyph packets; app-level backpressure and UART recovery under reboot need stress testing. Do not claim exactly-once delivery.
-- S3 Wi-Fi uses a basic retry loop and ESP32 station connection only. **AI/voice/network API communication is not yet added.**
-- C5 audio, local BLE, local Wi-Fi are disabled by design; later microphone and speaker belong on S3. Test 5V rail capacity and brownouts before wiring audio modules.
+## Limitations
+
+- The assistant has not run an Arduino or Xcode build; source requires compilation and physical tests.
+- Just Works bonding encrypts communication but doesn't provide authenticated peer identity or MITM protection.
+- The 5V shared-power current rating and USB backfeed behavior have not been measured.
+- The C5 Bluetooth/Wi-Fi remains intentionally disabled and cannot be a fallback without USB reflashing the old firmware.
+- Wi-Fi status is association, not proof of Internet or AI-server reachability. S3 AI/voice/camera integrations remain future work.

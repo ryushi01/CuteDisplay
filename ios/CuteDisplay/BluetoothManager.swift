@@ -78,6 +78,12 @@ final class BluetoothManager: NSObject, ObservableObject {
     // Keep BLE writes serialized so message, glyph and settings commands preserve order.
     private var pendingCommands: [String] = []
     private var waitingForWrite = false
+    // S3 FFF1 has NOTIFY and acknowledges actual C5 UART completion.
+    // The original C5 FFF1 has no NOTIFY and still uses GATT write responses.
+    private var awaitingBrainAck = false
+    private var brainWriteComplete = false
+    private var brainResponse: String?
+    private var bleCommandGeneration = 0
 
     var isSimulator: Bool {
         #if targetEnvironment(simulator)
@@ -307,10 +313,20 @@ final class BluetoothManager: NSObject, ObservableObject {
         for characteristic in characteristics {
             if service.uuid == controlServiceUUID && characteristic.uuid == commandUUID {
                 commandCharacteristic = characteristic
-                isConnected = true
-                status = "Connected to CuteDisplay"
-                stopLANFallback()
-                sendNext()
+                if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
+                    device.setNotifyValue(true, for: characteristic)
+                }
+                // Service discovery is not BLE security/bonding.
+                // A read of encrypted FFF1 triggers pairing on iOS, and the
+                // app becomes usable only after didUpdateValueFor succeeds.
+                if !isConnected {
+                    status = "Securing Bluetooth with the Brain..."
+                    if characteristic.properties.contains(.read) {
+                        device.readValue(for: characteristic)
+                    } else {
+                        status = "Brain control characteristic is not readable"
+                    }
+                }
             } else if service.uuid == networkServiceUUID && characteristic.uuid == networkCharacteristicUUID {
                 networkCharacteristic = characteristic
                 networkDetailsAvailable = true
@@ -444,6 +460,10 @@ final class BluetoothManager: NSObject, ObservableObject {
         networkRefreshStarted = false
         if !wifiFallbackConnected { pendingCommands.removeAll() }
         waitingForWrite = false
+        awaitingBrainAck = false
+        brainWriteComplete = false
+        brainResponse = nil
+        bleCommandGeneration += 1  // Invalidate any pending ACK timeout.
         peripheral = nil
         if !wifiFallbackConnected { isConnected = false }
     }
@@ -645,10 +665,28 @@ final class BluetoothManager: NSObject, ObservableObject {
     private func sendNext() {
         guard !waitingForWrite, !pendingCommands.isEmpty else { return }
         if let peripheral, let characteristic = commandCharacteristic, peripheral.state == .connected {
+            // Brain commands require an end-to-end ACK; without the FFF1
+            // notification subscription we must NOT flood the UART queue.
+            let brainProxy = characteristic.properties.contains(.notify)
+            if brainProxy && !characteristic.isNotifying { return }
             let next = pendingCommands.removeFirst()
             guard let data = next.data(using: .utf8) else { return }
             waitingForWrite = true
+            awaitingBrainAck = brainProxy
+            brainWriteComplete = false
+            brainResponse = nil
+            bleCommandGeneration += 1
+            let thisCommand = bleCommandGeneration
             peripheral.writeValue(data, for: characteristic, type: .withResponse)
+            if brainProxy {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(20))
+                    guard let self, self.bleCommandGeneration == thisCommand,
+                          self.awaitingBrainAck, self.waitingForWrite else { return }
+                    self.awaitingBrainAck = false
+                    self.commandCompleted(errorMessage: "Brain UART response timed out (20s)")
+                }
+            }
         } else if wifiFallbackConnected {
             let next = pendingCommands.removeFirst()
             waitingForWrite = true
@@ -740,6 +778,18 @@ extension BluetoothManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateNotificationStateFor characteristic: CBCharacteristic,
                     error: Error?) {
+        if characteristic.uuid == commandUUID {
+            if let error {
+                status = "Brain command notifications unavailable: \(error.localizedDescription)"
+                isConnected = false
+                pendingCommands.removeAll()
+                awaitingBrainAck = false
+                waitingForWrite = false
+            } else {
+                sendNext()
+            }
+            return
+        }
         guard characteristic.uuid == networkCharacteristicUUID else { return }
         if let error {
             status = "Wi-Fi detail subscription failed: \(error.localizedDescription)"
@@ -753,6 +803,32 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if characteristic.uuid == commandUUID {
+            if let error {
+                isConnected = false
+                status = "Bluetooth pairing required: \(error.localizedDescription)"
+                return
+            }
+            if !isConnected {
+                isConnected = true
+                status = "Connected securely to CuteDisplay"
+                stopLANFallback()
+                sendNext()
+                // Network characteristic may have been discovered earlier,
+                // before pairing; request its current Brain-owned values now.
+                if networkCharacteristic != nil { refreshNetworkDetails() }
+            } else if awaitingBrainAck,
+                      let data = characteristic.value,
+                      let response = String(data: data, encoding: .utf8) {
+                if response.hasPrefix("ACK:") ||
+                   response.hasPrefix("ERR:") ||
+                   response.hasPrefix("NACK:") {
+                    brainResponse = response
+                    finishBrainCommandIfReady()
+                }
+            }
+            return
+        }
         if characteristic.uuid == networkCharacteristicUUID {
             guard error == nil, let data = characteristic.value,
                   let value = String(data: data, encoding: .utf8),
@@ -852,11 +928,44 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral,
                     didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        commandCompleted(errorMessage: error?.localizedDescription)
+        if let error, (error as NSError).code == 5 {
+            // CBATTError.insufficientAuthentication: never pretend write
+            // worked. Require a successful protected FFF1 read/re-pair.
+            isConnected = false
+            status = "Brain Bluetooth encryption required; reconnect and pair again"
+            if let control = commandCharacteristic { peripheral.readValue(for: control) }
+        }
+        if let error {
+            // The GATT write failed (e.g. pairing not finished).
+            awaitingBrainAck = false
+            commandCompleted(errorMessage: error.localizedDescription)
+        } else if awaitingBrainAck {
+            brainWriteComplete = true
+            finishBrainCommandIfReady()
+        } else {
+            // Legacy C5 firmware does not provide FFF1 end-to-end ACKs.
+            commandCompleted(errorMessage: nil)
+        }
+        // Brain: both BLE write callback AND C5 UART ACK must complete.
+    }
+
+    private func finishBrainCommandIfReady() {
+        guard awaitingBrainAck, brainWriteComplete,
+              let response = brainResponse else { return }
+        awaitingBrainAck = false
+        if response.hasPrefix("ACK:") {
+            commandCompleted(errorMessage: nil)
+        } else {
+            commandCompleted(errorMessage: "Brain rejected command: \(response)")
+        }
     }
 
     private func commandCompleted(errorMessage: String?) {
         waitingForWrite = false
+        awaitingBrainAck = false
+        brainWriteComplete = false
+        brainResponse = nil
+        bleCommandGeneration += 1
         if let errorMessage {
             pendingCommands.removeAll()
             status = "Send failed: \(errorMessage)"

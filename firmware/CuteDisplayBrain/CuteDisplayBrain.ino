@@ -12,6 +12,9 @@
 #include <BLEUtils.h>
 #include <BLEAdvertising.h>
 #include <BLESecurity.h>
+#if defined(CONFIG_BLUEDROID_ENABLED)
+#include <BLE2902.h>
+#endif
 // BLECharacteristic.h (included by the Arduino BLE library) provides
 // ESP_GATT_PERM_* access permission constants on Arduino-ESP32 3.x.
 // Do not include the ESP-IDF-internal esp_gatt_defs.h directly.
@@ -24,6 +27,9 @@ static constexpr int SEG_BYTES=38;
 static constexpr uint32_t PROXY_WINDOW_MS=600000UL;
 static BLECharacteristic *controlChar=nullptr,*batteryChar=nullptr,*powerChar=nullptr,*networkChar=nullptr;
 static bool clientConnected=false;
+static volatile bool bleAuthenticated=false;
+static volatile bool pairingOK=false,pairingFailed=false;
+static volatile uint8_t pairingFailureReason=0;
 static bool wifiEnabled=false,wifiDHCP=true,wifiConnecting=false;
 static String wifiSSID,wifiPassword,staticIP,staticMask,staticGateway,staticDNS;
 static uint32_t wifiStarted=0,nextWiFiAttempt=0,lastWiFiPoll=0,lastRadioSent=0;
@@ -32,7 +38,8 @@ static IPAddress configuredIP,configuredMask,configuredGateway,configuredDNS;
 
 static volatile bool connectPending=false,disconnectPending=false;
 static QueueHandle_t incomingCommands=nullptr,networkQueue=nullptr;
-static bool proxyEnabled=false,faceOnline=false;
+static volatile bool bleDropNotReady=false,bleDropFull=false;
+static volatile bool proxyEnabled=false,faceOnline=false;
 static uint32_t proxyDeadline=0,lastFace=0,lastHello=0,lastHeartbeat=0,lastNetSent=0;
 static uint16_t nextSeq=0;
 static CuteLink::Reader frameReader;
@@ -47,8 +54,33 @@ static uint16_t activeSeq=0;
 static uint32_t chunkSentAt=0;
 static String activeFramePayload;
 
+// Just Works bonding encrypts the link but does not authenticate the peer
+// against an active MITM. Do not treat it as production identity proof.
+class BrainSecurityCallbacks:public BLESecurityCallbacks{
+#if defined(CONFIG_BLUEDROID_ENABLED)
+ void onAuthenticationComplete(esp_ble_auth_cmpl_t result)override{
+  pairingFailureReason=result.fail_reason;
+  if(result.success)pairingOK=true;else pairingFailed=true;
+ }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+ void onAuthenticationComplete(ble_gap_conn_desc *desc)override{
+  if(desc && desc->sec_state.encrypted)pairingOK=true;
+  else pairingFailed=true;
+ }
+#endif
+};
 class ServerEvents:public BLEServerCallbacks{
  void onConnect(BLEServer*)override{connectPending=true;}
+#if defined(CONFIG_BLUEDROID_ENABLED)
+ void onConnect(BLEServer*,esp_ble_gatts_cb_param_t *params)override{
+  // Trigger pairing before protected GATT reads/writes.
+  if(params)BLESecurity::startSecurity(params->connect.remote_bda);
+ }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+ void onConnect(BLEServer*,ble_gap_conn_desc *desc)override{
+  if(desc)BLESecurity::startSecurity(desc->conn_handle);
+ }
+#endif
  void onDisconnect(BLEServer*)override{disconnectPending=true;}
 };
 class CommandEvents:public BLECharacteristicCallbacks{
@@ -56,10 +88,12 @@ class CommandEvents:public BLECharacteristicCallbacks{
   String v=c->getValue();
   if(!incomingCommands||v.isEmpty()||v.length()>MAX_CMD)return;
   for(size_t i=0;i<v.length();++i)if(v[i]=='\0')return;
+  if(!bleAuthenticated || !proxyEnabled || !faceOnline){
+   bleDropNotReady=true;return;
+  }
   char row[MAX_CMD+1]={};
   memcpy(row,v.c_str(),v.length());
-  if(xQueueSend(incomingCommands,row,0)!=pdTRUE)
-    Serial.println("[S3] WARNING: command queue full; BLE write not delivered");
+  if(xQueueSend(incomingCommands,row,0)!=pdTRUE)bleDropFull=true;
  }
 };
 static uint16_t sendLink(const char *kind,const String &payload=""){
@@ -145,6 +179,7 @@ static void pushNetwork(const String &v){
   Serial.println("[S3] Network telemetry queue full");
 }
 static void sendRadioStatus(bool immediate);
+static void toggleBrainWiFiByButton();
 static void processFace(const CuteLink::Frame &f){
  lastFace=millis();
  if(!faceOnline)Serial.println("[S3] C5 UART connected");
@@ -160,6 +195,9 @@ static void processFace(const CuteLink::Frame &f){
   // C5 radios are disabled; ignore any stale C5 radio telemetry.
  } else if(f.type=="BATTERY"){
   Serial.printf("[C5] BATTERY %s\n",f.payload.c_str());
+ } else if(f.type=="WIFI_TOGGLE"){
+  // Physical GPIO0 long-press request from the C5, not an untrusted BLE write.
+  toggleBrainWiFiByButton();
  } else if(f.type=="STATUS"){
   Serial.printf("[C5] STATUS %s\n",f.payload.c_str());
  } else if(f.type=="LOG"){
@@ -238,7 +276,7 @@ static void stopBrainWiFi(){
  wifiConnecting=false;nextWiFiAttempt=0;
 }
 static void networkInfo(const String &field){
- if(!clientConnected)return;
+ if(!clientConnected || !bleAuthenticated)return;
  if(field=="LINK"){pushNetwork(String("N:LINK:")+(brainWiFiOnline()?"1":"0"));return;}
  if(field=="MODE"){pushNetwork(String("N:MODE:")+(wifiDHCP?"DHCP":"STATIC"));return;}
  if(field=="IP"){pushNetwork("N:IP:"+(brainWiFiOnline()?WiFi.localIP().toString():String("-")));return;}
@@ -307,6 +345,26 @@ static bool controlBrainWiFi(const String &cmd){
  }
  return true;
 }
+static void toggleBrainWiFiByButton(){
+ if(wifiEnabled){
+  wifiEnabled=false;
+  persistBrainWiFi();
+  stopBrainWiFi();
+  sendLink("WIFI_STATE","OFF");
+  Serial.println("[S3] C5 long press: Brain WiFi OFF");
+ } else if(wifiSSID.isEmpty()){
+  sendLink("WIFI_STATE","NO_CONFIG");
+  Serial.println("[S3] C5 long press: configure S3 WiFi from iPhone first");
+ } else {
+  wifiEnabled=true;
+  persistBrainWiFi();
+  startBrainWiFi();
+  sendLink("WIFI_STATE","ON");
+  Serial.println("[S3] C5 long press: Brain WiFi ON, connecting...");
+ }
+ networkInfo("LINK");
+ sendRadioStatus(true);
+}
 static void updateBrainWiFi(){
  uint32_t now=millis();
  if((uint32_t)(now-lastWiFiPoll)<500UL)return;
@@ -333,7 +391,7 @@ static void sendRadioStatus(bool immediate){
  uint32_t now=millis();
  if(!faceOnline || (!immediate && (uint32_t)(now-lastRadioSent)<1800UL))return;
  lastRadioSent=now;
- String packet=String("b=")+(clientConnected?"1":"0")+
+ String packet=String("b=")+(bleAuthenticated?"1":"0")+
               ";w="+(brainWiFiOnline()?"1":"0")+
               ";ip="+(brainWiFiOnline()?WiFi.localIP().toString():String("-"));
  sendLink("RADIO",packet);
@@ -345,7 +403,9 @@ static void pollFace(){
  uint32_t now=millis();
  if(faceOnline&&(uint32_t)(now-lastFace)>10000UL){
   faceOnline=false;
-  Serial.println("[S3] Face UART timed out");
+  Serial.printf("[S3] Face UART timed out: silence=%lums bad_frames=%lu queued=%u\n",
+     (unsigned long)(now-lastFace),(unsigned long)frameReader.invalid,
+     incomingCommands?(unsigned)uxQueueMessagesWaiting(incomingCommands):0);
   cancelCommand("LINK_LOST");
  }
  if(!faceOnline&&(uint32_t)(now-lastHello)>=2000UL){
@@ -355,19 +415,19 @@ static void pollFace(){
   lastHeartbeat=now;sendLink("HEARTBEAT");
  }
  sendRadioStatus(false);
- if(activeSeq&&(uint32_t)(now-chunkSentAt)>1200UL){
+ if(activeSeq&&(uint32_t)(now-chunkSentAt)>2500UL){
   if(retryCount<2){
    ++retryCount;
    Serial.println("[S3] Retrying UART chunk after ACK timeout");
    sendChunk(true);
   }else cancelCommand("UART_TIMEOUT");
  }
- if(proxyEnabled&&(int32_t)(now-proxyDeadline)>=0){
+ if(proxyEnabled && proxyDeadline && (int32_t)(now-proxyDeadline)>=0){
   stopProxy();Serial.println("[S3] Proxy test window expired");
  }
 }
 static void pollNetwork(){
- if(!clientConnected||!networkQueue||!networkChar)return;
+ if(!clientConnected||!bleAuthenticated||!networkQueue||!networkChar)return;
  if((uint32_t)(millis()-lastNetSent)<50UL)return;
  char item[97]={};
  if(xQueueReceive(networkQueue,item,0)==pdTRUE){
@@ -377,7 +437,19 @@ static void pollNetwork(){
  }
 }
 static void pollBLECommands(){
- if(!incomingCommands || activeSeq || !proxyEnabled)return;
+ if(bleDropNotReady){
+  bleDropNotReady=false;
+  proxyResult("ERR:NOT_READY");
+  Serial.println("[S3] BLE write rejected: pairing or Face not ready");
+ }
+ if(bleDropFull){
+  bleDropFull=false;
+  proxyResult("ERR:QUEUE_FULL");
+  Serial.println("[S3] BLE write rejected: command queue full");
+ }
+ // Never deliver app/WiFi credentials until the BLE link is encrypted and
+ // the pairing-complete event has enabled this session.
+ if(!incomingCommands || activeSeq || !proxyEnabled || !bleAuthenticated)return;
  char item[MAX_CMD+1]={};
  if(xQueueReceive(incomingCommands,item,0)!=pdTRUE)return;
  if(!faceOnline){proxyResult("ERR:FACE_OFFLINE");return;}
@@ -395,8 +467,8 @@ static void consoleCommand(String cmd){
   return;
  }
  if(cmd=="status"){
-  Serial.printf("[S3] face=%d BLE_client=%d proxy=%d active=%u bad_frames=%lu queued=%u\n",
-   faceOnline,clientConnected,proxyEnabled,activeSeq,(unsigned long)frameReader.invalid,
+  Serial.printf("[S3] face=%d BLE_client=%d paired=%d proxy=%d active=%u bad_frames=%lu queued=%u\n",
+   faceOnline,clientConnected,bleAuthenticated,proxyEnabled,activeSeq,(unsigned long)frameReader.invalid,
    incomingCommands?(unsigned)uxQueueMessagesWaiting(incomingCommands):0);
   if(faceOnline){sendLink("GET_STATUS");sendRadioStatus(true);}
   Serial.printf("[S3] Brain WiFi %s, BLE client %s\n",
@@ -405,8 +477,12 @@ static void consoleCommand(String cmd){
  }
  if(cmd=="proxy on"||cmd=="ble on"){
   if(!faceOnline){Serial.println("[S3] Face offline; cannot enable proxy");return;}
-  proxyEnabled=true;proxyDeadline=millis()+PROXY_WINDOW_MS;
-  Serial.println("[S3] Encrypted BLE proxy test ENABLED for 10 minutes");
+  if(!bleAuthenticated){
+   Serial.println("[S3] iPhone is not securely paired; proxy stays disabled");
+   return;
+  }
+  proxyEnabled=true;proxyDeadline=0;
+  Serial.println("[S3] Authenticated BLE proxy enabled for this connection");
   proxyResult("PROXY_READY");return;
  }
  if(cmd=="proxy off"||cmd=="ble off"){
@@ -451,9 +527,10 @@ static void pollUSB(){
 void setup(){
  Serial.begin(115200);delay(250);
  Serial.println("[S3] CuteDisplay Phase 3 secure BLE proxy beta");
+ Serial1.setRxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
  Serial.printf("[S3] UART TX=%d RX=%d 115200\n",BrainPinPlan::UART_TX,BrainPinPlan::UART_RX);
- incomingCommands=xQueueCreate(256,MAX_CMD+1);
+ incomingCommands=xQueueCreate(16,MAX_CMD+1);
  networkQueue=xQueueCreate(48,97);
  if(!incomingCommands||!networkQueue){
   Serial.println("[S3] ERROR: unable to allocate command/telemetry queues");
@@ -463,7 +540,8 @@ void setup(){
  BLEDevice::setMTU(185);
  BLESecurity *security=new BLESecurity();
  security->setCapability(ESP_IO_CAP_NONE);
- security->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_BOND);
+ security->setAuthenticationMode(true,false,true);
+ BLEDevice::setSecurityCallbacks(new BrainSecurityCallbacks());
  BLEServer *server=BLEDevice::createServer();
  server->setCallbacks(new ServerEvents());
  BLEService *ctrl=server->createService("FFF0");
@@ -474,25 +552,38 @@ void setup(){
  // Bluedroid: encrypted read/write permissions. Just Works does not provide MITM.
  controlChar->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED|ESP_GATT_PERM_WRITE_ENCRYPTED);
  controlChar->setCallbacks(new CommandEvents());
+#if defined(CONFIG_BLUEDROID_ENABLED)
+ controlChar->addDescriptor(new BLE2902());
+#endif
  controlChar->setValue("PROXY_DISABLED");ctrl->start();
  BLEService *bs=server->createService("180F");
  batteryChar=bs->createCharacteristic("2A19",BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_NOTIFY);
- uint8_t unknown=255;batteryChar->setValue(&unknown,1);bs->start();
+ uint8_t unknown=255;
+#if defined(CONFIG_BLUEDROID_ENABLED)
+ batteryChar->addDescriptor(new BLE2902());
+#endif
+ batteryChar->setValue(&unknown,1);bs->start();
  BLEService *ps=server->createService("FFF3");
  powerChar=ps->createCharacteristic("FFF4",BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_NOTIFY);
+#if defined(CONFIG_BLUEDROID_ENABLED)
+ powerChar->addDescriptor(new BLE2902());
+#endif
  powerChar->setValue("0,0,0,0,0,0,0,0");ps->start();
  BLEService *ns=server->createService("FFF5");
  networkChar=ns->createCharacteristic("FFF6",
    BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_NOTIFY|
    BLECharacteristic::PROPERTY_READ_ENC);
  networkChar->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED);
+#if defined(CONFIG_BLUEDROID_ENABLED)
+ networkChar->addDescriptor(new BLE2902());
+#endif
  networkChar->setValue("N:LINK:0");ns->start();
  BLEAdvertising *ad=BLEDevice::getAdvertising();
  ad->addServiceUUID(BLEUUID("FFF0"));
  ad->addServiceUUID(BLEUUID("180F"));
  ad->setScanResponse(true);
  BLEDevice::startAdvertising();
- Serial.println("[S3] Encrypted FFF1 writes; BLE proxy starts disabled (proxy on)");
+ Serial.println("[S3] Encrypted FFF1 writes; relay activates automatically once BLE pairs");
  // Start BLE before WiFi (avoids radio/heap fragmentation during BLE init).
  restoreBrainWiFi();
  if(wifiEnabled)startBrainWiFi();
@@ -504,17 +595,37 @@ void loop(){
  updateBrainWiFi();
  if(connectPending){
   connectPending=false;clientConnected=true;
-  Serial.println("[S3] BLE connected; encrypted write will trigger bonding if needed");
+  bleAuthenticated=false;
+  // Do not clear pairingOK: onConnect() can finish security before loop().
+  Serial.println("[S3] BLE transport connected; waiting for security/bonding");
+  bleDropNotReady=false;bleDropFull=false;
   sendRadioStatus(true);
-  networkInfo("LINK");
  }
  if(disconnectPending){
   disconnectPending=false;clientConnected=false;
+  bleAuthenticated=false;pairingOK=false;pairingFailed=false;
   stopProxy();
+  bleDropNotReady=false;bleDropFull=false;
   if(networkQueue)xQueueReset(networkQueue);
   BLEDevice::startAdvertising();
   sendRadioStatus(true);
   Serial.println("[S3] BLE disconnected; proxy gate closed");
+ }
+ if(pairingOK){
+  pairingOK=false;
+  bleAuthenticated=true;
+  proxyEnabled=true;proxyDeadline=0; // Session-scoped, no USB command needed.
+  Serial.println("[S3] BLE encryption/bonding succeeded; app relay READY");
+  proxyResult("PROXY_READY");
+  networkInfo("LINK");
+  sendRadioStatus(true);
+ }
+ if(pairingFailed){
+  pairingFailed=false;
+  bleAuthenticated=false;
+  stopProxy();
+  Serial.printf("[S3] BLE pairing failed, reason=%u (re-pair iPhone if old bond)\n",
+    (unsigned)pairingFailureReason);
  }
  pollBLECommands();
  pollNetwork();

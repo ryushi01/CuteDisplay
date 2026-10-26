@@ -13,6 +13,24 @@ Tell the assistant:
 
 Read the actual repository before making code changes because this document can become stale.
 
+## Latest field failure and repair — 2026-10-26 (NOT YET RETESTED)
+
+User tried the earlier Phase-3 firmware/app on physical S3+C5 and reported iPhone BLE apparently connecting, but error **"Send failed: authentication is insufficient"** on commands; message, mascot settings and S3 Wi-Fi setup would not work. Subsequent S3 logs:
+```text
+[C5] STATUS lcd=1;ble=1;wifi=0;soc=100
+[S3] WARNING: command queue full; BLE write not delivered
+[S3] C5 UART connected
+[C5] STATUS lcd=1;ble=0;wifi=0;soc=100
+[S3] Face UART timed out
+```
+The early S3 firmware's `FFF1` permissions required encryption, but the Brain had not initiated pairing reliably or enabled the proxy automatically. Independently, the SwiftUI app interpreted GATT **write-with-response** as C5 command success, so multi-packet glyph and settings uploads flooded S3's UART queue even when the proxy was disabled. The C5-to-S3 UART timeout implies >10 seconds without valid inbound frames and is **not proven to be only queue-related**: possible reset, poor jumper, power/brownout or processing stall. Do not claim a proven root cause for the UART silence from these logs alone.
+
+**Current source changes awaiting Arduino/Xcode and hardware testing:** S3 initiates BLE secure connection on connect (Bluedroid/NimBLE), listens for security-complete event, enables FFF1 bridge automatically for **each bonded/encrypted session**, creates notification CCC descriptors and refuses BLE writes while not ready. Swift `BluetoothManager` reads protected FFF1 first, subscribes to its notifications and **waits for ACK:CMD/ACK:WIFI or ERR** before sending the next command; legacy C5 direct GATT (without FFF1 notify) still uses old write callbacks for recovery builds. S3 UART command queue is now 16 bounded slots (not 256) with explicit ERROR on overflow, and both S3/C5 UART RX software buffers are 2048 bytes. The C5 ACKs after processing commands; S3 logs silence and invalid frames if the UART stops. No automatic replay after iOS ACK timeout; old UI queue is cancelled on error.
+
+**New requested feature:** C5 GPIO0 1.4-second long-press sends `WIFI_TOGGLE` to Brain by UART, S3 turns its **own** Wi-Fi on/off and sends `WIFI_STATE` feedback to the LILYGO. If no network has been set on S3, LILYGO displays **SET WIFI IN APP**. The C5 radio remains disabled even when the button is held. HUD status, S3 Wi-Fi credentials and S3-only BLE remain the architecture.
+
+**Next test, one item at a time:** (1) reflash S3+C5 and build/install matching Swift code, repair old iPhone pairing if needed, confirm app "Connected securely" and send a single `C:1`; (2) send a message/Japanese glyphs to confirm queue pacing; (3) configure S3 Wi-Fi and test C5 button toggle + icon/IP; (4) if timeout still happens, capture complete S3 logs including `bad_frames` and test separate USB with the shared 5V jumper removed. Git reference Phase 2 known-good recovery baseline: `f2e352c3ccb9bf3e4487c41cb3e2de5d6c3fdf5d` (C5 BLE reenabled when reflashed). Do not replace/erase NVS unless deliberately resetting bonds.
+
 ## Latest engineering update — 2026-10-26 Brain owns BLE/Wi-Fi, C5 radios DISABLED (UNTESTED BETA)
 
 Per explicit user request, the new Phase-3 firmware makes the ESP32-S3 the **only wireless controller**: C5 does not initialize Bluetooth, connect to Wi-Fi, or start its old LAN server. UART W: commands sent to the C5 are rejected, and the long-press GPIO0 Wi-Fi toggle no longer enables C5 radio. S3 now manages Wi-Fi credentials, DHCP/static IP, station connection and Wi-Fi telemetry; S3 BLE FFF0/FFF1 is encrypted/Just Works bonded and exposes C5 power/battery over 180F/2A19 and FFF3/FFF4 plus **S3's own** Wi-Fi data over FFF5/FFF6. S3 broadcasts `RADIO` b/w/IP frames to C5 every ~1.8 seconds. C5 top-right Bluetooth/Wi-Fi indicators and physical-button status overlay display **the real S3 BLE-client & S3 Wi-Fi station** state and S3 IP; when S3 status is missing/offline, both icons show disconnected (never fall back to C5). C5 battery is still physically measured on C5. Existing Kitty and all other display behavior intended unchanged.
