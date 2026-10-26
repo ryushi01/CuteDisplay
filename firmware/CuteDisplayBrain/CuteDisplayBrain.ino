@@ -12,6 +12,7 @@
 #include <BLEUtils.h>
 #include <BLEAdvertising.h>
 #include <BLESecurity.h>
+#include <esp_arduino_version.h>
 #if defined(CONFIG_NIMBLE_ENABLED)
 #include <host/ble_store.h>
 #endif
@@ -25,7 +26,7 @@
 #include "CuteLink.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
-static constexpr char S3_FW_VERSION[]="Phase4-BLEPAIR-FIX2-20261026";
+static constexpr char S3_FW_VERSION[]="Phase4-BLE-COMPAT-20261026";
 static constexpr size_t MAX_CMD=96;
 // Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
 // UART frame payload (one-digit chunk index, total, delimiters).
@@ -575,7 +576,19 @@ void setup(){
  BLEDevice::setMTU(185);
  BLESecurity *security=new BLESecurity();
  security->setCapability(ESP_IO_CAP_NONE);
- security->setAuthenticationMode(true,false,true);
+ // iPhone reported peer-unspecified SMP failure 0x0508 on SC-only pairing.
+ // Permit standard Just Works bonding for compatibility, but continue
+ // requiring encryption on FFF1 and FFF6. This pairing has no MITM defense.
+ security->setAuthenticationMode(true,false,false);
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3,3,12)
+ // Allow iOS's encrypted FFF1 read to initiate the SMP exchange rather
+ // than beginning it automatically while AccessorySetupKit is discovering.
+ BLESecurity::setForceAuthentication(false);
+ Serial.println("[S3] BLE profile: bonded Just Works, no SC-only requirement, on-demand SMP");
+#else
+ Serial.println("[S3] BLE core <3.3.12: forced pairing may still race; update ESP32 board package");
+#endif
+ Serial.printf("[S3] Arduino-ESP32 core %s\n",ESP_ARDUINO_VERSION_STR);
  BLEDevice::setSecurityCallbacks(new BrainSecurityCallbacks());
  BLEServer *server=BLEDevice::createServer();
  server->setCallbacks(new ServerEvents());
@@ -633,7 +646,7 @@ void loop(){
   bleAuthenticated=false;
   if(controlChar)controlChar->setValue("PAIRING_PENDING");
   // Do not clear pairingOK: onConnect() can finish security before loop().
-  Serial.println("[S3] BLE transport connected; waiting for security/bonding");
+  Serial.println("[S3] BLE connected; awaiting encrypted FFF1 read and bonding");
   bleDropNotReady=false;bleDropFull=false;
   sendRadioStatus(true);
  }
@@ -666,7 +679,7 @@ void loop(){
      (unsigned)pairingFailureStatus,(unsigned)pairingFailureStatus,
      (unsigned)pairingFailureReason);
   if(pairingFailureStatus==0x0508){
-   Serial.println("[S3] NimBLE: iPhone reported unspecified pairing failure. Remove stale bonds on both devices, then retry.");
+   Serial.println("[S3] NimBLE 0x0508: unspecified peer SMP failure (bond compatibility test not yet verified).");
   }
  }
  pollBLECommands();
