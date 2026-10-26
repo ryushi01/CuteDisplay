@@ -1,5 +1,5 @@
 /*
- CuteDisplay message-only firmware with audio loopback / no RSS - T-Display C5 / ESP32-C5
+ CuteDisplay display/controller firmware (audio moved to future ESP32-S3 brain) - T-Display C5 / ESP32-C5
  Message display with animated mascot,
  brightness, live AXP2602 battery level (BLE 180F / 2A19).
 
@@ -40,7 +40,6 @@
 #include "freertos/semphr.h"
 #include "esp_system.h"
 #include "esp_idf_version.h"
-#include "driver/i2s_std.h"
 
 #define PIN_CS 26
 #define PIN_DC 8
@@ -51,7 +50,6 @@
 #define BAT_SDA 2
 #define BAT_SCL 3
 #define PIN_USER_BUTTON 0 // LILYGO T-Display-C5 user button (GPIO0, active LOW)
-#define PIN_VOICE_BUTTON 28 // BOOT/right button: short battery, hold voice loopback
 #define LCD_W 320
 #define LCD_H 170
 #define MAX_CMD 96
@@ -461,33 +459,6 @@ bool bubbleTypewriter = true;
 size_t revealedCharacters = 0;
 unsigned long lastBubbleReveal = 0;
 const unsigned long BUBBLE_LETTER_MS = 135;
-// Right button: short press is intentionally inert; hold 1.4s for audio loopback.
-static bool voiceButtonRaw=HIGH;
-static bool voiceButtonStable=HIGH;
-static unsigned long voiceButtonChangedAt=0;
-static unsigned long voiceButtonPressedAt=0;
-static bool voiceButtonLongHandled=false;
-static volatile bool voiceBusy=false;
-static constexpr uint32_t VOICE_HOLD_MS=1400;
-static constexpr uint32_t VOICE_SAMPLE_RATE=16000;
-static constexpr uint32_t VOICE_RECORD_MS=2000;
-// Four exposed pins reserved for the shared-clock full-duplex I2S bus.
-// Current LILYGO T-Display-C5 breadboard audio wiring (ELEGOO 830 points):
-// INMP441: VDD=3V3, GND=GND, SCK/BCLK=GPIO1, WS=GPIO4,
-//          SD/DOUT=GPIO5, L/R=GND (left channel).
-// MAX98357A: VIN=5V only after checking available USB/VBUS current,
-//            GND=GND, BCLK=GPIO1, LRC=GPIO4, DIN=GPIO6.
-// Speaker: connect only to amplifier SPK+ and SPK- (never to GND).
-// GPIO1/GPIO4 clocks are shared; GPIO5 mic input and GPIO6 amp output
-// must NOT be connected together. USB power rail and 3V3 must not be bridged.
-// This is Phase 1 sequential local loopback, not AI streaming.
-// For the top/bottom header positions and rail safety, see:
-// docs/hardware/lilygo-c5-audio-breadboard.md
-static constexpr gpio_num_t VOICE_BCLK=GPIO_NUM_1;
-static constexpr gpio_num_t VOICE_WS=GPIO_NUM_4;
-static constexpr gpio_num_t VOICE_MIC_DIN=GPIO_NUM_5;
-static constexpr gpio_num_t VOICE_AMP_DOUT=GPIO_NUM_6;
-
 bool scrolling = false;
 int scrollX = 0;
 // User-controlled appearance. Defaults restored on every board reboot.
@@ -2413,71 +2384,6 @@ void processCommand(String cmd){
  showMessage(cmd);
 }
 
-// Audio hardware loopback: 2 seconds of INMP441 mono I2S capture into PSRAM,
-// followed by MAX98357A playback. No AI or cloud request in Phase 1.
-// Keep the sample buffer off internal heap. The task always releases I2S resources.
-static void voiceLoopbackTask(void*){
- constexpr size_t sampleCount=(VOICE_SAMPLE_RATE*VOICE_RECORD_MS)/1000;
- int32_t* audio=(int32_t*)heap_caps_malloc(sampleCount*sizeof(int32_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
- if(!audio){Serial.println("[VOICE] PSRAM allocation failed");voiceBusy=false;vTaskDelete(nullptr);return;}
- i2s_chan_handle_t tx=nullptr,rx=nullptr;
- i2s_chan_config_t chan=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
- chan.dma_desc_num=4;chan.dma_frame_num=128;
- esp_err_t err=i2s_new_channel(&chan,&tx,&rx);
- if(err!=ESP_OK){Serial.printf("[VOICE] I2S channel error=%d\n",(int)err);goto cleanup;}
- {
-  i2s_std_config_t conf={};
-  conf.clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(VOICE_SAMPLE_RATE);
-  conf.slot_cfg=I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,I2S_SLOT_MODE_MONO);
-  conf.gpio_cfg.mclk=I2S_GPIO_UNUSED;
-  conf.gpio_cfg.bclk=VOICE_BCLK;conf.gpio_cfg.ws=VOICE_WS;
-  conf.gpio_cfg.dout=VOICE_AMP_DOUT;conf.gpio_cfg.din=VOICE_MIC_DIN;
-  conf.gpio_cfg.invert_flags.mclk_inv=false;
-  conf.gpio_cfg.invert_flags.bclk_inv=false;
-  conf.gpio_cfg.invert_flags.ws_inv=false;
-  err=i2s_channel_init_std_mode(rx,&conf);
-  if(err==ESP_OK)err=i2s_channel_init_std_mode(tx,&conf);
-  if(err!=ESP_OK){Serial.printf("[VOICE] I2S configuration error=%d\n",(int)err);goto cleanup;}
- }
- if(i2s_channel_enable(rx)!=ESP_OK){Serial.println("[VOICE] RX enable failed");goto cleanup;}
- {
-  size_t pos=0;
-  uint32_t started=millis();
-  while(pos<sampleCount && millis()-started<VOICE_RECORD_MS+2000UL){
-   size_t got=0;
-   size_t n=min((size_t)128,sampleCount-pos);
-   esp_err_t e=i2s_channel_read(rx,audio+pos,n*sizeof(int32_t),&got,250);
-   if(e==ESP_OK)pos+=got/sizeof(int32_t);
-  }
-  i2s_channel_disable(rx);
-  Serial.printf("[VOICE] Captured %u/%u samples\n",(unsigned)pos,(unsigned)sampleCount);
-  if(pos>0 && i2s_channel_enable(tx)==ESP_OK){
-   // Keep playback quiet: clamp 24-bit microphone data to a modest level.
-   for(size_t i=0;i<pos;i++)audio[i]=audio[i]/2;
-   size_t offset=0;
-   while(offset<pos){
-    size_t wrote=0;size_t n=min((size_t)128,pos-offset);
-    esp_err_t e=i2s_channel_write(tx,audio+offset,n*sizeof(int32_t),&wrote,350);
-    if(e!=ESP_OK)break;
-    offset+=wrote/sizeof(int32_t);
-   }
-   i2s_channel_disable(tx);
-  }
- }
-cleanup:
- if(tx)i2s_del_channel(tx);
- if(rx)i2s_del_channel(rx);
- heap_caps_free(audio);
- voiceBusy=false;
- vTaskDelete(nullptr);
-}
-static void startVoiceLoopback(){
- if(voiceBusy)return;
- voiceBusy=true;
- if(xTaskCreate(voiceLoopbackTask,"CuteAudio",6144,nullptr,1,nullptr)!=pdPASS){
-  voiceBusy=false;Serial.println("[VOICE] Task allocation failed");
- }
-}
 // Static graphics/glyph data belongs in PSRAM, not the scarce internal heap.
 // These allocations happen exactly once, before NVS glyph restoration and BLE init.
 static bool initExternalCaches() {
@@ -2584,8 +2490,6 @@ void setup(){
  commandQueue=xQueueCreate(32,MAX_CMD+1);
  if(!commandQueue)Serial.println("[BLE] Queue creation failed");
  pinMode(PIN_USER_BUTTON,INPUT_PULLUP);
- pinMode(PIN_VOICE_BUTTON,INPUT_PULLUP);
- voiceButtonRaw=voiceButtonStable=digitalRead(PIN_VOICE_BUTTON);
 
  userButtonLastRaw=digitalRead(PIN_USER_BUTTON);
  userButtonStable=userButtonLastRaw;
@@ -2621,22 +2525,6 @@ void loop(){
  completeWiFiShutdown();
  unsigned long now=millis();
  checkWiFiOffSettled(now);
- // GPIO28: short press does nothing; hold >=1.4s starts audio loopback.
- bool rightRaw=digitalRead(PIN_VOICE_BUTTON);
- if(rightRaw!=voiceButtonRaw){voiceButtonRaw=rightRaw;voiceButtonChangedAt=now;}
- if(now-voiceButtonChangedAt>=35 && rightRaw!=voiceButtonStable){
-  voiceButtonStable=rightRaw;
-  if(rightRaw==LOW){voiceButtonPressedAt=now;voiceButtonLongHandled=false;}
-  else{
-   // Short press intentionally has no action.
-   voiceButtonPressedAt=0;voiceButtonLongHandled=false;
-  }
- }
- if(voiceButtonStable==LOW && voiceButtonPressedAt && !voiceButtonLongHandled &&
-    now-voiceButtonPressedAt>=VOICE_HOLD_MS){
-  voiceButtonLongHandled=true;
-  startVoiceLoopback();
- }
  updateWiFi(now);
  updateLAN();
  if(!wifiOnline()){
@@ -2763,7 +2651,7 @@ void loop(){
     revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+BUBBLE_LETTER_MS);
  if(mascotVisible && mascotIsSpeaking())untilDue(lastSpeakingFrame+105UL);
  if(chargeNoticeUntil)untilDue(lastBatteryOverlayFrame+220UL);
- if(voiceButtonStable==LOW || userButtonStable==LOW)sleepMs=min(sleepMs,(uint32_t)8);
+ if(userButtonStable==LOW)sleepMs=min(sleepMs,(uint32_t)8);
  if((int32_t)(millis()-(lastBatteryRead+BATTERY_SAMPLE_MS))<0)untilDue(lastBatteryRead+BATTERY_SAMPLE_MS);
  delay(max((uint32_t)1,sleepMs));
 }
