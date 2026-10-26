@@ -44,7 +44,6 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var lastPowerUpdate: Date?
     @Published var autoReconnect = UserDefaults.standard.object(forKey: "cuteAutoReconnect") as? Bool ?? true
     @Published var rememberedDeviceID = UserDefaults.standard.string(forKey: "cutePeripheralID")
-    @Published var isSendingDrinks = false
     @Published var lowBatteryAlertsEnabled = UserDefaults.standard.object(forKey: "cuteLowBatteryAlerts") as? Bool ?? false
     @Published var lowBatteryThreshold = UserDefaults.standard.object(forKey: "cuteLowBatteryThreshold") as? Int ?? 20
     private var lowBatteryAlertArmed = true
@@ -72,9 +71,6 @@ final class BluetoothManager: NSObject, ObservableObject {
     // One write at a time. Particularly important for D:RESET / D:ADD / D:SHOW.
     private var pendingCommands: [String] = []
     private var waitingForWrite = false
-    private var uploadsRemaining = 0
-    // Latest-wins drink updates: don't discard edits during a BLE upload.
-    private var deferredDrinks: [(name: String, count: Int)]? = nil
 
     var isSimulator: Bool {
         #if targetEnvironment(simulator)
@@ -394,9 +390,6 @@ final class BluetoothManager: NSObject, ObservableObject {
         networkRefreshStarted = false
         if !wifiFallbackConnected { pendingCommands.removeAll() }
         waitingForWrite = false
-        uploadsRemaining = 0
-        deferredDrinks = nil
-        isSendingDrinks = false
         peripheral = nil
         if !wifiFallbackConnected { isConnected = false }
     }
@@ -410,7 +403,7 @@ final class BluetoothManager: NSObject, ObservableObject {
         }
         enqueue(glyphPackets(for: [text]) + [text])
     }
-    func sendDrinksPayload(_ payload: String) { enqueue([payload]) }
+    func sendControlCommand(_ payload: String) { enqueue([payload]) }
     // Wi-Fi credentials are provisioned over the connected BLE link.
     // Only use a network that you control. Password is never logged.
     func connectWiFi(ssid: String, password: String) {
@@ -550,7 +543,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     // Queued after any earlier writes. The board turns its screen off and
     // enters deep sleep; reconnect only after pressing the hardware RESET.
     func powerOff() {
-        guard !isSimulator, isConnected, !isSendingDrinks else { return }
+        guard !isSimulator, isConnected else { return }
         enqueue(["P:OFF"])
         status = "Power-off requested — press board RESET to wake"
     }
@@ -560,53 +553,12 @@ final class BluetoothManager: NSObject, ObservableObject {
         enqueue(["B:\(brightness)"])
     }
 
-    // One complete snapshot at a time. When another edit arrives during an upload,
-    // retain only the newest snapshot and send it immediately after completion.
-    func sendDrinks(_ items: [(name: String, count: Int)]) {
-        let limited = Array(items.prefix(24))
-        guard limited.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
-            status = "Drink names cannot be empty"
-            return
-        }
-        guard limited.allSatisfy({ "D:ADD:\(String($0.name.prefix(12))),\(min(9999, max(0, $0.count)))".utf8.count <= 96 }) else {
-            status = "A drink name exceeds the BLE limit"
-            return
-        }
-        if isSimulator { status = "Demo Mode — preview updated"; return }
-        guard isConnected else { return }
-        if isSendingDrinks {
-            deferredDrinks = limited
-            status = "Another edit queued for syncing..."
-            return
-        }
-        startDrinkUpload(limited)
-    }
-
-    private func startDrinkUpload(_ items: [(name: String, count: Int)]) {
-        let entries = items.map { item in
-            "D:ADD:\(String(item.name.prefix(12))),\(min(9999, max(0, item.count)))"
-        }
-        let batch = glyphPackets(for: items.map(\.name)) + ["D:RESET"] + entries + ["D:SHOW"]
-        guard batch.allSatisfy({ $0.utf8.count <= 96 }) else {
-            status = "Bluetooth payload too long"
-            return
-        }
-        // Previous UI commands can be in the queue. All commands in this batch
-        // are appended after them, so upload progress is tracked with a sentinel
-        // count that includes those earlier queued commands.
-        uploadsRemaining = batch.count + pendingCommands.count + (waitingForWrite ? 1 : 0)
-        isSendingDrinks = true
-        status = "Synchronizing \(items.count) drinks..."
-        enqueue(batch)
-    }
-
-    // Reapply settings after reconnect, then show the requested mode.
+    // Reapply display preferences and message after reconnect.
     // Commands are queued in order and use Write With Response.
     func restoreState(theme: Int, character: Int, mood: Int,
                       visible: Bool, size: Int, font: Int,
                       bubble: Bool, typewriter: Bool, brightness: Int,
-                      modeIsDrinks: Bool, message: String,
-                      drinks: [(name: String, count: Int)]) {
+                      message: String) {
         guard isConnected else { return }
         enqueue([
             "T:\(min(24, max(0, theme)))",
@@ -619,10 +571,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             "Y:\(typewriter ? 1 : 0)",
             "B:\(min(100, max(0, brightness)))"
         ])
-        // Restore the complete drink list even if Message Mode is selected.
-        // In Message Mode the final queued command returns the LCD to the message.
-        sendDrinks(drinks)
-        if !modeIsDrinks { sendMessage(message) }
+        sendMessage(message)
     }
 
     private func enqueue(_ commands: [String]) {
@@ -850,21 +799,8 @@ extension BluetoothManager: CBPeripheralDelegate {
         waitingForWrite = false
         if let errorMessage {
             pendingCommands.removeAll()
-            uploadsRemaining = 0
-            isSendingDrinks = false
             status = "Send failed: \(errorMessage)"
             return
-        }
-        if uploadsRemaining > 0 {
-            uploadsRemaining -= 1
-            if uploadsRemaining == 0 {
-                isSendingDrinks = false
-                status = "Drink list synchronized"
-                if let latest = deferredDrinks {
-                    deferredDrinks = nil
-                    startDrinkUpload(latest)
-                }
-            }
         }
         sendNext()
     }
