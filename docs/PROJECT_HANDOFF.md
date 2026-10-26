@@ -13,6 +13,12 @@ Tell the assistant:
 
 Read the actual repository before making code changes because this document can become stale.
 
+## Latest development — 2026-10-26 Phase 2 BLE test relay / single-USB observed
+
+After confirming UART and `msg Hello from Brain`, the user reconnected S3 5V → C5 5V power (with common ground and verified UART TX/RX) and reported **both boards work with only the S3 USB-C powered**. This is a boot/operation observation; no current capacity, regulator heat, voltage stability, backfeed behavior or battery charger interactions have been electrically verified. The C5's USB input must remain unplugged while the two 5V pins are joined. Do not treat as permanent power-design validation.
+
+The **S3-only Phase 2 BLE test relay source** now uses `ble on` / `ble off` USB Serial Monitor commands to enable an **unauthenticated five-minute gated** relay from S3 `FFF0/FFF1` BLE diagnostic writes to existing UART `TEXT`, `MASCOT`, `MOOD` commands. Allowed: plain printable ASCII text (≤80 bytes, no colon/pipe), `C:0..5`, `M:0..7`; all other (including Wi-Fi credentials, power and glyph uploads) rejected. One in-flight UART response at a time, 3-second ACK/NACK timeout and no automatic retries. **New code not compiled/flashed/hardware tested yet**. C5 firmware, working pinout and native iPhone app unchanged. S3 BLE remains non-authenticated and is **NOT** a full iPhone proxy. [Phase 2 instructions](hardware/ble-relay-test.md). The next work is secure pairing, UART robustness, UTF-8 glyph transport and battery/network service proxy, then app migration.
+
 ## Latest status — 2026-10-26 two-board UART HELLO, status and display command verified
 
 User flashed the previous S3 BLE diagnostic and confirmed its serial boot/advertising logs; user reports flashing current C5. S3 USB → C5 power booted both, but C5 USB → S3 lit power while S3 failed to boot. This is not a current-path safety rating, so user chose **separate USB supplies** for development and no 5V positive jumper. Do not power two USB supplies into common 5V rails.

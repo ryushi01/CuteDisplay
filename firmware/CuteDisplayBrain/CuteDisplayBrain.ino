@@ -1,8 +1,9 @@
 /*
- CuteDisplay ESP32-S3 Brain — Phase 1 UART test and BLE diagnostic.
+ CuteDisplay ESP32-S3 Brain — Phase 2 opt-in BLE-to-C5 diagnostic relay.
  Board target: Freenove ESP32-S3-CAM N16R8, Arduino-ESP32 3.x.
- UART diagnostics are now included. Pins and frames have not been bench-tested.
- I2S/AI/camera and iPhone BLE command forwarding are NOT implemented.
+ UART HELLO/status/text path was verified on both boards.
+ New USB-opt-in diagnostic BLE relay is LIMITED and untested.
+ I2S/AI/camera and native iPhone pairing migration are NOT implemented.
  Do not flash this sketch to the LILYGO T-Display-C5.
 */
 #include <Arduino.h>
@@ -18,8 +19,8 @@ static constexpr char CONTROL_SERVICE[] = "FFF0";
 static constexpr char CONTROL_CHAR[] = "FFF1";
 static constexpr size_t MAX_CMD_BYTES = 96;
 
-// Keep all application processing in loop(), never in a BLE callback.
-// Future versions will forward validated frames through a wired UART bridge.
+// Keep callbacks fast: process and validate BLE writes in loop(), never onWrite.
+// Only harmless cosmetic commands are supported, with USB enable gate.
 static QueueHandle_t controlQueue = nullptr;
 static BLECharacteristic *controlCharacteristic = nullptr;
 static bool clientConnected = false;
@@ -49,9 +50,45 @@ static uint16_t s3Seq=0;
 static uint32_t lastC5=0,lastHello=0;
 static char consoleBuffer[112]={};
 static size_t consoleLen=0;
-static void toC5(const char *type,const String &value=""){
- if(!CuteLink::send(Serial1,++s3Seq,type,value))Serial.println("[S3] Invalid UART payload");
+static constexpr uint32_t BLE_TEST_WINDOW_MS=300000UL;
+static bool bleTestEnabled=false; // Disabled at boot; requires USB Serial command.
+static uint32_t bleTestDeadline=0;
+static uint16_t blePendingSeq=0; // One command in flight, no blind retries.
+static uint32_t blePendingAt=0;
+static uint16_t toC5(const char *type,const String &value=""){
+ uint16_t seq=++s3Seq;
+ if(!seq)seq=++s3Seq;
+ if(!CuteLink::send(Serial1,seq,type,value)){
+  Serial.println("[S3] Invalid UART payload");return 0;
+ }
+ return seq;
 }
+static void bleReply(const String &result){
+ if(!controlCharacteristic)return;
+ controlCharacteristic->setValue(result.c_str());
+ if(clientConnected)controlCharacteristic->notify();
+}
+static void bleCloseGate(){
+ bleTestEnabled=false;bleTestDeadline=0;
+ if(controlQueue)xQueueReset(controlQueue);
+}
+// The diagnostic service has no enforced link authentication. Reject anything
+// outside a small harmless allowlist (especially credentials and power commands).
+static bool decodeSafeBle(String command,String &kind,String &value){
+ if(command.length()==3&&command.startsWith("C:")&&command[2]>='0'&&command[2]<='5'){
+  kind="MASCOT";value=command.substring(2);return true;
+ }
+ if(command.length()==3&&command.startsWith("M:")&&command[2]>='0'&&command[2]<='7'){
+  kind="MOOD";value=command.substring(2);return true;
+ }
+ if(command.isEmpty()||command.length()>80)return false;
+ for(size_t i=0;i<command.length();++i){
+  uint8_t c=(uint8_t)command[i];
+  if(c<32||c>126||c==':'||c=='|')return false;
+ }
+ kind="TEXT";value=command;return true;
+}
+
 static void serviceC5() {
  CuteLink::Frame f;
  for(int i=0;i<4&&c5Reader.poll(Serial1,f);++i){
@@ -62,10 +99,25 @@ static void serviceC5() {
     CuteLink::send(Serial1,f.seq,"ACK","HELLO");
     Serial.println("[C5] HELLO");
   }else Serial.printf("[C5] seq=%u %s %s\n",f.seq,f.type.c_str(),f.payload.c_str());
+  if(blePendingSeq&&f.seq==blePendingSeq&&(f.type=="ACK"||f.type=="NACK")){
+   Serial.printf("[S3] BLE relay result: %s %s\n",f.type.c_str(),f.payload.c_str());
+   bleReply(String(f.type=="ACK"?"ACK:":"NACK:")+f.payload);
+   blePendingSeq=0;
+  }
  }
  uint32_t now=millis();
  if(c5Online&&(uint32_t)(now-lastC5)>10000UL){
   c5Online=false;Serial.println("[S3] C5 UART timed out");
+ }
+ if(blePendingSeq&&(uint32_t)(now-blePendingAt)>3000UL){
+  blePendingSeq=0;
+  Serial.println("[S3] BLE relay UART ACK timed out; no retry");
+  bleReply("ERROR:UART_TIMEOUT");
+ }
+ if(bleTestEnabled&&(int32_t)(now-bleTestDeadline)>=0){
+  bleCloseGate();
+  Serial.println("[S3] BLE test relay expired (5 minutes)");
+  bleReply("DISABLED");
  }
  if(!c5Online&&(uint32_t)(now-lastHello)>2000UL){
   lastHello=now;toC5("HELLO","S3");
@@ -74,12 +126,23 @@ static void serviceC5() {
 static void runConsole(String cmd) {
  cmd.trim();
  if(cmd=="help"){
-  Serial.println("[S3] help status hello ping battery msg <ASCII> mood <0-7> mascot <0-5>");
+  Serial.println("[S3] help status hello ping battery msg <ASCII> mood <0-7> mascot <0-5> ble on ble off");
   return;
  }
+ if(cmd=="ble on"){
+  if(!c5Online){Serial.println("[S3] C5 offline; BLE test cannot enable");return;}
+  bleTestEnabled=true;bleTestDeadline=millis()+BLE_TEST_WINDOW_MS;
+  Serial.println("[S3] BLE test relay enabled for 5 minutes (unsecured test only)");
+  bleReply("TEST_READY");return;
+ }
+ if(cmd=="ble off"){
+  bleCloseGate();Serial.println("[S3] BLE test relay disabled");
+  bleReply("DISABLED");return;
+ }
  if(cmd=="status"){
-  Serial.printf("[S3] online=%d BLE_client=%d invalid_frames=%lu\n",
-    c5Online?1:0,clientConnected?1:0,(unsigned long)c5Reader.invalid);
+  Serial.printf("[S3] online=%d BLE_client=%d BLE_test=%d pending=%u invalid_frames=%lu\n",
+    c5Online?1:0,clientConnected?1:0,bleTestEnabled?1:0,blePendingSeq,
+    (unsigned long)c5Reader.invalid);
   if(c5Online)toC5("GET_STATUS");
   return;
  }
@@ -123,7 +186,7 @@ void setup() {
   Serial.begin(115200);
   delay(250);
   Serial.println("[S3] CuteDisplay brain development bootstrap");
-  Serial.println("[S3] UART diagnostics only. Audio, AI, camera and phone migration INACTIVE");
+  Serial.println("[S3] Phase 2 opt-in BLE test; audio/AI/camera/iPhone migration INACTIVE");
   Serial.printf("[S3] UART TX=%d RX=%d, I2S BCLK=%d WS=%d DIN=%d DOUT=%d (I2S INACTIVE)\n",
     BrainPinPlan::UART_TX, BrainPinPlan::UART_RX,
     BrainPinPlan::I2S_BCLK, BrainPinPlan::I2S_WS,
@@ -147,7 +210,7 @@ void setup() {
     BLECharacteristic::PROPERTY_NOTIFY
   );
   controlCharacteristic->setCallbacks(new BrainCommandCallbacks());
-  controlCharacteristic->setValue("S3_DEV_UART_NOT_READY");
+  controlCharacteristic->setValue("BLE_TEST_DISABLED");
   control->start();
   BLEAdvertising *advertising = BLEDevice::getAdvertising();
   advertising->addServiceUUID(CONTROL_SERVICE);
@@ -171,17 +234,29 @@ void loop() {
     Serial.println("[S3] BLE client disconnected; advertising restarted");
   }
 
-  if (controlQueue) {
-    char packet[MAX_CMD_BYTES + 1] = {};
-    for (int i = 0; i < 4 && xQueueReceive(controlQueue, packet, 0) == pdTRUE; ++i) {
-      // This is explicitly a diagnostic sink, NOT an implemented UART bridge.
-      Serial.print("[S3] Received BLE command (not forwarded): ");
-      Serial.println(packet);
-      if (controlCharacteristic) {
-        controlCharacteristic->setValue("UART_NOT_READY");
-        if (clientConnected) controlCharacteristic->notify();
-      }
+  // One BLE write at a time. Never print raw BLE data (could be a password).
+  if(controlQueue && blePendingSeq==0){
+   char packet[MAX_CMD_BYTES+1]={};
+   if(xQueueReceive(controlQueue,packet,0)==pdTRUE){
+    String kind,payload;
+    if(!bleTestEnabled){
+     Serial.println("[S3] BLE write blocked: test gate closed");
+     bleReply("ERROR:DISABLED");
+    }else if(!c5Online){
+     Serial.println("[S3] BLE write blocked: C5 offline");
+     bleReply("ERROR:C5_OFFLINE");
+    }else if(!decodeSafeBle(String(packet),kind,payload)){
+     Serial.println("[S3] BLE write rejected: test-only command allowlist");
+     bleReply("ERROR:TEST_ONLY");
+    }else{
+     uint16_t seq=toC5(kind.c_str(),payload);
+     if(seq){
+      blePendingSeq=seq;blePendingAt=millis();
+      Serial.printf("[S3] BLE test forwarded %s seq=%u\n",kind.c_str(),seq);
+      bleReply("SENT:"+String(seq));
+     }else bleReply("ERROR:FRAME");
     }
+   }
   }
   delay(10);
 }
