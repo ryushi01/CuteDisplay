@@ -1,12 +1,14 @@
 /*
  CuteDisplay ESP32-S3 Brain — Phase 0 BLE discovery and UART-ready skeleton.
  Board target: Freenove ESP32-S3-CAM N16R8, Arduino-ESP32 3.x.
- NOTE: No I2S pins, camera pins, or inter-board UART pins are selected here.
- Until the hardware pin map and serial protocol are tested, this firmware
+ NOTE: Candidate I2S and inter-board UART pins are documented in
+ BrainPinPlan.h but are NOT configured or enabled by this sketch.
+ Until the GPIO breakout and serial protocol are bench-tested, this firmware
  intentionally DOES NOT forward display commands or claim S3 audio support.
  Do not flash this sketch to the LILYGO T-Display-C5.
 */
 #include <Arduino.h>
+#include "BrainPinPlan.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -46,6 +48,10 @@ void setup() {
   delay(250);
   Serial.println("[S3] CuteDisplay brain development bootstrap");
   Serial.println("[S3] Audio, camera, UART, AI and iOS migration are NOT activated");
+  Serial.printf("[S3] Planned UART TX=%d RX=%d, I2S BCLK=%d WS=%d DIN=%d DOUT=%d (INACTIVE)\n",
+    BrainPinPlan::UART_TX, BrainPinPlan::UART_RX,
+    BrainPinPlan::I2S_BCLK, BrainPinPlan::I2S_WS,
+    BrainPinPlan::I2S_DIN, BrainPinPlan::I2S_DOUT);
   controlQueue = xQueueCreate(16, MAX_CMD_BYTES + 1);
   if (!controlQueue) {
     Serial.println("[S3] Fatal: cannot allocate BLE command queue");
