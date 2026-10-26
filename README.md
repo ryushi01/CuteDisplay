@@ -2,6 +2,10 @@
 
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
+## Troubleshooting update — Brain BLE pairing status 1288 (`0x0508`)
+
+The user's field test returned `ERR:NOT_READY` with NimBLE pairing error `1288` (peer **unspecified SMP pairing failure**) and showed at least one older S3 firmware startup banner. The next S3 + iOS sources now log exact version and security status, offer USB-only NimBLE `ble bonds clear`, and delay app commands until the Brain explicitly reports `PROXY_READY`. The C5 firmware/wiring is unchanged. **Source only; not yet tested.** See [controlled pairing recovery instructions](docs/hardware/ble-pairing-1288.md).
+
 ## Phase 4 — persistent Brain-disconnect popup and faster UART (source pending device test)
 
 **Requested behavior:** The LILYGO C5 shows a centered, opaque **BRAIN DISCONNECTED** pop-up as soon as it boots without a valid Brain UART connection or stops receiving valid Brain frames for about **6 seconds**. The warning remains visible across Kitty animations, messages, battery and Wi-Fi popups because it is composited last on every LCD redraw. It is dismissed **only when the C5 again receives valid CRC-checked frames from the S3**; a state-transition repaint clears it immediately. This indicates **S3-to-C5 UART liveness**, not Wi-Fi access or successful iPhone pairing. The C5's own BLE and Wi-Fi remain disabled.

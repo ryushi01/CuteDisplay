@@ -12,6 +12,9 @@
 #include <BLEUtils.h>
 #include <BLEAdvertising.h>
 #include <BLESecurity.h>
+#if defined(CONFIG_NIMBLE_ENABLED)
+#include <host/ble_store.h>
+#endif
 #if defined(CONFIG_BLUEDROID_ENABLED)
 #include <BLE2902.h>
 #endif
@@ -22,6 +25,7 @@
 #include "CuteLink.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
+static constexpr char S3_FW_VERSION[]="Phase4-BLEPAIR-FIX1-20261026";
 static constexpr size_t MAX_CMD=96;
 // Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
 // UART frame payload (one-digit chunk index, total, delimiters).
@@ -32,6 +36,7 @@ static bool clientConnected=false;
 static volatile bool bleAuthenticated=false;
 static volatile bool pairingOK=false,pairingFailed=false;
 static volatile uint8_t pairingFailureReason=0;
+static volatile uint16_t pairingFailureStatus=0;
 static bool wifiEnabled=false,wifiDHCP=true,wifiConnecting=false;
 static String wifiSSID,wifiPassword,staticIP,staticMask,staticGateway,staticDNS;
 static uint32_t wifiStarted=0,nextWiFiAttempt=0,lastWiFiPoll=0,lastRadioSent=0;
@@ -62,12 +67,20 @@ class BrainSecurityCallbacks:public BLESecurityCallbacks{
 #if defined(CONFIG_BLUEDROID_ENABLED)
  void onAuthenticationComplete(esp_ble_auth_cmpl_t result)override{
   pairingFailureReason=result.fail_reason;
+  pairingFailureStatus=result.fail_reason;
   if(result.success)pairingOK=true;else pairingFailed=true;
  }
 #elif defined(CONFIG_NIMBLE_ENABLED)
  void onAuthenticationComplete(ble_gap_conn_desc *desc)override{
   if(desc && desc->sec_state.encrypted)pairingOK=true;
-  else pairingFailed=true;
+  else {pairingFailureStatus=0xFFFF;pairingFailed=true;}
+ }
+ // Newer Arduino-ESP32 NimBLE invokes the two-argument callback also on
+ // failures. Older cores only expose the one-argument success callback.
+ // Deliberately omit override for compatibility with both BLE headers.
+ void onAuthenticationComplete(ble_gap_conn_desc *desc,int status){
+  if(status==0 && desc && desc->sec_state.encrypted)pairingOK=true;
+  else {pairingFailureStatus=(uint16_t)status;pairingFailed=true;}
  }
 #endif
 };
@@ -465,7 +478,22 @@ static void pollBLECommands(){
 static void consoleCommand(String cmd){
  cmd.trim();
  if(cmd=="help"){
-  Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off");
+  Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
+  return;
+ }
+ if(cmd=="ble bonds clear"){
+  // Explicit USB-only recovery action, never triggered by Bluetooth.
+  // Requires the phone to disconnect first; avoids wiping WiFi or C5 NVS.
+  if(clientConnected){
+   Serial.println("[S3] Disconnect iPhone before clearing Bluetooth bonds");
+   return;
+  }
+#if defined(CONFIG_NIMBLE_ENABLED)
+  int rc=ble_store_clear();
+  Serial.printf("[S3] NimBLE bond store clear result=%d (0=success); restart S3 and re-pair iPhone\n",rc);
+#else
+  Serial.println("[S3] This build is not NimBLE; clear old iPhone bond and re-pair");
+#endif
   return;
  }
  if(cmd=="status"){
@@ -528,7 +556,14 @@ static void pollUSB(){
 }
 void setup(){
  Serial.begin(115200);delay(250);
- Serial.println("[S3] CuteDisplay Phase 3 secure BLE proxy beta");
+ Serial.printf("[S3] CuteDisplay Brain FW=%s\n",S3_FW_VERSION);
+#if defined(CONFIG_NIMBLE_ENABLED)
+ Serial.println("[S3] BLE host=NimBLE");
+#elif defined(CONFIG_BLUEDROID_ENABLED)
+ Serial.println("[S3] BLE host=Bluedroid");
+#else
+ Serial.println("[S3] BLE host=UNKNOWN");
+#endif
  Serial1.setRxBufferSize(2048);
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
@@ -600,6 +635,7 @@ void loop(){
  if(connectPending){
   connectPending=false;clientConnected=true;
   bleAuthenticated=false;
+  if(controlChar)controlChar->setValue("PAIRING_PENDING");
   // Do not clear pairingOK: onConnect() can finish security before loop().
   Serial.println("[S3] BLE transport connected; waiting for security/bonding");
   bleDropNotReady=false;bleDropFull=false;
@@ -609,6 +645,7 @@ void loop(){
   disconnectPending=false;clientConnected=false;
   bleAuthenticated=false;pairingOK=false;pairingFailed=false;
   stopProxy();
+  if(controlChar)controlChar->setValue("PROXY_DISABLED");
   bleDropNotReady=false;bleDropFull=false;
   if(networkQueue)xQueueReset(networkQueue);
   BLEDevice::startAdvertising();
@@ -628,8 +665,13 @@ void loop(){
   pairingFailed=false;
   bleAuthenticated=false;
   stopProxy();
-  Serial.printf("[S3] BLE pairing failed, reason=%u (re-pair iPhone if old bond)\n",
-    (unsigned)pairingFailureReason);
+  if(controlChar)controlChar->setValue("PAIRING_FAILED");
+  Serial.printf("[S3] BLE pairing FAILED: host_status=%u (0x%04X) bluedroid_reason=%u\n",
+     (unsigned)pairingFailureStatus,(unsigned)pairingFailureStatus,
+     (unsigned)pairingFailureReason);
+  if(pairingFailureStatus==0x0508){
+   Serial.println("[S3] NimBLE: iPhone reported unspecified pairing failure. Remove stale bonds on both devices, then retry.");
+  }
  }
  pollBLECommands();
  pollNetwork();

@@ -83,6 +83,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     private var awaitingBrainAck = false
     private var brainWriteComplete = false
     private var brainResponse: String?
+    private var brainReadyReadAttempts = 0
     private var bleCommandGeneration = 0
 
     var isSimulator: Bool {
@@ -463,6 +464,7 @@ final class BluetoothManager: NSObject, ObservableObject {
         awaitingBrainAck = false
         brainWriteComplete = false
         brainResponse = nil
+        brainReadyReadAttempts = 0
         bleCommandGeneration += 1  // Invalidate any pending ACK timeout.
         peripheral = nil
         if !wifiFallbackConnected { isConnected = false }
@@ -810,8 +812,35 @@ extension BluetoothManager: CBPeripheralDelegate {
                 return
             }
             if !isConnected {
+                // A protected read proves encryption, but NOT that the S3
+                // firmware has finished enabling its UART command proxy.
+                // Do not flush saved mascot/glyph/Wi-Fi commands until READY.
+                let isBrain = characteristic.properties.contains(.notify)
+                let response = characteristic.value.flatMap {
+                    String(data: $0, encoding: .utf8)
+                } ?? ""
+                if isBrain && response != "PROXY_READY" {
+                    status = response == "PAIRING_FAILED"
+                        ? "Brain Bluetooth pairing failed; forget and pair again"
+                        : "Waiting for Brain command relay..."
+                    brainReadyReadAttempts += 1
+                    if brainReadyReadAttempts <= 12 {
+                        Task { @MainActor [weak self] in
+                            try? await Task.sleep(for: .milliseconds(500))
+                            guard let self, !self.isConnected,
+                                  let device = self.peripheral,
+                                  device.state == .connected,
+                                  let control = self.commandCharacteristic else { return }
+                            device.readValue(for: control)
+                        }
+                    } else {
+                        status = "Brain relay not ready; check S3 Serial Monitor"
+                    }
+                    return
+                }
+                brainReadyReadAttempts = 0
                 isConnected = true
-                status = "Connected securely to CuteDisplay"
+                status = isBrain ? "Connected securely to Brain" : "Connected to CuteDisplay"
                 stopLANFallback()
                 sendNext()
                 // Network characteristic may have been discovered earlier,

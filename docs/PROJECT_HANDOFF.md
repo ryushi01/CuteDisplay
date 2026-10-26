@@ -13,6 +13,12 @@ Tell the assistant:
 
 Read the actual repository before making code changes because this document can become stale.
 
+## BLE pair failure observed — 2026-10-26, fix source pending test
+
+User reports iPhone `ERR:NOT_READY` and S3 NimBLE default callback `Authentication failed with status 1288` (0x0508, **peer unspecified pairing failure**); logs also include **older S3 startup messages** (`BLE proxy starts disabled (proxy on)`) absent from later GitHub firmware, implying an old build or mixed boots. Do not infer a specific pairing failure root cause from 0x0508 alone.
+
+New S3 source exposes banner `Phase4-BLEPAIR-FIX1-20261026`, implements both NimBLE authentication callback signatures to report failed pairing status, and introduces USB-only `ble bonds clear` for NimBLE when disconnected. Old phone authorization/bond needs to be removed on iPhone as well, then re-paired. iOS `BluetoothManager.swift` now waits until FFF1 actual `PROXY_READY` rather than assuming a protected read alone means the S3 command relay is active. C5 firmware **unchanged** in this targeted fix. All code **uncompiled/unverified**, preserve encrypted GATT permissions and ensure S3↔C5 UART baud is matched. See [1288 failure recovery](hardware/ble-pairing-1288.md).
+
 ## Latest source — 2026-10-26 Phase 4 persistent UART-link popup & 921600 baud (NOT TESTED)
 
 At user's request, the C5 LCD now draws a **persistent opaque BRAIN DISCONNECTED** foreground pop-up from startup / after **6 seconds with no valid S3 UART frames**. It is composited after mascot, text, battery, Wi-Fi, and connection HUD, so nothing hides it. A new valid CRC-checked S3 frame causes the C5 loop to redraw immediately and **remove** the warning. The message indicates the physical UART Brain/Face connection only; iPhone BLE connection and S3 Wi-Fi are separate indicator states. C5 BLE and C5 Wi-Fi remain **OFF**. GPIO0 long hold still toggles only **S3 Wi-Fi** via UART.
