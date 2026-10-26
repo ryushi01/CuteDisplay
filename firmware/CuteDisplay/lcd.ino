@@ -1,5 +1,5 @@
 /*
- CuteDisplay 4.2 voice hardware loopback / no RSS - T-Display C5 / ESP32-C5
+ CuteDisplay message-only firmware with audio loopback / no RSS - T-Display C5 / ESP32-C5
  Message display with animated mascot,
  brightness, live AXP2602 battery level (BLE 180F / 2A19).
 
@@ -683,8 +683,7 @@ void setGlyph(uint32_t cp, const uint8_t *bits) {
  glyphCount++;
 }
 void saveDisplayState(){
- // The news bubble temporarily swaps the active message/mode. Never persist
- // this transient preview in place of the user's own display settings.
+ // Persist the active message and user display preferences.
  const String &persistentMessage = message;
  const bool persistentBubble = bubbleEnabled;
  displayPrefs.begin("cute-display",false);
