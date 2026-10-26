@@ -14,7 +14,7 @@ The firmware runs directly on the display hardware, so its screen and core anima
 - Displaying custom text with Japanese/Unicode support, speech bubbles, and visual themes.
 - Tracking the onboard battery through the AXP2602: charge level, voltage, current, temperature, health, and estimated time remaining or to full.
 - Managing brightness, on-device button controls, Bluetooth communication, and optional Wi-Fi connectivity.
-- Preparing for two-way audio through an external I²S microphone and speaker amplifier. The current test records a short clip and plays it back locally; **it does not yet talk to an AI model**.
+- Rendering AI response text and animation states in a future two-board design, with I²S audio, the onboard camera, Wi-Fi AI coordination, and iPhone pairing assigned to a separate **Freenove ESP32-S3-CAM brain**. The S3 integration is **planned, not yet implemented**.
 
 ### What the iPhone app does
 
@@ -24,28 +24,42 @@ Communication is primarily over **Bluetooth Low Energy**. The project also suppo
 
 ### General concept and future direction
 
-The long-term goal is a **small physical AI companion with personality**: hold the device's button, speak into its microphone, send the audio to a selectable **local AI backend or OpenAI API**, and hear the response through the speaker, potentially accompanied by expressions or messages on the LCD.
+The long-term goal is a **small physical AI companion with personality**. The **ESP32-S3 brain** will capture speech, communicate with a separate OpenAI or self-hosted Ollama voice/vision backend, and drive audio playback. The **LILYGO ESP32-C5** will display responses, expressions and character animations, receiving commands and sending battery telemetry over a proposed wired UART link.
 
-Development is incremental. Today, the animated display, phone controls, battery telemetry, and connectivity form the core product. The microphone-to-speaker loopback is an early hardware test for the planned voice interface, **not a completed AI assistant**. The user can continue enjoying CuteDisplay as a personalized display while the audio and AI components are developed.
+Development is incremental. The existing LILYGO display and iPhone controls remain working source baselines. Audio loopback has been **removed from current LILYGO firmware** in preparation for migrating microphone, amplifier, camera, BLE pairing and AI connectivity to the ESP32-S3. No complete S3 brain firmware, UART bridge, or AI voice pipeline is committed yet.
 
 ---
 
-## Current breadboard wiring diagram
+## Planned dual-board architecture
 
-![CuteDisplay LILYGO T-Display-C5 audio wiring diagram: INMP441 microphone, MAX98357A amplifier, and 8 ohm speaker](docs/hardware/cutedisplay-c5-audio-wiring.svg)
+```mermaid
+flowchart TD
+  Phone["iPhone app · future BLE pairing"] <-->|BLE| Brain["Freenove ESP32-S3-CAM · brain"]
+  Brain <-->|Wi-Fi / HTTPS| Server["External AI backend · OpenAI or Ollama, STT, TTS, vision"]
+  Brain <-->|UART · planned| Face["LILYGO T-Display-C5 · LCD, mascots, text, battery"]
+  Mic["INMP441 microphone"] --> Brain
+  Brain --> Amp["MAX98357A + 8Ω speaker"]
+  Camera["Onboard S3 camera"] --> Brain
+```
 
-**Diagram note:** This is an electrical connection guide, not a verified hole-by-hole breadboard placement. **GPIO1 and GPIO4 are shared I²S clocks; GPIO5 (microphone input) and GPIO6 (amplifier output) must remain separate.** Use the [detailed ELEGOO 830 breadboard guide](docs/hardware/lilygo-c5-audio-breadboard.md) for the official top/bottom LILYGO header layout, microphone/amplifier power separation, speaker connections, and safety checks.
+**Implementation status:** The drawing describes the **target architecture**, not an already-connected S3 implementation. The LILYGO still runs its existing BLE and Wi-Fi services until the new S3-to-LILYGO UART bridge and app-side BLE migration are implemented and tested. The microphone and speaker are **not** connected to the LILYGO in the current firmware.
+
+### Historical LILYGO audio wiring (superseded — do not assemble as the current build)
+
+![Legacy LILYGO C5 I²S microphone and amplifier wiring — historical reference only](docs/hardware/cutedisplay-c5-audio-wiring.svg)
+
+This wiring illustration documents the **retired C5 loopback prototype** and is kept for development history. **Do not wire audio to the LILYGO under the new plan.** The S3 audio pinout must be designed independently around camera and UART GPIO reservations. [Historical C5 wiring notes](docs/hardware/lilygo-c5-audio-breadboard.md).
 
 ## Repository synchronization status — 2026-10-26
 
 **Current hardware target:** LILYGO T-Display-C5 **only**.
 
 **Feature simplification (2026-10-26):** Drinks Mode has been removed completely from the **current firmware and iPhone application source**. The firmware now displays messages and animated characters only; drink-list drawing, pagination, staged upload commands (`D:RESET`, `D:ADD`, `D:SHOW`), and drink persistence were removed. The iPhone app no longer has the Drinks screen, drink preview, drink synchronization, drink data in saved profiles, or drink-upload logic in BluetoothManager. Old saved profiles continue to decode without their obsolete extra fields. The existing BLE control messages for mascots, themes, messages, battery, and Wi-Fi remain supported.
- The current 830-point breadboard wiring guide is [docs/hardware/lilygo-c5-audio-breadboard.md](docs/hardware/lilygo-c5-audio-breadboard.md). It documents the exact GPIO mapping and header contacts from the official LILYGO pinout. The microphone and amplifier share I²S **clocks**, but use **separate data pins**. Earlier generated pictures that show both data connections on GPIO5 must not be used as wiring references.
+ The [former C5 audio breadboard wiring guide](docs/hardware/lilygo-c5-audio-breadboard.md) is now a **superseded historical record**, not the current wiring plan. Audio hardware is being reassigned to the ESP32-S3 brain; the new pinout is pending hardware verification.
 
-**Current firmware:** `firmware/CuteDisplay/lcd.ino` (message-only display with 4.2 audio-loopback functionality). **Current iOS app sources:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift`. This synchronization is a source/documentation update, **not** an independently compiled/flashed hardware release. The 830-point bench assembly, 5 V amplifier power budget, and loopback operation remain to be tested on the actual devices.
+**Current firmware:** `firmware/CuteDisplay/lcd.ino` (message-only display and animations; **audio loopback removed**). **Current iOS app sources:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift`. This synchronization is a source/documentation update, **not** an independently compiled/flashed hardware release. The new S3 audio and UART hardware has not yet been wired, compiled or bench-tested.
 
-**Planned next steps:** (1) local mic-to-speaker test with INMP441 + MAX98357A; (2) server-based STT, Ollama conversation and TTS streaming; (3) synchronized speaking/listening mascot animations and AI text; (4) optional future migration to Freenove ESP32-S3 CAM + Waveshare 1.9-inch screen. The S3 is **not part of the current wiring**, and camera/video functionality is not implemented.
+**Planned next steps:** (1) S3 BLE endpoint, UART communication with the C5 and eventual iPhone re-pairing; (2) S3 INMP441 + MAX98357A audio test; (3) backend STT, Ollama/OpenAI and TTS; (4) S3 onboard camera/vision; (5) benchmark whether the Waveshare 1.9-inch screen and mascot rendering can eventually move onto the S3. These S3 capabilities are not yet implemented.
 
 ## Earlier source synchronization status — 2026-10-23
 
@@ -55,14 +69,12 @@ The latest ESP32-C5 source (`firmware/CuteDisplay/lcd.ino`) and the iPhone Wi-Fi
 
 Wi-Fi fallback requires: the device connected to an existing trusted Wi-Fi network; the iPhone able to reach its local IP on TCP port 8848; an initial BLE connection to retrieve the LAN authentication key/IP; and the `NSLocalNetworkUsageDescription` key in the **actual Xcode app target's Info settings** (the XML file in this repository is an instruction fragment). Fallback is authenticated but **not encrypted**, and foreground/best-effort: iOS can suspend networking in the background or after force-quitting the app. No automatic ESP32 reboot or Wi-Fi activation is introduced.
 
-## Phase 1 button and battery display (2026-10-23)
+## LILYGO button and battery behavior — current
 
-- GPIO28 **short press: no action**. Hold for 1.4 seconds to run the two-second microphone-to-speaker loopback test.
-- GPIO0 retains its existing short-press status display and long-press Wi-Fi toggle.
-- Both Time to Full and Time to Empty render as **N hours M min** in the iPhone app. On the ESP32 LCD, the battery-status overlay uses the same format.
-- The BLE wire protocol continues to report integer minutes; no BLE characteristic or battery-learning changes were made.
-- News/RSS functionality remains removed. The local-AI/OpenAI gateway is planned for later phases and is not included in Phase 1.
-- Source changes are committed to GitHub, but are **not yet compiled or verified on the hardware**. The full Xcode project and external board dependencies are not in this repository. Keep the working prototype until tomorrow's audio test succeeds.
+- **GPIO0** retains its existing short-press battery/status display and long-press Wi-Fi toggle.
+- **GPIO28** no longer triggers microphone recording or speaker playback. No GPIO28 audio handler or I²S configuration remains in the current C5 firmware.
+- Both Time to Full and Time to Empty render as **N hours M min** in the app and LCD overlay. Battery telemetry format remains unchanged.
+- The current LILYGO firmware retains message/mascot display, BLE, optional Wi-Fi and AXP2602 battery functions. The S3 takes over mobile pairing only in a **future migration phase**.
 
 ## iOS app name and source installation (2026-10-23)
 
@@ -72,17 +84,15 @@ To display **CuteDisplay** (instead of DrinkDisplay), open Xcode → TARGETS →
 
 Preserve the app's bundle identifier and signing configuration to retain its saved data. Build and install on a physical iPhone, then verify the Home Screen label. This repository doesn't include the actual `.xcodeproj`, so changing the target configuration cannot be performed through these source-only files.
 
-## AI voice hardware — Phase 1 (unverified)
+## Audio and AI hardware responsibility — ESP32-S3 (planned)
 
-The ESP32-C5 firmware now removes all RSS/news fetching and uses GPIO28's long press (1.4 seconds) for a **two-second microphone recording followed by immediate speaker playback**. A short GPIO28 press does nothing. GPIO0 Wi-Fi controls are unchanged. This is a hardware-only loopback test: **no model or OpenAI API is accessed in Phase 1**. The eventual backend will support selecting local AI or OpenAI using the same audio transport.
+- **S3 brain:** INMP441 I²S microphone, MAX98357A speaker amplifier, onboard camera, AI backend Wi-Fi gateway and eventually the iPhone BLE peripheral.
+- **LILYGO display controller:** LCD rendering, mascot animations, text/bubbles, battery and local button behavior. A future UART bridge will deliver AI text, animation states and settings from the S3.
+- **AI backend:** independent OpenAI or self-hosted Ollama/Open WebUI stack, with speech recognition and speech synthesis hosted off-device.
+- **Current state:** the C5 audio loopback code and GPIO28 voice-test handler have been removed. The S3 firmware and pinout are not yet implemented; verify the camera-reserved pins before making audio/UART connections.
+- **Future display:** once the dedicated SPI LCD arrives, benchmark the S3's camera, networking, audio, CPU and PSRAM usage before considering migration of the LILYGO renderer.
 
-Current audio GPIO mapping: **GPIO1** BCLK (shared), **GPIO4** WS/LRCLK (shared), **GPIO5** INMP441 SD (input only), **GPIO6** MAX98357A DIN (output only), with common GND. Power the **INMP441 from 3.3 V**; the MAX98357A can use the USB-fed **5 V/VBUS rail only if the LILYGO power budget has been verified**, or a suitably regulated amplifier supply with common ground. **Never join the 3.3 V and 5 V rails, and never ground the amplifier SPK− output.** See the [complete breadboard pin map and power precautions](docs/hardware/lilygo-c5-audio-breadboard.md).
-
-The complete test bundle is also available as `CuteDisplay_AI_Phase1_Audio_NoNews.zip` in the conversation attachments. Audio/I²S compilation and device behavior have **not** been tested here; flash to the spare board first and keep the working prototype unchanged.
-
-## Currently committed firmware: 4.2 (audio-loopback prototype)
-
-The following earlier UI features were established in the 4.0 line; the committed firmware header identifies the current prototype as **4.2**, including GPIO28 audio hardware loopback. These are source-level descriptions, not claims of completed physical validation.
+## Currently committed firmware: C5 message/animation controller (former 4.2 loopback removed)
 
 ## UI feature baseline (4.0)
 
@@ -99,10 +109,10 @@ The following earlier UI features were established in the 4.0 line; the committe
 ## Project layout
 
 ```text
-firmware/CuteDisplay/lcd.ino       Current ESP32-C5 v4.2 sketch with local audio loopback and Wi-Fi fallback
+firmware/CuteDisplay/lcd.ino       Current ESP32-C5 message/mascot controller; no local audio, Wi-Fi fallback retained
 ios/CuteDisplay/ContentView.swift  SwiftUI screen
 ios/CuteDisplay/BluetoothManager.swift  BLE communications
-docs/hardware/lilygo-c5-audio-breadboard.md Current wiring, pinout and testing checklist
+docs/hardware/lilygo-c5-audio-breadboard.md Historical C5 audio experiment — superseded
 archive/                           Earlier downloadable versions
 ```
 
@@ -131,7 +141,7 @@ Historical download packages are in `archive/`. **3.5B is retained only as histo
 
 ## Important notes
 
-- **Hardware wiring source of truth:** [C5 audio breadboard guide](docs/hardware/lilygo-c5-audio-breadboard.md). It corrects older illustration mistakes involving shared audio data and supply rails.
+- **The old C5 audio breadboard guide is historical only.** Do not reuse its GPIO mapping for the ESP32-S3. S3 audio/UART pinout will be documented after camera conflicts are checked.
 - The onboard LILYGO LCD is already connected internally; it requires **no breadboard SPI wires**. The ELEGOO 830 board is used for the microphone/amplifier prototypes.
 
 - Code in this repository is not independently hardware- or Xcode-verified; test on your device and keep backups of your working build.
