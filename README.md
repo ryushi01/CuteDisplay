@@ -2,7 +2,7 @@
 
 ## About CuteDisplay
 
-**CuteDisplay** is a customizable, battery-powered miniature companion display built around the **LILYGO T-Display C5 (ESP32-C5)** and controlled from a companion **iPhone app**. The idea is to turn a small LCD into a playful, expressive accessory: it can show a cute animated character, a personal message, or a rotating list of drinks, while the phone acts as the convenient place to configure and manage it.
+**CuteDisplay** is a customizable, battery-powered miniature companion display built around the **LILYGO T-Display C5 (ESP32-C5)** and controlled from a companion **iPhone app**. The idea is to turn a small LCD into a playful, expressive accessory: it can show a cute animated character and a personal message, while the phone acts as the convenient place to configure and manage it.
 
 Rather than being a passive screen, CuteDisplay is designed as a connected little character that you can personalize and, eventually, **talk to**. The project brings together custom ESP32 firmware, a native SwiftUI iOS interface, Bluetooth communication, optional local Wi-Fi connectivity, and planned AI-powered voice interactions.
 
@@ -11,14 +11,14 @@ Rather than being a passive screen, CuteDisplay is designed as a connected littl
 The firmware runs directly on the display hardware, so its screen and core animations do not depend on the iPhone staying open. It handles:
 
 - Rendering six animated mascot styles, moods, accessories, reactions, and optional surprise animations.
-- Displaying custom text with Japanese/Unicode support, speech bubbles, and visual themes, or showing a paginated drinks list.
+- Displaying custom text with Japanese/Unicode support, speech bubbles, and visual themes.
 - Tracking the onboard battery through the AXP2602: charge level, voltage, current, temperature, health, and estimated time remaining or to full.
 - Managing brightness, on-device button controls, Bluetooth communication, and optional Wi-Fi connectivity.
 - Preparing for two-way audio through an external I²S microphone and speaker amplifier. The current test records a short clip and plays it back locally; **it does not yet talk to an AI model**.
 
 ### What the iPhone app does
 
-The **CuteDisplay iOS app** is the control panel for the physical device. From the phone, you can pair and reconnect to the display, customize its mascot and animations, select colors and layout options, write messages, and edit the drinks shown on screen. It also provides battery and power information, brightness controls, saved display profiles, Wi-Fi settings, and optional low-battery alerts.
+The **CuteDisplay iOS app** is the control panel for the physical device. From the phone, you can pair and reconnect to the display, customize its mascot and animations, select colors and layout options, and write messages. It also provides battery and power information, brightness controls, saved display profiles, Wi-Fi settings, and optional low-battery alerts.
 
 Communication is primarily over **Bluetooth Low Energy**. The project also supports an optional authenticated local-network fallback when the device and phone are on a reachable Wi-Fi network; this fallback is not end-to-end encrypted and does not guarantee operation while iOS suspends the app.
 
@@ -38,9 +38,12 @@ Development is incremental. Today, the animated display, phone controls, battery
 
 ## Repository synchronization status — 2026-10-26
 
-**Current hardware target:** LILYGO T-Display-C5 **only**. The current 830-point breadboard wiring guide is [docs/hardware/lilygo-c5-audio-breadboard.md](docs/hardware/lilygo-c5-audio-breadboard.md). It documents the exact GPIO mapping and header contacts from the official LILYGO pinout. The microphone and amplifier share I²S **clocks**, but use **separate data pins**. Earlier generated pictures that show both data connections on GPIO5 must not be used as wiring references.
+**Current hardware target:** LILYGO T-Display-C5 **only**.
 
-**Current firmware:** `firmware/CuteDisplay/lcd.ino` (4.2 hardware audio loopback). **Current iOS app sources:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift`. This synchronization is a source/documentation update, **not** an independently compiled/flashed hardware release. The 830-point bench assembly, 5 V amplifier power budget, and loopback operation remain to be tested on the actual devices.
+**Feature simplification (2026-10-26):** Drinks Mode has been removed completely from the **current firmware and iPhone application source**. The firmware now displays messages and animated characters only; drink-list drawing, pagination, staged upload commands (`D:RESET`, `D:ADD`, `D:SHOW`), and drink persistence were removed. The iPhone app no longer has the Drinks screen, drink preview, drink synchronization, drink data in saved profiles, or drink-upload logic in BluetoothManager. Old saved profiles continue to decode without their obsolete extra fields. The existing BLE control messages for mascots, themes, messages, battery, and Wi-Fi remain supported.
+ The current 830-point breadboard wiring guide is [docs/hardware/lilygo-c5-audio-breadboard.md](docs/hardware/lilygo-c5-audio-breadboard.md). It documents the exact GPIO mapping and header contacts from the official LILYGO pinout. The microphone and amplifier share I²S **clocks**, but use **separate data pins**. Earlier generated pictures that show both data connections on GPIO5 must not be used as wiring references.
+
+**Current firmware:** `firmware/CuteDisplay/lcd.ino` (message-only display with 4.2 audio-loopback functionality). **Current iOS app sources:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift`. This synchronization is a source/documentation update, **not** an independently compiled/flashed hardware release. The 830-point bench assembly, 5 V amplifier power budget, and loopback operation remain to be tested on the actual devices.
 
 **Planned next steps:** (1) local mic-to-speaker test with INMP441 + MAX98357A; (2) server-based STT, Ollama conversation and TTS streaming; (3) synchronized speaking/listening mascot animations and AI text; (4) optional future migration to Freenove ESP32-S3 CAM + Waveshare 1.9-inch screen. The S3 is **not part of the current wiring**, and camera/video functionality is not implemented.
 
@@ -89,7 +92,6 @@ The following earlier UI features were established in the 4.0 line; the committe
 - Japanese/Unicode text delivered as glyphs over BLE
 - Message Mode with optional speech bubble and typewriter effect
 - 25 color choices; black screen background with light-tinted speech bubble
-- Drinks Mode with contrasting rows, pagination and automatic updates from iPhone
 - Live AXP2602 battery percentage, voltage, charging/discharging current, health, temperature, time estimates, and calculated battery-side watts
 - Remembered device pairing and automatic BLE reconnection when iOS permits the app to run
 - Brightness and deep-sleep button
