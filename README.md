@@ -30,6 +30,12 @@ Development is incremental. Today, the animated display, phone controls, battery
 
 ---
 
+## Current breadboard wiring diagram
+
+![CuteDisplay LILYGO T-Display-C5 audio wiring diagram: INMP441 microphone, MAX98357A amplifier, and 8 ohm speaker](docs/hardware/cutedisplay-c5-audio-wiring.svg)
+
+**Diagram note:** This is an electrical connection guide, not a verified hole-by-hole breadboard placement. **GPIO1 and GPIO4 are shared I²S clocks; GPIO5 (microphone input) and GPIO6 (amplifier output) must remain separate.** Use the [detailed ELEGOO 830 breadboard guide](docs/hardware/lilygo-c5-audio-breadboard.md) for the official top/bottom LILYGO header layout, microphone/amplifier power separation, speaker connections, and safety checks.
+
 ## Repository synchronization status — 2026-10-26
 
 **Current hardware target:** LILYGO T-Display-C5 **only**. The current 830-point breadboard wiring guide is [docs/hardware/lilygo-c5-audio-breadboard.md](docs/hardware/lilygo-c5-audio-breadboard.md). It documents the exact GPIO mapping and header contacts from the official LILYGO pinout. The microphone and amplifier share I²S **clocks**, but use **separate data pins**. Earlier generated pictures that show both data connections on GPIO5 must not be used as wiring references.
