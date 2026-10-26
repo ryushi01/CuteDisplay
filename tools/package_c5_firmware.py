@@ -22,12 +22,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--bin", required=True, type=Path, help="Compiled ESP32-C5 *application* .bin")
     ap.add_argument("--version", required=True, type=int, help="Matches C5FirmwareVersion.h")
+    ap.add_argument("--version-header", type=Path, default=VERSION_HEADER, help="C5 source version header (for temporary CI build)")
     ap.add_argument("--output", type=Path, default=DEST)
     args = ap.parse_args()
-    source = VERSION_HEADER.read_text(encoding="utf-8")
+    source = args.version_header.read_text(encoding="utf-8")
     match = re.search(r"\bC5_FIRMWARE_VERSION\s*=\s*(\d+)\s*;", source)
     if not match:
-        ap.error(f"No C5_FIRMWARE_VERSION found in {VERSION_HEADER}")
+        ap.error(f"No C5_FIRMWARE_VERSION found in {args.version_header}")
     source_version = int(match.group(1))
     if args.version != source_version:
         ap.error(f"Image v{args.version} doesn't match C5 source v{source_version}; "

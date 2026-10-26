@@ -1,0 +1,45 @@
+name: Build S3 firmware with C5 OTA update
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-s3-with-c5-update.yml"
+      - "tools/build_s3_with_c5_update.sh"
+      - "tools/package_c5_firmware.py"
+      - "firmware/CuteDisplay/**"
+      - "firmware/CuteDisplayBrain/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Check out CuteDisplay project
+        uses: actions/checkout@v4
+
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install Espressif ESP32 core 3.3.12
+        shell: bash
+        run: |
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.12
+
+      - name: Compile C5 v1/v2 and bundled S3 firmware
+        shell: bash
+        run: bash tools/build_s3_with_c5_update.sh
+
+      - name: Publish ready-to-upload S3 project and binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: CuteDisplay-S3-includes-C5-v2
+          path: release/
+          if-no-files-found: error
+          retention-days: 30

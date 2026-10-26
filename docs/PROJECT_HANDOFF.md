@@ -1,5 +1,10 @@
 # CuteDisplay — Project Handoff / Resume Here
 
+## Simplified C5 firmware test package — GitHub Actions auto-build (not yet tested)
+
+User asks for a **ready-to-upload S3 firmware including a C5 update**, without manual version editing or packaging. Added a GitHub Actions workflow `.github/workflows/build-s3-with-c5-update.yml` and local `tools/build_s3_with_c5_update.sh` that fetch official LILYGO C5 board drivers, builds the **OTA receiver C5 v1**, changes C5 version only in a **temporary working copy** and builds **C5 v2**, packages v2 into S3 via upgraded `package_c5_firmware.py --version-header`, and builds S3. GitHub Actions publishes `CuteDisplay-S3-includes-C5-v2` artifact containing `lcd/` C5 USB bootstrap, `CuteDisplayBrain/` bundled S3 source, and both app binaries. User opens the bundled Brain sketch in Arduino IDE and uploads **only S3** after initial C5 v1 bootstrap. Repo source `C5FirmwareImage.h` stays EMPTY (safety); actual C5 bin bundled **only in successfully built artifact**. Status: CI/workflow build has not been verified, neither has real OTA/reboot. See [one S3 upload first-test instructions](hardware/one-s3-upload-c5-v2.md). Preserve stable C5 USB recovery.
+
+
 ## Current implementation — Phase 6 C5 firmware OTA over existing UART + updating popup
 
 **User selected no-extra-wires application-level C5 OTA. User also requested on-screen pop-up while firmware is uploaded/installed.** We have added beta source to the existing `firmware/CuteDisplay/lcd.ino`: `C5UARTOTA.h`, `C5FirmwareVersion.h` (v1 bootstrap), and a last-layer **FIRMWARE UPDATE / RECEIVING FROM BRAIN** popup with progress bar, **INSTALLING UPDATE / VERIFYING / RESTARTING** state, and **UPDATE FAILED** error state. C5 writes inactive OTA app slot via `Update.begin/write/setSHA256/end(false)`, and calls `ESP.restart()` only after verification; no reboot on failed/incomplete images.

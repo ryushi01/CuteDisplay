@@ -1,5 +1,9 @@
 # CuteDisplay 🎀
 
+## Easy combined S3 + C5 v2 firmware build (GitHub Actions)
+
+**Do not manually bump versions or package C5 binaries for the first v1→v2 test.** The new [combined firmware GitHub Actions workflow](https://github.com/ryushi01/CuteDisplay/actions/workflows/build-s3-with-c5-update.yml) compiles C5 v1 + v2, embeds the v2 application into a compiled S3 Brain project, and publishes a downloadable artifact with ready-to-upload Arduino IDE sketches. It downloads required `board_config.h`, AXP2602 and ST7789 sources from LILYGO's official repository. Alternative local command: `bash tools/build_s3_with_c5_update.sh`. **After the one-time OTA-capable v1 C5 USB bootstrap**, users upload only the S3 Brain from the artifact to deliver the bundled v2 display update. **Build/flash have not been independently verified**; only claim the .bin exists after GitHub Actions passes. [Short installation guide](docs/hardware/one-s3-upload-c5-v2.md).
+
 ## Phase 6 beta — C5 firmware upgraded by S3 over existing UART (SOURCE ADDED, NOT HARDWARE-TESTED)
 
 The C5 sketch now includes `C5UARTOTA.h` and `C5FirmwareVersion.h`, an **inactive-partition OTA receiver** with SHA-256 validation. The display shows a persistent **FIRMWARE UPDATE** overlay with a progress bar during upload, **INSTALLING UPDATE** during verification/reboot, or **UPDATE FAILED** when aborted. The C5 calls `ESP.restart()` **only after** the entire new image is verified. The S3 `BrainC5OTA.h` queries C5 version/slot size and transfers the separately compiled, bundled C5 image only if newer, then checks the **post-reboot running version** before declaring success. Existing 921600 baud UART pins are unchanged; C5 Bluetooth/Wi-Fi remain OFF; iPhone app source is unchanged.
