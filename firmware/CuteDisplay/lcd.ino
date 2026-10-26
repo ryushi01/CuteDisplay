@@ -2789,7 +2789,12 @@ void setup(){
 void loop(){
  serviceBrain();
  C5UARTOTA::tick();
- if(C5UARTOTA::active())return;
+ if(C5UARTOTA::active()){
+  // Yield to FreeRTOS/flash driver while the display is in OTA mode.
+  // Do not spin the Arduino loop task or starve lower-priority services.
+  delay(1);
+  return;
+ }
  char input[MAX_CMD+1]={0};
  for(int q=0;q<8&&commandQueue&&xQueueReceive(commandQueue,input,0)==pdTRUE;q++){
   processCommand(String(input));
