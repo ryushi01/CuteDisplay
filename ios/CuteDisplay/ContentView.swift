@@ -1,17 +1,6 @@
 import SwiftUI
 import Foundation
 
-struct DrinkItem: Identifiable, Codable, Equatable {
-    var id = UUID()
-    var name: String
-    var count: Int
-}
-
-enum DisplayMode: String, CaseIterable {
-    case message = "Message"
-    case drinks = "Drinks"
-}
-
 enum CuteMood: Int, CaseIterable, Identifiable {
     case neutral = 0, happy, sad, angry, hungry, sleepy, excited, shy
     var id: Int { rawValue }
@@ -59,7 +48,6 @@ struct CuteDisplayProfile: Codable, Identifiable {
     var id: UUID = UUID()
     var name: String
     var message: String
-    var mode: String
     var theme: Int
     var character: Int
     var mood: Int
@@ -75,7 +63,6 @@ struct CuteDisplayProfile: Codable, Identifiable {
     var bubble: Bool
     var typewriter: Bool
     var brightness: Double
-    var drinks: [DrinkItem]
 }
 
 struct ContentView: View {
@@ -94,7 +81,6 @@ struct ContentView: View {
     }
 
     @StateObject private var bluetooth = BluetoothManager()
-    @State private var mode: DisplayMode = .message
     @State private var message = UserDefaults.standard.string(forKey: "savedMessage") ?? "こんにちわ"
     @State private var brightness = 75.0
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
@@ -119,8 +105,6 @@ struct ContentView: View {
     @State private var nightStart = UserDefaults.standard.object(forKey: "cuteNightStart") as? Int ?? 22
     @State private var dayBrightness = UserDefaults.standard.object(forKey: "cuteDayBrightness") as? Double ?? 80
     @State private var nightBrightness = UserDefaults.standard.object(forKey: "cuteNightBrightness") as? Double ?? 25
-    @State private var drinks: [DrinkItem] = ContentView.loadDrinks()
-    @State private var newDrinkName = ""
     @State private var selectedCharacter = CuteCharacter(
         rawValue: UserDefaults.standard.object(forKey: "selectedCharacter") as? Int ?? 1
     ) ?? .kitty
@@ -139,7 +123,6 @@ struct ContentView: View {
     @State private var messageFontSize = UserDefaults.standard.object(forKey: "messageFontSize") as? Int ?? 3
     @State private var speechBubbleEnabled = UserDefaults.standard.bool(forKey: "speechBubbleEnabled")
     @State private var speechTypewriter = UserDefaults.standard.object(forKey: "speechTypewriter") as? Bool ?? true
-    @State private var previewPage = 0
     @State private var selectedTheme = UserDefaults.standard.integer(forKey: "displayTheme")
     private let themeNames = [
         "Pink", "Cyan", "Mint", "Yellow", "Lavender",
@@ -173,21 +156,10 @@ struct ContentView: View {
     private var lcdBackground: Color { .black }
     private var lcdMascotBackground: Color { .black }
     private var mascotPreviewWidth: CGFloat { showMascot ? CGFloat(max(40, 98 * mascotSize / 100)) * 0.9 : 0 }
-    // Drinks Mode only: theme-tinted alternating row panels for better contrast.
-    // Message Mode and the light speech bubble remain unchanged.
-    private func lcdRowBackground(_ index: Int) -> some View {
-        ZStack {
-            Color(white: index.isMultiple(of: 2) ? 0.13 : 0.075)
-            themeColor.opacity(index.isMultiple(of: 2) ? 0.20 : 0.13)
-        }
-    }
     @State private var appNotice = ""
     @State private var showingPowerConfirmation = false
-    @State private var drinkSyncTask: DispatchWorkItem?
-    @State private var autoSyncEnabled = UserDefaults.standard.object(forKey: "autoSyncDrinks") as? Bool ?? true
 
-    private let quickMessages = ["こんにちわ", "乾杯！","CHEERS!", "TEQUILA!", "MORE WINE!", "I WANT CHAMPAGNE!"]
-    private let maxDisplayDrinks = 24
+    private let quickMessages = ["こんにちは！", "Hello!", "How are you?", "I am CuteDisplay!", "Let’s chat!", "今日もよろしくね！"]
 
     private var shouldAutoSend: Bool { canSend && !previewOnly }
     private func updateScheduledBrightness() {
@@ -202,36 +174,12 @@ struct ContentView: View {
         bluetooth.setBrightness(amount)
     }
     private var canSend: Bool { bluetooth.isSimulator || bluetooth.isConnected }
-    private var displayedDrinks: [DrinkItem] { Array(drinks.prefix(maxDisplayDrinks)) }
-    private var pageCount: Int { max(1, (displayedDrinks.count + 3) / 4) }
-    private var previewDrinks: [DrinkItem] {
-        let start = min(previewPage, pageCount - 1) * 4
-        return Array(displayedDrinks.dropFirst(start).prefix(4))
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     deviceStatusSection
                     wifiSection
-                    VStack(alignment: .leading, spacing: 10) {
-                        sectionTitle("DISPLAY MODE")
-                        Picker("Display Mode", selection: $mode) {
-                            ForEach(DisplayMode.allCases, id: \.self) { item in
-                                Text(item.rawValue).tag(item)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .onChange(of: mode) { _, selected in
-                            guard bluetooth.isConnected && !previewOnly else { return }
-                            if selected == .message {
-                                bluetooth.sendMessage(message)
-                            } else {
-                                bluetooth.sendDrinks(displayedDrinks.map { (name: $0.name, count: $0.count) })
-                            }
-                        }
-                    }
                     themeSection
                     displayPreview
                     Toggle("Preview changes before sending", isOn: $previewOnly)
@@ -243,11 +191,7 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(!bluetooth.isConnected)
                     }
-                    if mode == .message {
-                        messageSection
-                    } else {
-                        drinksSection
-                    }
+                    messageSection
                     characterSection
                     moodSection
                     mascotCustomizationSection
@@ -281,15 +225,10 @@ struct ContentView: View {
                 Text("This turns off the LCD and puts the ESP32 into low-power deep sleep. Bluetooth disconnects. Press the hardware RESET button to restart.")
             }
         }
-        .onChange(of: drinks) { _, _ in
-            saveDrinks()
-            previewPage = min(previewPage, pageCount - 1)
-            scheduleDrinkSync()
-        }
         .onChange(of: bluetooth.isConnected) { _, connected in
             // Connecting/reconnecting must never overwrite the running LCD display.
             // Battery telemetry is recovered by BluetoothManager independently.
-            if !connected { drinkSyncTask?.cancel(); lastAppliedScheduledBrightness = nil }
+            if !connected { lastAppliedScheduledBrightness = nil }
             else { updateScheduledBrightness() }
         }
         .onChange(of: message) { _, value in
@@ -301,7 +240,6 @@ struct ContentView: View {
                 try? await Task.sleep(for: .seconds(60))
             }
         }
-        .onDisappear { drinkSyncTask?.cancel() }
     }
 
     // MARK: - Wi-Fi setup and telemetry
@@ -459,7 +397,7 @@ struct ContentView: View {
                     set: { enabled in
                         bluetooth.setLowBatteryAlerts(enabled)
                         if bluetooth.isConnected && !previewOnly {
-                            bluetooth.sendDrinksPayload("L:\(enabled ? bluetooth.lowBatteryThreshold : 0)")
+                            bluetooth.sendControlCommand("L:\(enabled ? bluetooth.lowBatteryThreshold : 0)")
                         }
                     }
                 )).tint(.orange)
@@ -471,7 +409,7 @@ struct ContentView: View {
                         set: { value in
                             bluetooth.setLowBatteryThreshold(value)
                             if bluetooth.isConnected && !previewOnly && bluetooth.lowBatteryAlertsEnabled {
-                                bluetooth.sendDrinksPayload("L:\(value)")
+                                bluetooth.sendControlCommand("L:\(value)")
                             }
                         }
                     )) {
@@ -547,7 +485,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .disabled(bluetooth.isSendingDrinks)
+
                 Text("Bluetooth reconnection only refreshes battery telemetry; it does not change the current LCD screen.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -616,17 +554,11 @@ struct ContentView: View {
             HStack {
                 sectionTitle("LCD PREVIEW")
                 Spacer()
-                if mode == .drinks {
-                    Text("PAGE \(min(previewPage + 1, pageCount)) / \(pageCount)")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.gray)
-                }
             }
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(lcdBackground)
-                if mode == .message {
-                    HStack(spacing: 4) {
+                HStack(spacing: 4) {
                         Text(message.isEmpty ? "こんにちわ" : message)
                             .font(.system(size: CGFloat(10 + messageFontSize * 5), weight: .bold))
                             .foregroundStyle(speechBubbleEnabled ? Color.black : themeColor)
@@ -668,70 +600,9 @@ struct ContentView: View {
                         }
                     }
                     .padding(9)
-                } else {
-                    HStack(spacing: 8) {
-                        VStack(spacing: 7) {
-                            ForEach(Array(previewDrinks.enumerated()), id: \.element.id) { index, drink in
-                                HStack(spacing: 4) {
-                                    Text(drink.name.uppercased())
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.5)
-                                    Spacer(minLength: 2)
-                                    Text("×\(drink.count)")
-                                        .foregroundStyle(.white)
-                                        .fixedSize()
-                                }
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundStyle(themeColor)
-                                .padding(.horizontal, 6)
-                                .frame(height: 24)
-                                .background(lcdRowBackground(index))
-                                .clipShape(RoundedRectangle(cornerRadius: 5))
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .frame(maxWidth: .infinity)
-                        if showMascot {
-                            VStack(spacing: 4) {
-                                Text(selectedMood == .sleepy ? "😴" : selectedCharacter.symbol)
-                                    .font(.system(size: 51 * CGFloat(mascotSize) / 100))
-                                Text(selectedCharacter.title)
-                                    .font(.system(size: 9))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.5)
-                                    .foregroundStyle(themeColor)
-                            }
-                            .frame(width: mascotPreviewWidth)
-                            .frame(maxHeight: .infinity)
-                            .background(lcdMascotBackground)
-                        }
-                    }
-                    .padding(10)
-                }
             }
             .aspectRatio(320.0 / 170.0, contentMode: .fit)
             .clipped()
-            if mode == .drinks && pageCount > 1 {
-                HStack(spacing: 12) {
-                    Button {
-                        previewPage = (previewPage - 1 + pageCount) % pageCount
-                    } label: {
-                        Label("Previous", systemImage: "chevron.left")
-                    }
-                    Spacer()
-                    Text("LCD cycles pages every 3.5 seconds")
-                        .font(.caption2)
-                        .foregroundStyle(.gray)
-                    Spacer()
-                    Button {
-                        previewPage = (previewPage + 1) % pageCount
-                    } label: {
-                        Label("Next", systemImage: "chevron.right")
-                    }
-                }
-                .font(.caption)
-                .buttonStyle(.bordered)
-            }
             Text("Illustrative preview; Japanese characters are sent as small font glyphs.")
                 .font(.caption2)
                 .foregroundStyle(.gray)
@@ -779,14 +650,14 @@ struct ContentView: View {
                 .tint(.pink)
                 .onChange(of: speechBubbleEnabled) { _, enabled in
                     UserDefaults.standard.set(enabled, forKey: "speechBubbleEnabled")
-                    if shouldAutoSend { bluetooth.sendDrinksPayload("Q:\(enabled ? 1 : 0)") }
+                    if shouldAutoSend { bluetooth.sendControlCommand("Q:\(enabled ? 1 : 0)") }
                 }
             if speechBubbleEnabled {
                 Toggle("Typewriter animation", isOn: $speechTypewriter)
                     .tint(.pink)
                     .onChange(of: speechTypewriter) { _, enabled in
                         UserDefaults.standard.set(enabled, forKey: "speechTypewriter")
-                        if shouldAutoSend { bluetooth.sendDrinksPayload("Y:\(enabled ? 1 : 0)") }
+                        if shouldAutoSend { bluetooth.sendControlCommand("Y:\(enabled ? 1 : 0)") }
                     }
                 Text("Shows the message in a bubble beside the animated mascot. The bubble can be turned off at any time.")
                     .font(.caption)
@@ -825,76 +696,6 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                 }
             }
-        }
-    }
-
-    // MARK: Drinks mode
-
-    private var drinksSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                sectionTitle("YOUR DRINKS")
-                Spacer()
-                Text("\(drinks.count) saved · \(min(drinks.count, maxDisplayDrinks)) on LCD")
-                    .font(.caption2)
-                    .foregroundStyle(.gray)
-            }
-            ForEach($drinks) { $drink in
-                HStack(spacing: 9) {
-                    TextField("Drink name", text: $drink.name)
-                        .textFieldStyle(.roundedBorder)
-                    Button {
-                        drink.count = max(0, drink.count - 1)
-                    } label: {
-                        Image(systemName: "minus.circle.fill").font(.title2)
-                    }
-                    .tint(themeColor)
-                    Text("\(drink.count)").font(.headline).monospacedDigit().frame(minWidth: 25)
-                    Button {
-                        drink.count = min(9999, drink.count + 1)
-                    } label: {
-                        Image(systemName: "plus.circle.fill").font(.title2)
-                    }
-                    .tint(.mint)
-                    Button { deleteDrink(id: drink.id) } label: {
-                        Image(systemName: "trash")
-                    }
-                    .tint(.gray)
-                }
-                .padding(10)
-                .background(.white.opacity(0.07))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            sectionTitle("ADD A DRINK")
-            HStack(spacing: 10) {
-                TextField("New drink name", text: $newDrinkName)
-                    .textFieldStyle(.roundedBorder)
-                Button { addDrink() } label: {
-                    Image(systemName: "plus")
-                        .font(.headline)
-                        .padding(11)
-                        .background(.mint)
-                        .foregroundStyle(.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .disabled(newDrinkName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            Toggle("Automatically sync drink changes", isOn: $autoSyncEnabled)
-                .tint(themeColor)
-                .onChange(of: autoSyncEnabled) { _, enabled in
-                    UserDefaults.standard.set(enabled, forKey: "autoSyncDrinks")
-                    if enabled { scheduleDrinkSync() }
-                    else { drinkSyncTask?.cancel() }
-                }
-            Text(autoSyncEnabled ? "Changes sync automatically after a short pause." : "Tap Update Drinks Display to send changes.")
-                .font(.caption2).foregroundStyle(.secondary)
-            Text("LCD rotates four drinks per page every 3.5 seconds (up to 24). Japanese names are supported; 12 characters maximum per name.")
-                .font(.caption)
-                .foregroundStyle(.gray)
-            actionButton(bluetooth.isSendingDrinks ? "Sending Drink List..." : "Update Drinks Display", color: .orange) {
-                sendDrinks()
-            }
-            .disabled(!canSend || bluetooth.isSendingDrinks)
         }
     }
 
@@ -958,7 +759,7 @@ struct ContentView: View {
                 .tint(themeColor)
                 .onChange(of: surpriseAnimationsEnabled) { _, enabled in
                     UserDefaults.standard.set(enabled, forKey: "surpriseAnimationsEnabled")
-                    if shouldAutoSend { bluetooth.sendDrinksPayload("S:\(enabled ? 1 : 0)") }
+                    if shouldAutoSend { bluetooth.sendControlCommand("S:\(enabled ? 1 : 0)") }
                 }
             Text("Occasionally, the mascot sneezes, stretches, looks around, gets startled or notices a butterfly. Turn this off to keep only the regular mood animations.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -989,7 +790,7 @@ struct ContentView: View {
             }
             .onChange(of: accessoryStyle) { _, value in
                 UserDefaults.standard.set(value, forKey: "cuteAccessoryStyle")
-                if shouldAutoSend { bluetooth.sendDrinksPayload("A:\(value)") }
+                if shouldAutoSend { bluetooth.sendControlCommand("A:\(value)") }
             }
 
             Picker("Held object", selection: $heldObjectMode) {
@@ -999,7 +800,7 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .onChange(of: heldObjectMode) { _, value in
                 UserDefaults.standard.set(value, forKey: "cuteHeldObjectMode")
-                if shouldAutoSend { bluetooth.sendDrinksPayload("H:\(value)") }
+                if shouldAutoSend { bluetooth.sendControlCommand("H:\(value)") }
             }
 
             if heldObjectMode == 1 {
@@ -1010,7 +811,7 @@ struct ContentView: View {
                 }
                 .onChange(of: heldObject) { _, value in
                     UserDefaults.standard.set(value, forKey: "cuteHeldObject")
-                    if shouldAutoSend { bluetooth.sendDrinksPayload("J:\(value)") }
+                    if shouldAutoSend { bluetooth.sendControlCommand("J:\(value)") }
                 }
             }
 
@@ -1022,7 +823,7 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .onChange(of: animationFrequency) { _, value in
                 UserDefaults.standard.set(value, forKey: "cuteAnimationFrequency")
-                if shouldAutoSend { bluetooth.sendDrinksPayload("K:\(value)") }
+                if shouldAutoSend { bluetooth.sendControlCommand("K:\(value)") }
             }
 
             Picker("Animation intensity", selection: $animationIntensity) {
@@ -1033,14 +834,14 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .onChange(of: animationIntensity) { _, value in
                 UserDefaults.standard.set(value, forKey: "cuteAnimationIntensity")
-                if shouldAutoSend { bluetooth.sendDrinksPayload("I:\(value)") }
+                if shouldAutoSend { bluetooth.sendControlCommand("I:\(value)") }
             }
 
             Toggle("Individual mascot personality", isOn: $personalityAnimations)
                 .tint(themeColor)
                 .onChange(of: personalityAnimations) { _, value in
                     UserDefaults.standard.set(value, forKey: "cutePersonalityAnimations")
-                    if shouldAutoSend { bluetooth.sendDrinksPayload("N:\(value ? 1 : 0)") }
+                    if shouldAutoSend { bluetooth.sendControlCommand("N:\(value ? 1 : 0)") }
                 }
 
             HStack(spacing: 8) {
@@ -1062,7 +863,7 @@ struct ContentView: View {
         let proposed=newProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
         let label=proposed.isEmpty ? "Profile \(displayProfiles.count + 1)" : proposed
         let profile=CuteDisplayProfile(
-            name: label, message: message, mode: mode.rawValue,
+            name: label, message: message,
             theme: selectedTheme, character: selectedCharacter.rawValue,
             mood: selectedMood.rawValue, visible: showMascot,
             mascotSize: mascotSize, accessory: accessoryStyle,
@@ -1070,7 +871,7 @@ struct ContentView: View {
             frequency: animationFrequency, intensity: animationIntensity,
             personality: personalityAnimations, fontSize: messageFontSize,
             bubble: speechBubbleEnabled, typewriter: speechTypewriter,
-            brightness: brightness, drinks: drinks)
+            brightness: brightness)
         displayProfiles.append(profile)
         persistProfiles()
         newProfileName=""
@@ -1085,9 +886,7 @@ struct ContentView: View {
     private func loadProfile(_ profile: CuteDisplayProfile) {
         // Apply settings locally first; the optional preview mode prevents
         // changing the hardware until the user explicitly taps Apply.
-        drinkSyncTask?.cancel()
         message=profile.message
-        mode=DisplayMode(rawValue:profile.mode) ?? .message
         selectedTheme=max(0,min(24,profile.theme))
         selectedCharacter=CuteCharacter(rawValue:profile.character) ?? .kitty
         selectedMood=CuteMood(rawValue:profile.mood) ?? .happy
@@ -1103,7 +902,6 @@ struct ContentView: View {
         speechBubbleEnabled=profile.bubble
         speechTypewriter=profile.typewriter
         brightness=profile.brightness
-        drinks=profile.drinks
         UserDefaults.standard.set(selectedTheme,forKey:"displayTheme")
         UserDefaults.standard.set(selectedCharacter.rawValue,forKey:"selectedCharacter")
         UserDefaults.standard.set(selectedMood.rawValue,forKey:"mascotMood")
@@ -1135,7 +933,7 @@ struct ContentView: View {
                 HStack {
                     VStack(alignment:.leading,spacing:2) {
                         Text(profile.name).font(.subheadline.bold())
-                        Text("\(profile.mode) • \(profile.message)")
+                        Text(profile.message)
                             .font(.caption2).foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -1185,8 +983,7 @@ struct ContentView: View {
                     if shouldAutoSend { bluetooth.sendMessage("Z:\(value)") }
                 }
             }
-            if mode == .message {
-                HStack {
+            HStack {
                     Text("Message font size")
                     Spacer()
                     Text("\(messageFontSize) / 5").foregroundStyle(.secondary)
@@ -1201,10 +998,7 @@ struct ContentView: View {
                     }
                 }
                 .tint(themeColor)
-                Text("Only Message Mode text changes size; drink-row fonts stay unchanged.")
-                    .font(.caption)
-                    .foregroundStyle(.gray)
-            }
+
             Text("Smaller mascots reserve less width, allowing more text. The board defaults to Happy Hello Kitty after restart; reapply your preferences from the app.")
                 .font(.caption2)
                 .foregroundStyle(.gray)
@@ -1228,7 +1022,7 @@ struct ContentView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .buttonStyle(.plain)
-            .disabled(!bluetooth.isConnected || bluetooth.isSimulator || bluetooth.isSendingDrinks)
+            .disabled(!bluetooth.isConnected || bluetooth.isSimulator)
             Text("Low-power deep sleep, not physical battery disconnection. Press the LILYGO RESET button to wake.")
                 .font(.caption)
                 .foregroundStyle(.gray)
@@ -1313,37 +1107,9 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    private func addDrink() {
-        let name = newDrinkName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        drinks.append(DrinkItem(name: name, count: 0))
-        newDrinkName = ""
-    }
-
-    private func deleteDrink(id: UUID) { drinks.removeAll { $0.id == id } }
-
-    private func sendDrinks() {
-        guard canSend else { appNotice = "Connect to CuteDisplay first"; return }
-        bluetooth.sendDrinks(displayedDrinks.map { (name: $0.name, count: $0.count) })
-        appNotice = bluetooth.isSimulator
-            ? "Simulator preview only; no Bluetooth data sent."
-            : "Sending list; wait until Device Status reports completion."
-    }
-
-    private func scheduleDrinkSync() {
-        drinkSyncTask?.cancel()
-        guard autoSyncEnabled, bluetooth.isConnected, !previewOnly else { return }
-        let task = DispatchWorkItem { [self] in
-            bluetooth.sendDrinks(displayedDrinks.map { (name: $0.name, count: $0.count) })
-        }
-        drinkSyncTask = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: task)
-    }
-
     // Reapply the saved preferences only when explicitly requested, for example
     // after a firmware restart that reset the board defaults.
     private func restoreAfterConnection() {
-        drinkSyncTask?.cancel()
         bluetooth.restoreState(
             theme: selectedTheme,
             character: selectedCharacter.rawValue,
@@ -1354,34 +1120,15 @@ struct ContentView: View {
             bubble: speechBubbleEnabled,
             typewriter: speechTypewriter,
             brightness: Int(brightness),
-            modeIsDrinks: mode == .drinks,
-            message: message,
-            drinks: displayedDrinks.map { (name: $0.name, count: $0.count) }
+            message: message
         )
-        bluetooth.sendDrinksPayload("L:\(bluetooth.lowBatteryAlertsEnabled ? bluetooth.lowBatteryThreshold : 0)")
-        bluetooth.sendDrinksPayload("S:\(surpriseAnimationsEnabled ? 1 : 0)")
+        bluetooth.sendControlCommand("L:\(bluetooth.lowBatteryAlertsEnabled ? bluetooth.lowBatteryThreshold : 0)")
+        bluetooth.sendControlCommand("S:\(surpriseAnimationsEnabled ? 1 : 0)")
         sendMascotCustomization()
         appNotice = "Connected — restoring CuteDisplay settings."
     }
 
-    private func saveDrinks() {
-        if let data = try? JSONEncoder().encode(drinks) {
-            UserDefaults.standard.set(data, forKey: "savedDrinks")
-        }
-    }
 
-    private static func loadDrinks() -> [DrinkItem] {
-        if let data = UserDefaults.standard.data(forKey: "savedDrinks"),
-           let saved = try? JSONDecoder().decode([DrinkItem].self, from: data) {
-            return saved
-        }
-        return [
-            DrinkItem(name: "Tequila", count: 9),
-            DrinkItem(name: "Wine", count: 2),
-            DrinkItem(name: "Champagne", count: 1),
-            DrinkItem(name: "Beer", count: 3)
-        ]
-    }
 }
 
 #Preview {
