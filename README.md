@@ -40,7 +40,25 @@ Development is incremental. The existing LILYGO display and iPhone controls rema
 
 ![Proposed CuteDisplay ELEGOO 830 breadboard with ESP32-S3 brain, LILYGO C5 face, microphone, amplifier and speaker; GPIO assignments pending](docs/hardware/cutedisplay-s3-c5-breadboard.svg)
 
-The new diagram replaces the former LILYGO microphone/speaker drawing. **INMP441 and MAX98357A now belong to the ESP32-S3**, and the S3 will communicate with the LILYGO via **crossed UART TX/RX plus shared GND**. Both boards can initially use separate USB-C power. **Do not bridge their positive power rails.** The S3 I²S and UART GPIO numbers are intentionally **not assigned yet** until the Freenove breakout pinout and camera-reserved GPIOs are verified. This is a connection plan, **not a verified hole-by-hole wiring diagram**.
+The new diagram replaces the former LILYGO microphone/speaker drawing. **INMP441 and MAX98357A belong to the ESP32-S3**, and the S3 will communicate with the LILYGO via **crossed UART TX/RX plus shared GND**. Both boards can initially use separate USB-C power; **do not bridge their positive power rails**. The proposed GPIOs below have been screened for known camera/microSD/PSRAM conflicts but **are not yet confirmed on the purchased physical board**. This is a topology and signal diagram, **not a verified hole-by-hole breadboard placement**.
+
+| Connection | Planned pins |
+| --- | --- |
+| I²S bit clock to INMP441 SCK + MAX98357A BCLK | **S3 GPIO41** |
+| I²S word-select to INMP441 WS + MAX98357A LRC | **S3 GPIO42** |
+| Microphone data INMP441 SD → S3 | **S3 GPIO1 (input)** |
+| Amplifier data S3 → MAX98357A DIN | **S3 GPIO2 (output)** |
+| UART S3 → C5 display | **S3 GPIO47 TX → LILYGO GPIO5 RX** |
+| UART C5 → S3 telemetry | **LILYGO GPIO4 TX → S3 GPIO21 RX** |
+| Reference and supplies | Common **GND**; mic **3V3**; amplifier rated **5V/VIN** after validation; separate board USB power |
+
+**GPIO41/42 caution:** These can conflict with external JTAG on ESP32-S3. Do not enable external JTAG on these pins. Check that GPIO41, GPIO42, GPIO47, GPIO21, GPIO1 and GPIO2 are exposed and free on your exact Freenove board before wiring. The diagram intentionally omits camera circuitry but reserves camera pins for future use.
+
+### Bluetooth remains part of the design
+
+**Keep BLE on the ESP32-S3 for initial setup, iPhone pairing, local control and fallback configuration.** Wi-Fi will handle communication with the separate AI server (OpenAI or Ollama/Open WebUI). BLE plus Wi-Fi coexistence is a performance test item, not a reason to discard BLE now. If streamed speech produces dropouts under concurrent BLE traffic, measure and tune buffering, scheduling and traffic first; only consider an alternative Wi-Fi-only **operating mode** if real-world testing establishes a need. Existing LILYGO BLE remains in place during migration so you can recover device settings until the S3 UART bridge is proven.
+
+**Pin plan source:** [S3+C5 connection table and reserved GPIO guidance](docs/hardware/s3-c5-breadboard-plan.md). Firmware candidate pin constants: [BrainPinPlan.h](firmware/CuteDisplayBrain/BrainPinPlan.h).
 
 See the [new S3+C5 breadboard wiring and safety plan](docs/hardware/s3-c5-breadboard-plan.md). The [old C5 I²S wiring diagram](docs/hardware/cutedisplay-c5-audio-wiring.svg) and [historical assembly guide](docs/hardware/lilygo-c5-audio-breadboard.md) remain archived for reference only and must **not** be used for the new build.
 
@@ -53,14 +71,14 @@ See the [new S3+C5 breadboard wiring and safety plan](docs/hardware/s3-c5-breadb
 
 ## Repository synchronization status — 2026-10-26
 
-**Current hardware targets:** LILYGO T-Display-C5 existing controller **and** Freenove ESP32-S3-CAM brain development board. iPhone-to-S3 migration is planned, not complete.
+**Current hardware targets:** LILYGO T-Display-C5 existing controller **and** Freenove ESP32-S3-CAM brain development board. The S3 BLE diagnostic sketch now includes the proposed pin-plan constants but still does **not** initialize UART, I²S, Wi-Fi AI transport or iPhone control routing. iPhone-to-S3 migration is planned, not complete.
 
 **Feature simplification (2026-10-26):** Drinks Mode has been removed completely from the **current firmware and iPhone application source**. The firmware now displays messages and animated characters only; drink-list drawing, pagination, staged upload commands (`D:RESET`, `D:ADD`, `D:SHOW`), and drink persistence were removed. The iPhone app no longer has the Drinks screen, drink preview, drink synchronization, drink data in saved profiles, or drink-upload logic in BluetoothManager. Old saved profiles continue to decode without their obsolete extra fields. The existing BLE control messages for mascots, themes, messages, battery, and Wi-Fi remain supported.
  The [former C5 audio breadboard wiring guide](docs/hardware/lilygo-c5-audio-breadboard.md) is now a **superseded historical record**, not the current wiring plan. Audio hardware is being reassigned to the ESP32-S3 brain; the new pinout is pending hardware verification.
 
 **Current LILYGO firmware:** `firmware/CuteDisplay/lcd.ino` (message-only display and animations; **audio loopback removed**). **S3 diagnostic firmware:** `firmware/CuteDisplayBrain/CuteDisplayBrain.ino` (BLE discovery endpoint, not a functioning bridge). **Current iOS app sources:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift`. This synchronization is a source/documentation update, **not** an independently compiled/flashed hardware release. The new S3 audio and UART hardware has not yet been wired, compiled or bench-tested.
 
-**Planned next steps:** (1) S3 BLE endpoint, UART communication with the C5 and eventual iPhone re-pairing; (2) S3 INMP441 + MAX98357A audio test; (3) backend STT, Ollama/OpenAI and TTS; (4) S3 onboard camera/vision; (5) benchmark whether the Waveshare 1.9-inch screen and mascot rendering can eventually move onto the S3. These S3 capabilities are not yet implemented.
+**Planned next steps:** (1) confirm physical header availability, implement S3 UART with C5 and retain BLE for first-time setup; (2) S3 INMP441 + MAX98357A audio test; (3) backend STT, Ollama/OpenAI and TTS; (4) S3 onboard camera/vision; (5) benchmark whether the Waveshare 1.9-inch screen and mascot rendering can eventually move onto the S3. These S3 capabilities are not yet implemented.
 
 ## Earlier source synchronization status — 2026-10-23
 
@@ -116,6 +134,7 @@ ios/CuteDisplay/BluetoothManager.swift  BLE communications
 docs/hardware/s3-c5-breadboard-plan.md   Current S3+C5 wiring concept (GPIO assignment pending)
 docs/hardware/cutedisplay-s3-c5-breadboard.svg New breadboard diagram displayed above
 firmware/CuteDisplayBrain/CuteDisplayBrain.ino S3 BLE diagnostic bootstrap
+firmware/CuteDisplayBrain/BrainPinPlan.h  Candidate S3 GPIO assignments, not activated
  docs/hardware/lilygo-c5-audio-breadboard.md Historical C5 audio experiment — superseded
 archive/                           Earlier downloadable versions
 ```
