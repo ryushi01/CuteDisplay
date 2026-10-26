@@ -1,6 +1,6 @@
 # S3 Brain Phase 2: limited opt-in BLE relay test
 
-**Not yet compiled or physically verified.** The previous S3-C5 UART link WAS verified on the user's boards: S3 USB Serial Monitor received HELLO and C5 STATUS, and `msg Hello from Brain` displayed on LILYGO.
+**Phase-2 BLE relay was flashed and verified for MASCOT commands and ACKs; the newer idle-heartbeat fix is still untested.** The previous S3-C5 UART link WAS verified on the user's boards: S3 USB Serial Monitor received HELLO and C5 STATUS, and `msg Hello from Brain` displayed on LILYGO.
 
 ## Power and wiring
 
@@ -22,3 +22,10 @@ Open `firmware/CuteDisplayBrain/CuteDisplayBrain.ino`, keeping `BrainPinPlan.h` 
 **Security/compatibility limits:** The S3 diagnostic BLE endpoint does not enforce pairing or encryption. The 5-minute local USB opt-in and strict input allowlist lower risk but DO NOT provide authorization during the open window. Use only in a controlled test environment. Reject all Wi-Fi credentials, power/sleep commands, G/G2 glyph packets, configuration commands and Unicode messages. Do not pair the normal CuteDisplay iPhone app to the S3 yet: battery (180F), power (FFF3) and network (FFF5) GATT services and native SwiftUI protocol are not proxied. C5 direct iPhone BLE stays fully functional. UART retries, sequence collision/replay protection, UTF-8 glyph transfer and secure onboarding remain to be built.
 
 Next milestone: authenticated BLE onboarding/provisioning, reliable bounded UART command queue/ACK and telemetry proxy; then staged app migration. AI/I2S/camera remain future work.
+
+
+## Updated firmware: suppress idle HELLO reconnections (not yet tested)
+
+The BLE relay logs showed valid `MASCOT` ACKs, but recurring C5 `HELLO`/`LOG C5 connected` even as C5 STATUS continued. This was expected from the original asymmetric liveness logic: C5 considered S3 offline after 10 seconds without **incoming** frames, and S3 sent nothing while idle. The firmware now sends `HEARTBEAT` every 3 seconds S3→C5 and accepts it silently on C5. **This requires reflashing BOTH sketches** (with their `CuteLink.h` files, and C5 `board_config.h`/AXP2602 dependencies). The UART pinout remains unchanged; the update has **not** been hardware verified.
+
+Confirm over at least 30 seconds of idle Serial Monitor output that C5 keeps reporting `STATUS` without new `HELLO` or `LOG C5 connected` every 10 seconds. Then repeat `ble on` and `C:1`; expect `ACK MASCOT`. Genuine resets or unplugging power should still cause a proper HELLO/reconnect.

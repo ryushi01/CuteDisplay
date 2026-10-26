@@ -2511,6 +2511,10 @@ static void serviceBrain() {
    CuteLink::send(Serial1,f.seq,"ACK","HELLO");replyStatus(f.seq);
   }else if(f.type=="ACK"&&f.payload=="HELLO")replyStatus(f.seq);
   else if(f.type=="PING")CuteLink::send(Serial1,f.seq,"ACK","PING");
+  else if(f.type=="HEARTBEAT") {
+   // Silent liveness signal; lastS3 updated on every valid inbound frame.
+   // No ACK needed: C5 already sends independent STATUS every 5 seconds.
+  }
   else if(f.type=="GET_STATUS")replyStatus(f.seq);
   else if(f.type=="GET_BATTERY")replyBattery(f.seq);
   else if(f.type=="TEXT"){

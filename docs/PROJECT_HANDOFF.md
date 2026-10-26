@@ -13,6 +13,22 @@ Tell the assistant:
 
 Read the actual repository before making code changes because this document can become stale.
 
+## Latest test report — 2026-10-26 BLE-to-UART succeeds; C5 idle reconnect explained and fix committed
+
+**New user-confirmed result:** After installing the Phase-2 BLE S3 sketch and keeping the previously working C5 display firmware, the user supplied S3 USB monitor logs:
+```text
+[C5] seq=342 STATUS lcd=1;ble=1;wifi=1;soc=100
+[C5] HELLO
+[C5] seq=345 LOG C5 connected
+[S3] BLE test forwarded MASCOT seq=2
+[C5] seq=2 ACK MASCOT
+[S3] BLE relay result: ACK MASCOT
+[S3] BLE test forwarded MASCOT seq=3
+[C5] seq=3 ACK MASCOT
+[S3] BLE relay result: ACK MASCOT
+```
+This **confirms basic Bluetooth write → S3 → UART → C5 accepted MASCOT command and C5-to-S3 ACK**. The user says other tests seem to work but provided no complete outputs, so do not mark all app functions, Unicode or battery proxy verified. The link's repeated idle `HELLO` / `LOG C5 connected` is explained by C5's 10-second **inbound** UART timeout: C5 sends status every 5 seconds, but that does not refresh its last-S3-receive timestamp when S3 is idle. This is a firmware keepalive issue, not necessarily loose wiring or a board reboot. **New untested firmware commit** now makes S3 send a silent `HEARTBEAT` frame every 3 seconds while online, and C5 accepts it without ACK, preventing spurious C5 reconnects. Both sketches must be reflashed to test this improvement. The previous hardware-verified pins S3 TX47/RX21 ↔ C5 RX1/TX6, common GND, are unchanged.
+
 ## Latest development — 2026-10-26 Phase 2 BLE test relay / single-USB observed
 
 After confirming UART and `msg Hello from Brain`, the user reconnected S3 5V → C5 5V power (with common ground and verified UART TX/RX) and reported **both boards work with only the S3 USB-C powered**. This is a boot/operation observation; no current capacity, regulator heat, voltage stability, backfeed behavior or battery charger interactions have been electrically verified. The C5's USB input must remain unplugged while the two 5V pins are joined. Do not treat as permanent power-design validation.

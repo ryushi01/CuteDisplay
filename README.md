@@ -2,9 +2,15 @@
 
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
-## Phase 2 S3 BLE → UART limited test relay (new source; untested)
+## 2026-10-26 hardware milestone: S3 BLE relay actually tested; UART idle-heartbeat correction pending
 
-The S3 firmware now supports an opt-in, five-minute BLE display-command test: from the S3 USB Serial Monitor enter `ble on`, then use a BLE diagnostic app to write plain text `Hello from BLE` or `C:1`/`M:1` to `CuteDisplay-Brain-DEV` service FFF0 characteristic FFF1. The Brain forwards these allowed commands over the verified UART link and reports the C5 ACK/NACK. The new S3 source is **not yet compiled or physically tested**. The diagnostic BLE service has no enforced link authentication, so relay is disabled by default and only limited cosmetic writes are accepted. **This is not the native iPhone app migration**; iPhone still connects directly to C5. See [BLE relay test guide](docs/hardware/ble-relay-test.md).
+The user's S3 Serial Monitor showed **successful BLE → UART → C5 ACK responses** for MASCOT commands, including `[S3] BLE test forwarded MASCOT seq=2`, `[C5] seq=2 ACK MASCOT`, and `[S3] BLE relay result: ACK MASCOT` (also sequence 3). This **validates BLE command forwarding and C5 ACK receipt**; full plain-text/Unicode, native iPhone app pairing, power/battery service proxy and long-run reliability are still pending.
+
+The same logs had repeated `[C5] HELLO` / `[C5] LOG C5 connected` despite continued C5 STATUS reports. Root cause in firmware: C5 times out after 10s without receiving S3 frames, whereas S3 previously did not send periodic frames while idle. **New source now sends quiet S3 HEARTBEAT every 3s while online and C5 accepts it without a response**, preserving user-initiated PING logging. This update requires flashing **both S3 and C5**; **the fix has NOT yet been compiled/flashed/tested**. Known-working pinout and direct C5 BLE/iPhone control remain unchanged.
+
+## Phase 2 S3 BLE → UART limited test relay (new source; initial MASCOT forwarding verified)
+
+The S3 firmware now supports an opt-in, five-minute BLE display-command test: from the S3 USB Serial Monitor enter `ble on`, then use a BLE diagnostic app to write plain text `Hello from BLE` or `C:1`/`M:1` to `CuteDisplay-Brain-DEV` service FFF0 characteristic FFF1. The Brain forwards these allowed commands over the verified UART link and reports the C5 ACK/NACK. The preceding S3 Phase-2 source **was flashed and showed real MASCOT forwarding and C5 ACKs**; the new heartbeat correction, which touches both board firmware files, has not yet been tested. The diagnostic BLE service has no enforced link authentication, so relay is disabled by default and only limited cosmetic writes are accepted. **This is not the native iPhone app migration**; iPhone still connects directly to C5. See [BLE relay test guide](docs/hardware/ble-relay-test.md).
 
 **Power observation:** User reports **one USB-C on the S3** (S3 5V → C5 5V header plus GND/UART) powered both boards and the UART/display functioned. The USB/header current rating, voltage droop and backfeed safety are still **unverified**. Never connect a second C5 USB power source with the 5V jumper installed.
 

@@ -47,7 +47,7 @@ class BrainCommandCallbacks : public BLECharacteristicCallbacks {
 static CuteLink::Reader c5Reader;
 static bool c5Online=false;
 static uint16_t s3Seq=0;
-static uint32_t lastC5=0,lastHello=0;
+static uint32_t lastC5=0,lastHello=0,lastHeartbeat=0;
 static char consoleBuffer[112]={};
 static size_t consoleLen=0;
 static constexpr uint32_t BLE_TEST_WINDOW_MS=300000UL;
@@ -121,6 +121,13 @@ static void serviceC5() {
  }
  if(!c5Online&&(uint32_t)(now-lastHello)>2000UL){
   lastHello=now;toC5("HELLO","S3");
+ }
+ // C5 tracks inbound S3 activity, not C5->S3 status transmissions.
+ // Send a quiet 3s heartbeat so idle BLE/console periods do not trigger
+ // C5's 10s timeout and repeat HELLO/LOG reconnection messages.
+ if(c5Online&&(uint32_t)(now-lastHeartbeat)>=3000UL){
+  lastHeartbeat=now;
+  toC5("HEARTBEAT");
  }
 }
 static void runConsole(String cmd) {
