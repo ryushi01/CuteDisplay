@@ -1,5 +1,14 @@
 # CuteDisplay 🎀
 
+## Phase 6 design — one S3 upload updates C5 automatically (PLANNED, NOT IMPLEMENTED)
+
+The next project objective is **C5 firmware upgrades carried by the Brain**, with one USB firmware upload **only to S3** for future releases. Recommended approach: one-time C5 USB bootstrap with an OTA-capable sketch, then use the existing working 921600-baud S3 GPIO47/21 ↔ C5 GPIO1/6 UART for versioned, SHA-256-verified updates into an inactive C5 OTA partition. The C5 binary must be built for **ESP32-C5** and bundled into the S3 firmware through a repeatable packaging step: uploading an S3 sketch by itself cannot build or flash another MCU's firmware. **Do not assume OTA is supported by the presently running C5 code.** The 16MB C5 must use an OTA-capable partition table. A broken C5 bootloader/firmware still needs USB recovery, unless we add a hardware ROM-programmer path.
+
+Verified ESP32-C5 ROM programming pins: **GPIO28 BOOT**, **EN RESET**, **GPIO11 UART0 TX**, **GPIO12 UART0 RX**, with GPIO27 strap held high for joint download mode 0. C5's **GPIO0 is its user button, not BOOT**; existing app-UART C5 GPIO1/6 cannot access the ROM bootloader. Permanent S3 hardware programmer would therefore require 4 additional appropriately protected signal wires, and should be designed against the particular LILYGO breakout. For the user request, prefer **no new wires** and a cautious one-time C5 OTA bootstrap.
+
+**Status:** architecture and safety tests documented only; no live OTA code installed, and no existing working firmware changed. [Firmware-update implementation specification](docs/architecture/s3-c5-firmware-updates.md).
+
+
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
 ## Phase 5 beta: Brain BLE auto-reconnect and authenticated LAN fallback

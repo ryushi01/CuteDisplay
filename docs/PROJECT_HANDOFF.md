@@ -1,5 +1,12 @@
 # CuteDisplay — Project Handoff / Resume Here
 
+## Requested next feature — S3-initiated C5 display firmware OTA (design only)
+
+The user wants to **flash only the S3 USB-C** and have S3 automatically upgrade the LILYGO C5 if its firmware differs. The confirmed working stack is S3 BLE/Wi-Fi/LAN and C5 UART at 921600; do not destabilize it. Research confirms C5 ROM download needs **BOOT GPIO28 held low**, **GPIO27 high**, reset **EN**, plus **UART0 GPIO11 TX/12 RX**—*not* the existing C5 app UART GPIO6 TX/1 RX. C5 GPIO0 is its left **user button**, not BOOT. A permanent S3 hardware flasher would require four more connections and physical header/pad validation.
+
+Recommended solution to avoid new wires: **one-time flash the C5 using USB** with an OTA receiver and a verified OTA-capable 16MB partition table. Thereafter S3 can bundle a separately built C5 binary, check version/target, transfer CRC-ACK chunks over existing UART, verify SHA-256 and inactive slot, reboot and verify post-boot version. S3 compilation alone does NOT compile/bundle C5 .bin without an explicit build/packaging step. Inoperative C5 recovery still requires direct USB or extra physical ROM pins. Preserve S3/C5 source, iPhone, and wiring until OTA implementation and bench checks are ready. **Currently design documentation only, not working code.** Full requirements, risks, and test gates: [s3-c5-firmware-updates.md](architecture/s3-c5-firmware-updates.md).
+
+
 ## Current Phase 5 — Brain-owned Wi-Fi fallback and BLE auto-reconnect (source only, not tested)
 
 User confirmed encrypted iPhone→S3 BLE and message updates work, S3↔C5 UART works at 921600, and S3 Wi-Fi works on 2.4 GHz IoT WLAN. User now wants automatic reconnect when in Bluetooth range, authenticated Wi-Fi fallback when phone is on same network, and **all iPhone network/Bluetooth/IP controls to belong exclusively to the S3 Brain**. Do not modify C5 code or the verified UART, nor change the BLE security profile.
