@@ -354,7 +354,7 @@ static void pollFace(){
  if(faceOnline&&(uint32_t)(now-lastHeartbeat)>=3000UL){
   lastHeartbeat=now;sendLink("HEARTBEAT");
  }
- sendRadioStatus();
+ sendRadioStatus(false);
  if(activeSeq&&(uint32_t)(now-chunkSentAt)>1200UL){
   if(retryCount<2){
    ++retryCount;
