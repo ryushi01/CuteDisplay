@@ -32,6 +32,12 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32@3.3.12
 
+      - name: Show available C5 and S3 board menu options
+        shell: bash
+        run: |
+          arduino-cli board details --fqbn esp32:esp32:esp32c5
+          arduino-cli board details --fqbn esp32:esp32:esp32s3
+
       - name: Compile C5 v1/v2 and bundled S3 firmware
         shell: bash
         run: bash tools/build_s3_with_c5_update.sh
