@@ -2,7 +2,7 @@
 
 **What is provided:** GitHub Actions can compile the LILYGO ESP32-C5 OTA bootstrap firmware (v1), compile an ESP32-C5 app with version **2**, embed the actual C5 v2 application image in the ESP32-S3 Brain sketch, and compile a matching S3 application. A build artifact contains both generated binaries and ready-to-open Arduino IDE sketch folders with all required LILYGO headers/drivers. This avoids editing C5 version numbers, manually exporting .bin or running the packager.
 
-**THIS IS NOT A VERIFIED, SUCCESSFUL BUILD YET.** GitHub Actions must finish successfully. Firmware OTA and reset have not been tested on user hardware; recover C5 over USB if something goes wrong. Do not flash an app-only binary at flash offset 0.
+**Build status: SUCCESSFUL.** GitHub Actions run 40365456603 compiled both C5 versions and bundled S3 application with Arduino-ESP32 3.3.12. Firmware OTA and reset have not been tested on user hardware; recover C5 over USB if something goes wrong. Do not flash an app-only binary at flash offset 0.
 
 ## Easy workflow on a Mac
 
@@ -38,3 +38,10 @@ The script downloads the missing `board_config.h`, AXP2602 and ST7789 drivers di
 ## CI partition-layout correction
 
 Arduino-ESP32 **3.3.12** provides `PartitionScheme=custom`, but its ESP32-C5/S3 board menus do **not** offer a value literally named `default_16MB`. The build script now copies the official `tools/partitions/default_16MB.csv` from the installed ESP32 core into both generated Arduino sketch folders as `partitions.csv`, and builds both sketches with `PartitionScheme=custom`. **Choose Custom in Arduino IDE** after opening the generated sketch. Do not select the unrelated 16MB FATFS schemes, which may not have two OTA app slots. This aligns the bootstrapped C5 partition table with the later OTA image's inactive slot.
+
+## Successful build evidence
+
+- [GitHub Actions run 40365456603](https://github.com/ryushi01/CuteDisplay/actions/runs/40365456603) includes downloadable **CuteDisplay-S3-includes-C5-v2** artifact.
+- C5 v1 and v2 application programs each compile to 1,218,243 bytes; C5 v2 app binary 1,218,528 bytes.
+- S3 with C5 v2 embedded: 2,386,522 program bytes.
+- Source **compilation succeeded**, but OTA transfer, on-device verification and automatic reboot **have not been hardware-tested**.

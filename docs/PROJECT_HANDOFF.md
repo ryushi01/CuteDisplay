@@ -1,5 +1,10 @@
 # CuteDisplay — Project Handoff / Resume Here
 
+## Build milestone: S3 firmware with embedded C5 v2 is compiled
+
+GitHub Actions **succeeded** for [run 40365456603](https://github.com/ryushi01/CuteDisplay/actions/runs/40365456603) on commit \`611130d12391eb9542b5cad391fcf09d772bde76\`. Artifact **CuteDisplay-S3-includes-C5-v2** holds OTA-capable C5 v1 bootstrap, C5 v2 binary, bundled S3 binary, and complete Arduino sketches with LILYGO drivers/partition CSV. Arduino ESP32 3.3.12 compiled both; C5 app size ~1.2MB, S3 with C5 app embedded ~2.3MB. Upload compiled sketch on C5 **once** via USB if OTA v1 is not already installed; then upload only the S3 sketch to initiate v1→v2 update over UART. Pick **Custom** partition and 16MB flash for each board. The physical C5 transfer/reboot is **NOT verified**. iPhone sources unchanged. [Instructions](hardware/one-s3-upload-c5-v2.md).
+
+
 ## Build correction: C5/S3 Arduino partition scheme must be Custom
 
 First CI compilation failed because `PartitionScheme=default_16MB` is **not a valid C5/S3 board-menu value** in Arduino-ESP32 3.3.12, although `tools/partitions/default_16MB.csv` exists. Fixed build script to choose `PartitionScheme=custom` and copy that upstream dual-OTA layout into both generated sketches as `partitions.csv`. In Arduino IDE select **Custom**, matching the supplied CSV. Do not claim build is working until the follow-up CI run succeeds. Firmware files were not modified by this build fix.

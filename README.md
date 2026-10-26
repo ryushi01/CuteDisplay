@@ -1,5 +1,9 @@
 # CuteDisplay 🎀
 
+## Combined C5 v2 + S3 firmware built successfully (October 2026)
+
+**Confirmed successful GitHub Actions build** [run 40365456603](https://github.com/ryushi01/CuteDisplay/actions/runs/40365456603), based on commit \`611130d\`. Download artifact **CuteDisplay-S3-includes-C5-v2**. It contains C5 version 1 bootstrap application (~1.2 MB), C5 version 2 update (~1.2 MB), compiled bundled S3 app (~2.3 MB), and complete Arduino IDE sketch folders. Both builds used Arduino-ESP32 3.3.12 and matching 16MB dual-OTA custom partition tables. **Physical firmware transfer and C5 reboot remain unverified.** C5 must be flashed with OTA-capable version 1 via direct USB once; then only S3 USB is needed. [Easy upload instructions](docs/hardware/one-s3-upload-c5-v2.md).
+
 ## Important: partition menu selection for automated bundle
 
 When uploading the generated `release/lcd/lcd.ino` or `release/CuteDisplayBrain/CuteDisplayBrain.ino`, use the Arduino IDE **Custom** partition scheme. The script includes Espressif's 16 MB dual-OTA `partitions.csv` in each generated sketch; `default_16MB` is the upstream CSV filename **not an Arduino board-menu choice**. Source-only build until a workflow run passes.
