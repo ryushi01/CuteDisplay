@@ -7,3 +7,6 @@ DerivedData/
 *.p12
 *.pem
 *.key
+
+# Combined firmware build outputs (download artifacts instead)
+release/

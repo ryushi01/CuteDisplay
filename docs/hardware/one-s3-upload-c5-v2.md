@@ -1,8 +1,14 @@
+## VERIFIED HARDWARE MILESTONE — 2026-10-27
+
+The user **successfully flashed the C5 OTA receiver by USB, then updated C5 v1 → v2 solely via the S3 USB upload and existing 921600-baud UART**. S3 Serial Monitor confirmed **C5 v1**, inactive OTA slot **6,553,600 bytes**, subsequent **SUCCESS: new display firmware confirmed after reboot**. Kitty restarted, responds normally, and iPhone BLE/app controls work. The transient CHECK UART warning cleared. No extra update wires are required. Keep C5 USB as recovery if firmware cannot boot.
+
+**Permanent workflow:** For each release, increment `C5_FIRMWARE_VERSION` only when C5 source changes (currently v2); make S3 changes normally. GitHub Actions [Build combined S3 + C5 firmware](https://github.com/ryushi01/CuteDisplay/actions/workflows/build-s3-with-c5-update.yml) automatically compiles current C5, generates a **nonempty** `C5FirmwareImage.h` and compiles the S3 containing it. Download artifact **CuteDisplay-S3-with-C5-update**, unzip, upload **only `CuteDisplayBrain/CuteDisplayBrain.ino` from inside that artifact** to the S3 with ESP32 core 3.3.12, 16MB / OPI PSRAM / Custom partition layout. S3 automatically updates only if C5 version is older; same version is skipped. **Do not upload the normal source folder as a combined release**: its checked-in `C5FirmwareImage.h` deliberately has version=0 and length=0. Do not hand-edit it or copy it over the generated file. Arduino IDE upload does not automatically compile a separate C5 sketch. Maintain known-good USB recovery and never bridge independently supplied USB 5V rails.
+
 # One S3 upload for the C5 v2 OTA test (automated combined build)
 
 **What is provided:** GitHub Actions can compile the LILYGO ESP32-C5 OTA bootstrap firmware (v1), compile an ESP32-C5 app with version **2**, embed the actual C5 v2 application image in the ESP32-S3 Brain sketch, and compile a matching S3 application. A build artifact contains both generated binaries and ready-to-open Arduino IDE sketch folders with all required LILYGO headers/drivers. This avoids editing C5 version numbers, manually exporting .bin or running the packager.
 
-**Build status: SUCCESSFUL.** GitHub Actions run 40365456603 compiled both C5 versions and bundled S3 application with Arduino-ESP32 3.3.12. Firmware OTA and reset have not been tested on user hardware; recover C5 over USB if something goes wrong. Do not flash an app-only binary at flash offset 0.
+**First OTA v1 → v2 transfer, C5 reset, version verification, Kitty and phone-app behavior: USER CONFIRMED SUCCESSFUL (2026-10-27).** GitHub Actions run 40365456603 compiled both C5 versions and bundled S3 application with Arduino-ESP32 3.3.12. Firmware OTA and reset have not been tested on user hardware; recover C5 over USB if something goes wrong. Do not flash an app-only binary at flash offset 0.
 
 ## Easy workflow on a Mac
 

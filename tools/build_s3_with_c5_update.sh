@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a C5 v1 bootstrap, C5 v2 OTA image, and an S3 with C5 v2 embedded.
+# Build the current C5 application and embed it in the S3 Brain firmware.
 # Runs on macOS or a GitHub Actions Linux runner; never flashes a USB device.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -7,6 +7,11 @@ OUT="$ROOT/release"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 C5_FQBN="esp32:esp32:esp32c5:FlashSize=16M,PSRAM=enabled,PartitionScheme=custom"
+VERSION="$(sed -nE 's/.*C5_FIRMWARE_VERSION[[:space:]]*=[[:space:]]*([0-9]+);.*/\1/p' "$ROOT/firmware/CuteDisplay/C5FirmwareVersion.h")"
+if ! [[ "$VERSION" =~ ^[0-9]+$ ]] || [ "$VERSION" -lt 2 ]; then
+  echo "Invalid C5 firmware version. Set C5_FIRMWARE_VERSION to 2 or higher." >&2; exit 1
+fi
+echo "Packaging C5 firmware version $VERSION"
 S3_FQBN="esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=custom"
 
 for program in arduino-cli git python3; do
@@ -33,6 +38,7 @@ git clone --quiet --depth 1 --filter=blob:none --sparse \
 git -C "$WORK/vendor" sparse-checkout set include lib/AXP2602 lib/esp_lcd_st7789
 
 # Arduino requires the main lcd.ino sketch in a folder called lcd.
+rm -rf "$OUT"
 mkdir -p "$WORK/lcd" "$OUT"
 cp -R "$ROOT/firmware/CuteDisplay/." "$WORK/lcd/"
 cp "$PARTITIONS" "$WORK/lcd/partitions.csv"
@@ -46,77 +52,65 @@ fi
 cp "$WORK/vendor/lib/esp_lcd_st7789/esp_lcd_st7789.h" "$WORK/lcd/"
 cp "$WORK/vendor/lib/esp_lcd_st7789/esp_lcd_st7789.c" "$WORK/lcd/"
 
-echo "[2/7] Build initial C5 version 1 firmware (one-time USB bootstrap)"
-grep -q 'C5_FIRMWARE_VERSION=1;' "$WORK/lcd/C5FirmwareVersion.h"
+echo "[2/5] Build current C5 v$VERSION application"
 arduino-cli compile --clean --fqbn "$C5_FQBN" \
-  --build-path "$WORK/build-c5-v1" "$WORK/lcd"
-test -s "$WORK/build-c5-v1/lcd.ino.bin"
+  --build-path "$WORK/build-c5" "$WORK/lcd"
+test -s "$WORK/build-c5/lcd.ino.bin"
 mkdir -p "$OUT/lcd"
 cp -R "$WORK/lcd/." "$OUT/lcd/"
-cp "$WORK/build-c5-v1/lcd.ino.bin" "$OUT/C5-bootstrap-v1-application.bin"
+cp "$WORK/build-c5/lcd.ino.bin" "$OUT/C5-v${VERSION}-application.bin"
 
-echo "[3/7] Bump C5 version in temporary build copy ONLY"
-python3 - "$WORK/lcd/C5FirmwareVersion.h" <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-source = path.read_text()
-old = "C5_FIRMWARE_VERSION=1;"
-assert source.count(old) == 1, "Unexpected version header"
-path.write_text(source.replace(old, "C5_FIRMWARE_VERSION=2;"))
-PY
-
-echo "[4/7] Build C5 version 2 application binary"
-arduino-cli compile --clean --fqbn "$C5_FQBN" \
-  --build-path "$WORK/build-c5-v2" "$WORK/lcd"
-test -s "$WORK/build-c5-v2/lcd.ino.bin"
-cp "$WORK/build-c5-v2/lcd.ino.bin" "$OUT/C5-update-v2-application.bin"
-
-echo "[5/7] Embed C5 v2 image into the S3 sketch"
+echo "[3/5] Embed C5 v$VERSION in S3 firmware"
 mkdir -p "$WORK/CuteDisplayBrain"
 cp -R "$ROOT/firmware/CuteDisplayBrain/." "$WORK/CuteDisplayBrain/"
 cp "$PARTITIONS" "$WORK/CuteDisplayBrain/partitions.csv"
 python3 "$ROOT/tools/package_c5_firmware.py" \
-  --bin "$WORK/build-c5-v2/lcd.ino.bin" --version 2 \
+  --bin "$WORK/build-c5/lcd.ino.bin" --version "$VERSION" \
   --version-header "$WORK/lcd/C5FirmwareVersion.h" \
   --output "$WORK/CuteDisplayBrain/C5FirmwareImage.h"
+# A missing or empty image must NEVER produce a seemingly valid release artifact.
+grep -Fq "inline constexpr uint32_t version=$VERSION;" "$WORK/CuteDisplayBrain/C5FirmwareImage.h" || { echo "Bundled image version mismatch" >&2; exit 1; }
+if grep -Fq 'inline constexpr size_t length=0;' "$WORK/CuteDisplayBrain/C5FirmwareImage.h"; then
+  echo "ERROR: bundled C5 image is empty" >&2; exit 1
+fi
 
-echo "[6/7] Compile S3 Brain firmware, bundled with the C5 v2 binary"
+echo "[4/5] Compile S3 Brain firmware with embedded C5 application"
 arduino-cli compile --clean --fqbn "$S3_FQBN" \
   --build-path "$WORK/build-s3" "$WORK/CuteDisplayBrain"
 test -s "$WORK/build-s3/CuteDisplayBrain.ino.bin"
 mkdir -p "$OUT/CuteDisplayBrain"
 cp -R "$WORK/CuteDisplayBrain/." "$OUT/CuteDisplayBrain/"
 cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
-  "$OUT/S3-Brain-includes-C5-v2-application.bin"
+  "$OUT/S3-Brain-includes-C5-v${VERSION}-application.bin"
 
-cat > "$OUT/READ_ME_FIRST.txt" <<'EOF'
-CuteDisplay: S3 Brain firmware + LILYGO C5 update v2
-==================================================
-BOOTSTRAP (one time only, if C5 has never received OTA support):
-  - Disconnect the positive 5V bridge BEFORE attaching a second USB.
-  - Open lcd/lcd.ino in Arduino IDE; select ESP32C5 Dev Module with
-    16 MB flash, enabled PSRAM, Partition Scheme: CUSTOM, using
-    the included partitions.csv dual-OTA layout.
-  - Click Upload to the C5 USB once (installs OTA receiver, v1).
+cat > "$OUT/READ_ME_FIRST.txt" <<EOF
+CuteDisplay combined firmware build: S3 Brain + C5 v$VERSION
+=======================================================
+HARDWARE-TESTED: on 2026-10-27 user confirmed C5 v1 -> v2 UART OTA,
+C5 reboot, post-boot version success, Kitty and iPhone app functionality.
 
-FUTURE UPDATES: UPLOAD ONLY THE S3 VIA ITS USB:
-  - Open CuteDisplayBrain/CuteDisplayBrain.ino in Arduino IDE.
-  - Select ESP32S3 Dev Module, 16 MB flash, OPI PSRAM and
-    CUSTOM partition scheme; choose the S3 USB port.
-  - Click Upload. S3 checks the C5's version and, if it is v1,
-    transfers the bundled v2 image over the existing UART.
-  - Check S3 USB Serial Monitor at 115200 baud for:
-    [S3 OTA] SUCCESS: new display firmware confirmed after reboot
+NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
+1. Open CuteDisplayBrain/CuteDisplayBrain.ino FROM THIS ARTIFACT.
+2. Choose ESP32S3 Dev Module, 16 MB flash, OPI PSRAM, Custom
+   partition scheme (included partitions.csv); select S3 USB port.
+3. Upload ONLY the S3 sketch, then open Serial Monitor at 115200.
+4. S3 upgrades C5 automatically ONLY if bundled version is newer.
+   Expect: [S3 OTA] SUCCESS: new display firmware confirmed after reboot
 
-S3-Brain-includes-C5-v2-application.bin is an APP-only image, not a
-whole-chip factory image. Never flash it to address 0x0; its normal
-application offset is 0x10000 ONLY if your existing S3 partition table
-and bootloader match. Arduino IDE Upload from source is safer.
+The C5FirmwareImage.h from the normal repository is deliberately EMPTY.
+Never upload the repository's S3 sketch as a combined firmware release;
+always use the generated CuteDisplayBrain folder from this artifact.
+Never overwrite the generated header with the repository placeholder.
 
-NOT HARDWARE VERIFIED. Retain a C5 USB recovery path until the
-first real UART upgrade/reboot has been tested successfully.
+FIRST-TIME BOOTSTRAP ONLY (if C5 does not yet have OTA receiver):
+Open lcd/lcd.ino from this artifact and upload to the C5 over USB
+with ESP32C5 Dev Module, 16 MB flash, enabled PSRAM, Custom partition.
+Future upgrades need only the S3 USB. Keep direct C5 USB recovery available.
+Avoid powering two USB sources with a shared 5V bridge connected.
+
+The .bin files are APPLICATION images, NOT complete factory images.
+Do not flash app-only binaries to offset 0x0.
 EOF
-echo "[7/7] Combined firmware available at: $OUT"
+echo "[5/5] Combined firmware available at: $OUT"
 ls -lh "$OUT/"*.bin
 echo "Open $OUT/CuteDisplayBrain/CuteDisplayBrain.ino in Arduino IDE"

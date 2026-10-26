@@ -1,4 +1,4 @@
-name: Build S3 firmware with C5 OTA update
+name: Build combined S3 + C5 firmware
 
 on:
   workflow_dispatch:
@@ -10,6 +10,7 @@ on:
       - "tools/package_c5_firmware.py"
       - "firmware/CuteDisplay/**"
       - "firmware/CuteDisplayBrain/**"
+      - "README.md"
 
 permissions:
   contents: read
@@ -38,14 +39,14 @@ jobs:
           arduino-cli board details --fqbn esp32:esp32:esp32c5
           arduino-cli board details --fqbn esp32:esp32:esp32s3
 
-      - name: Compile C5 v1/v2 and bundled S3 firmware
+      - name: Compile current C5 and bundled S3 firmware
         shell: bash
         run: bash tools/build_s3_with_c5_update.sh
 
       - name: Publish ready-to-upload S3 project and binaries
         uses: actions/upload-artifact@v4
         with:
-          name: CuteDisplay-S3-includes-C5-v2
+          name: CuteDisplay-S3-with-C5-update
           path: release/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90

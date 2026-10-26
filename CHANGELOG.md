@@ -1,5 +1,6 @@
 # Version history
 
+- **2026-10-27 — Verified UART OTA:** C5 v1→v2 upgraded from S3 USB-only combined build; C5 rebooted; serial reported success; Kitty and iPhone app work. CI release builds now package the current versioned C5 firmware automatically and reject empty images.
 - **3.8**: Optional surprise mascot animations and iPhone setting.
 - **3.7.2**: Restored contrasting drinks rows.
 - **3.7.1**: Light pastel fill inside speech bubbles, black outside.

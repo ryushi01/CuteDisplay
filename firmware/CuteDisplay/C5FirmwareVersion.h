@@ -1,4 +1,5 @@
 #pragma once
-// Monotonic C5 application release number. Change when exporting a new C5
-// binary for packaging into the S3. Keep this in sync with --version.
-static constexpr uint32_t C5_FIRMWARE_VERSION=1;
+// Verified baseline: C5 v2 installed by S3 UART OTA on 2026-10-27.
+// Increase this version whenever the C5 application changes. CI builds
+// the C5 binary and bundles it into the S3 firmware automatically.
+static constexpr uint32_t C5_FIRMWARE_VERSION=2;
