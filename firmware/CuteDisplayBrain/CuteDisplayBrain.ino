@@ -12,7 +12,9 @@
 #include <BLEUtils.h>
 #include <BLEAdvertising.h>
 #include <BLESecurity.h>
-#include <esp_gatt_defs.h>
+// BLECharacteristic.h (included by the Arduino BLE library) provides
+// ESP_GATT_PERM_* access permission constants on Arduino-ESP32 3.x.
+// Do not include the ESP-IDF-internal esp_gatt_defs.h directly.
 #include "BrainPinPlan.h"
 #include "CuteLink.h"
 
