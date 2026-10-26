@@ -6,12 +6,27 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/release"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-C5_FQBN="esp32:esp32:esp32c5:FlashSize=16M,PSRAM=enabled,PartitionScheme=default_16MB"
-S3_FQBN="esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=default_16MB"
+C5_FQBN="esp32:esp32:esp32c5:FlashSize=16M,PSRAM=enabled,PartitionScheme=custom"
+S3_FQBN="esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=custom"
 
 for program in arduino-cli git python3; do
   command -v "$program" >/dev/null || { echo "Missing $program" >&2; exit 1; }
 done
+# Arduino-ESP32 menu has PartitionScheme=custom, NOT default_16MB.
+# Bundling the official dual-slot 16MB table inside both sketches ensures
+# Arduino IDE Upload uses identical partitions to the compiled artifact.
+PARTITIONS=""
+for core in "$HOME/.arduino15/packages/esp32/hardware/esp32/3.3.12" \
+            "$HOME/Library/Arduino15/packages/esp32/hardware/esp32/3.3.12"; do
+  if [ -f "$core/tools/partitions/default_16MB.csv" ]; then
+    PARTITIONS="$core/tools/partitions/default_16MB.csv"
+    break
+  fi
+done
+if [ -z "$PARTITIONS" ]; then
+  echo "Cannot find Arduino-ESP32 3.3.12 default_16MB.csv; install the board core." >&2
+  exit 1
+fi
 echo "[1/7] Fetch official LILYGO C5 board/AXP2602/ST7789 drivers"
 git clone --quiet --depth 1 --filter=blob:none --sparse \
   https://github.com/Xinyuan-LilyGO/T-Display-C5.git "$WORK/vendor"
@@ -20,6 +35,7 @@ git -C "$WORK/vendor" sparse-checkout set include lib/AXP2602 lib/esp_lcd_st7789
 # Arduino requires the main lcd.ino sketch in a folder called lcd.
 mkdir -p "$WORK/lcd" "$OUT"
 cp -R "$ROOT/firmware/CuteDisplay/." "$WORK/lcd/"
+cp "$PARTITIONS" "$WORK/lcd/partitions.csv"
 cp "$WORK/vendor/include/board_config.h" "$WORK/lcd/"
 cp "$WORK/vendor/lib/AXP2602/axp2602.h" "$WORK/lcd/"
 cp "$WORK/vendor/lib/AXP2602/axp2602.cpp" "$WORK/lcd/"
@@ -59,6 +75,7 @@ cp "$WORK/build-c5-v2/lcd.ino.bin" "$OUT/C5-update-v2-application.bin"
 echo "[5/7] Embed C5 v2 image into the S3 sketch"
 mkdir -p "$WORK/CuteDisplayBrain"
 cp -R "$ROOT/firmware/CuteDisplayBrain/." "$WORK/CuteDisplayBrain/"
+cp "$PARTITIONS" "$WORK/CuteDisplayBrain/partitions.csv"
 python3 "$ROOT/tools/package_c5_firmware.py" \
   --bin "$WORK/build-c5-v2/lcd.ino.bin" --version 2 \
   --version-header "$WORK/lcd/C5FirmwareVersion.h" \
@@ -79,13 +96,14 @@ CuteDisplay: S3 Brain firmware + LILYGO C5 update v2
 BOOTSTRAP (one time only, if C5 has never received OTA support):
   - Disconnect the positive 5V bridge BEFORE attaching a second USB.
   - Open lcd/lcd.ino in Arduino IDE; select ESP32C5 Dev Module with
-    16 MB flash, enabled PSRAM, default_16MB OTA partitions.
+    16 MB flash, enabled PSRAM, Partition Scheme: CUSTOM, using
+    the included partitions.csv dual-OTA layout.
   - Click Upload to the C5 USB once (installs OTA receiver, v1).
 
 FUTURE UPDATES: UPLOAD ONLY THE S3 VIA ITS USB:
   - Open CuteDisplayBrain/CuteDisplayBrain.ino in Arduino IDE.
   - Select ESP32S3 Dev Module, 16 MB flash, OPI PSRAM and
-    default_16MB OTA partitions; choose the S3 USB port.
+    CUSTOM partition scheme; choose the S3 USB port.
   - Click Upload. S3 checks the C5's version and, if it is v1,
     transfers the bundled v2 image over the existing UART.
   - Check S3 USB Serial Monitor at 115200 baud for:

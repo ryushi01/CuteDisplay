@@ -1,5 +1,9 @@
 # CuteDisplay — Project Handoff / Resume Here
 
+## Build correction: C5/S3 Arduino partition scheme must be Custom
+
+First CI compilation failed because `PartitionScheme=default_16MB` is **not a valid C5/S3 board-menu value** in Arduino-ESP32 3.3.12, although `tools/partitions/default_16MB.csv` exists. Fixed build script to choose `PartitionScheme=custom` and copy that upstream dual-OTA layout into both generated sketches as `partitions.csv`. In Arduino IDE select **Custom**, matching the supplied CSV. Do not claim build is working until the follow-up CI run succeeds. Firmware files were not modified by this build fix.
+
 ## Simplified C5 firmware test package — GitHub Actions auto-build (not yet tested)
 
 User asks for a **ready-to-upload S3 firmware including a C5 update**, without manual version editing or packaging. Added a GitHub Actions workflow `.github/workflows/build-s3-with-c5-update.yml` and local `tools/build_s3_with_c5_update.sh` that fetch official LILYGO C5 board drivers, builds the **OTA receiver C5 v1**, changes C5 version only in a **temporary working copy** and builds **C5 v2**, packages v2 into S3 via upgraded `package_c5_firmware.py --version-header`, and builds S3. GitHub Actions publishes `CuteDisplay-S3-includes-C5-v2` artifact containing `lcd/` C5 USB bootstrap, `CuteDisplayBrain/` bundled S3 source, and both app binaries. User opens the bundled Brain sketch in Arduino IDE and uploads **only S3** after initial C5 v1 bootstrap. Repo source `C5FirmwareImage.h` stays EMPTY (safety); actual C5 bin bundled **only in successfully built artifact**. Status: CI/workflow build has not been verified, neither has real OTA/reboot. See [one S3 upload first-test instructions](hardware/one-s3-upload-c5-v2.md). Preserve stable C5 USB recovery.
