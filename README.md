@@ -30,7 +30,15 @@ Development is incremental. Today, the animated display, phone controls, battery
 
 ---
 
-## Source synchronization status — 2026-10-23
+## Repository synchronization status — 2026-10-26
+
+**Current hardware target:** LILYGO T-Display-C5 **only**. The current 830-point breadboard wiring guide is [docs/hardware/lilygo-c5-audio-breadboard.md](docs/hardware/lilygo-c5-audio-breadboard.md). It documents the exact GPIO mapping and header contacts from the official LILYGO pinout. The microphone and amplifier share I²S **clocks**, but use **separate data pins**. Earlier generated pictures that show both data connections on GPIO5 must not be used as wiring references.
+
+**Current firmware:** `firmware/CuteDisplay/lcd.ino` (4.2 hardware audio loopback). **Current iOS app sources:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift`. This synchronization is a source/documentation update, **not** an independently compiled/flashed hardware release. The 830-point bench assembly, 5 V amplifier power budget, and loopback operation remain to be tested on the actual devices.
+
+**Planned next steps:** (1) local mic-to-speaker test with INMP441 + MAX98357A; (2) server-based STT, Ollama conversation and TTS streaming; (3) synchronized speaking/listening mascot animations and AI text; (4) optional future migration to Freenove ESP32-S3 CAM + Waveshare 1.9-inch screen. The S3 is **not part of the current wiring**, and camera/video functionality is not implemented.
+
+## Earlier source synchronization status — 2026-10-23
 
 The latest ESP32-C5 source (`firmware/CuteDisplay/lcd.ino`) and the iPhone Wi-Fi fallback transport (`ios/CuteDisplay/BluetoothManager.swift`) are **committed together in the default GitHub branch**. Their companion SwiftUI source and iOS local-network permission instructions are present.
 
@@ -59,11 +67,15 @@ Preserve the app's bundle identifier and signing configuration to retain its sav
 
 The ESP32-C5 firmware now removes all RSS/news fetching and uses GPIO28's long press (1.4 seconds) for a **two-second microphone recording followed by immediate speaker playback**. A short GPIO28 press does nothing. GPIO0 Wi-Fi controls are unchanged. This is a hardware-only loopback test: **no model or OpenAI API is accessed in Phase 1**. The eventual backend will support selecting local AI or OpenAI using the same audio transport.
 
-Candidate shared I²S pin mapping: GPIO1 BCLK, GPIO4 WS/LRCLK, GPIO5 microphone SD (input), GPIO6 amplifier DIN (output); both breakouts at 3.3 V and common GND. Connect speaker only to amplifier OUT+/OUT−. **Check the purchased microphone pin labels and board revision before soldering.**
+Current audio GPIO mapping: **GPIO1** BCLK (shared), **GPIO4** WS/LRCLK (shared), **GPIO5** INMP441 SD (input only), **GPIO6** MAX98357A DIN (output only), with common GND. Power the **INMP441 from 3.3 V**; the MAX98357A can use the USB-fed **5 V/VBUS rail only if the LILYGO power budget has been verified**, or a suitably regulated amplifier supply with common ground. **Never join the 3.3 V and 5 V rails, and never ground the amplifier SPK− output.** See the [complete breadboard pin map and power precautions](docs/hardware/lilygo-c5-audio-breadboard.md).
 
 The complete test bundle is also available as `CuteDisplay_AI_Phase1_Audio_NoNews.zip` in the conversation attachments. Audio/I²S compilation and device behavior have **not** been tested here; flash to the spare board first and keep the working prototype unchanged.
 
-## Latest version: 4.0
+## Currently committed firmware: 4.2 (audio-loopback prototype)
+
+The following earlier UI features were established in the 4.0 line; the committed firmware header identifies the current prototype as **4.2**, including GPIO28 audio hardware loopback. These are source-level descriptions, not claims of completed physical validation.
+
+## UI feature baseline (4.0)
 
 - Six procedural, animated mascots and selectable moods (no sprite-sheet art)
 - Optional randomized surprise animations (sneeze, stretch, startled, look around, butterfly)
@@ -79,9 +91,10 @@ The complete test bundle is also available as `CuteDisplay_AI_Phase1_Audio_NoNew
 ## Project layout
 
 ```text
-firmware/CuteDisplay/lcd.ino       Current synchronized ESP32-C5 sketch with Wi-Fi fallback
+firmware/CuteDisplay/lcd.ino       Current ESP32-C5 v4.2 sketch with local audio loopback and Wi-Fi fallback
 ios/CuteDisplay/ContentView.swift  SwiftUI screen
 ios/CuteDisplay/BluetoothManager.swift  BLE communications
+docs/hardware/lilygo-c5-audio-breadboard.md Current wiring, pinout and testing checklist
 archive/                           Earlier downloadable versions
 ```
 
@@ -109,6 +122,9 @@ Uses `FFF0` control service and `FFF1` read/write characteristic; battery servic
 Historical download packages are in `archive/`. **3.5B is retained only as history**: its sprite-based mascots were intentionally rolled back in favor of the procedural 3.4-style renderer. The latest source combination is the synchronized default-branch firmware and iOS files; on-device validation remains pending.
 
 ## Important notes
+
+- **Hardware wiring source of truth:** [C5 audio breadboard guide](docs/hardware/lilygo-c5-audio-breadboard.md). It corrects older illustration mistakes involving shared audio data and supply rails.
+- The onboard LILYGO LCD is already connected internally; it requires **no breadboard SPI wires**. The ELEGOO 830 board is used for the microphone/amplifier prototypes.
 
 - Code in this repository is not independently hardware- or Xcode-verified; test on your device and keep backups of your working build.
 - Don't commit private credentials, Apple signing certificates, or provisioning profiles.
