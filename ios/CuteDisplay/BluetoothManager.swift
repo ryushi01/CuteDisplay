@@ -314,9 +314,9 @@ final class BluetoothManager: NSObject, ObservableObject {
         for characteristic in characteristics {
             if service.uuid == controlServiceUUID && characteristic.uuid == commandUUID {
                 commandCharacteristic = characteristic
-                if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
-                    device.setNotifyValue(true, for: characteristic)
-                }
+                // Do not subscribe before encryption; that creates a second
+                // protected GATT operation while pairing is in flight.
+                // Subscribe only when FFF1 reports PROXY_READY below.
                 // Service discovery is not BLE security/bonding.
                 // A read of encrypted FFF1 triggers pairing on iOS, and the
                 // app becomes usable only after didUpdateValueFor succeeds.
@@ -331,23 +331,42 @@ final class BluetoothManager: NSObject, ObservableObject {
             } else if service.uuid == networkServiceUUID && characteristic.uuid == networkCharacteristicUUID {
                 networkCharacteristic = characteristic
                 networkDetailsAvailable = true
-                if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
-                    device.setNotifyValue(true, for: characteristic)
-                } else if characteristic.isNotifying && !networkRefreshStarted {
-                    networkRefreshStarted = true
-                    refreshNetworkDetails()
-                }
-                if characteristic.properties.contains(.read) {
-                    device.readValue(for: characteristic)
+                if isConnected {
+                    if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
+                        device.setNotifyValue(true, for: characteristic)
+                    } else if characteristic.isNotifying && !networkRefreshStarted {
+                        networkRefreshStarted = true
+                        refreshNetworkDetails()
+                    }
+                    if characteristic.properties.contains(.read) {
+                        device.readValue(for: characteristic)
+                    }
                 }
             } else if (service.uuid == powerServiceUUID && characteristic.uuid == powerCharacteristicUUID)
                         || (service.uuid == batteryServiceUUID && characteristic.uuid == batteryLevelUUID) {
-                if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
-                    device.setNotifyValue(true, for: characteristic)
+                if isConnected {
+                    if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
+                        device.setNotifyValue(true, for: characteristic)
+                    }
+                    if characteristic.properties.contains(.read) {
+                        device.readValue(for: characteristic)
+                    }
                 }
-                if characteristic.properties.contains(.read) {
-                    device.readValue(for: characteristic)
-                }
+            }
+        }
+    }
+
+    // Never batch GATT reads and subscriptions while iOS and NimBLE are
+    // still negotiating encryption. One protected FFF1 read starts security.
+    // After PROXY_READY, restore telemetry and subscribe to command ACKs.
+    private func beginBrainDataSubscriptions(on device: CBPeripheral) {
+        if let control = commandCharacteristic,
+           control.properties.contains(.notify), !control.isNotifying {
+            device.setNotifyValue(true, for: control)
+        }
+        for service in device.services ?? [] where service.uuid != controlServiceUUID {
+            if let known = service.characteristics, !known.isEmpty {
+                inspectCharacteristics(on: device, service: service, characteristics: known)
             }
         }
     }
@@ -842,10 +861,10 @@ extension BluetoothManager: CBPeripheralDelegate {
                 isConnected = true
                 status = isBrain ? "Connected securely to Brain" : "Connected to CuteDisplay"
                 stopLANFallback()
+                beginBrainDataSubscriptions(on: peripheral)
+                // For Brain, sendNext waits until FFF1 notification is active.
+                // Legacy C5 FFF1 has no notifications and uses WriteResponse.
                 sendNext()
-                // Network characteristic may have been discovered earlier,
-                // before pairing; request its current Brain-owned values now.
-                if networkCharacteristic != nil { refreshNetworkDetails() }
             } else if awaitingBrainAck,
                       let data = characteristic.value,
                       let response = String(data: data, encoding: .utf8) {

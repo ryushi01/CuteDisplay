@@ -1,0 +1,11 @@
+# Phase 4 patch 2 — pairing 0x0508 and bidirectional Brain link
+
+Source beta; **not yet compiled or tested on the hardware**.
+
+The iPhone still fails NimBLE Bluetooth pairing with 1288 (0x0508), a peer-reported unspecified pairing failure. This patch eliminates the S3 sketch's manual second security-initiation call, because Arduino-ESP32 BLE already initiates security on connect. The iPhone's BluetoothManager now reads protected FFF1 first and defers other BLE characteristic subscriptions/reads until PROXY_READY. Pairing and encrypted GATT remain required. These are hypotheses; the failure's actual cause is unconfirmed. Confirm the new S3 Serial Monitor firmware banner **Phase4-BLEPAIR-FIX2-20261026**.
+
+C5 now sends UART PROBE with a unique sequence about every 1.6s. S3 responds ACK PROBE echoing the sequence. The persistent BRAIN DISCONNECTED overlay clears only if **both** C5 has recently received a valid S3 frame and a matching PROBE acknowledgment demonstrates C5->S3->C5 communication. Either failing for ~6s keeps the warning visible despite one-way STATUS messages. Both boards must run the new protocol at 921600 UART baud on the existing crossed wiring; the USB debug monitor remains 115200. C5 local BLE and Wi-Fi stay disabled.
+
+**Test:** Disconnect shared 5V jumper with power off, flash both boards separately, reassemble wiring, rebuild/reinstall the updated iPhone app. Verify the C5 warning clears upon S3 UART round-trip startup. For disconnection test use separate USB supplies **with no shared 5V**: remove only the S3 supply, keeping C5 powered. To check one-way failure, turn both boards off and remove only C5 TX6 -> S3 RX21; power again and confirm the warning stays even if C5 sees inbound radio frames. Restore wire with power off. Try one iPhone pairing; look for S3 'BLE encryption/bonding succeeded; app relay READY' and app 'Connected securely to Brain', then send a single mascot change. If 0x0508 persists with this exact banner, capture the new log; diagnose the iPhone/CoreBluetooth pairing path separately rather than claiming it is resolved.
+
+UART pinout: S3 TX GPIO47 -> C5 RX GPIO1; C5 TX GPIO6 -> S3 RX GPIO21, common GND. Avoid two USB power sources when the 5V rails are bridged. Retain a known-working firmware backup for rollback.

@@ -25,7 +25,7 @@
 #include "CuteLink.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
-static constexpr char S3_FW_VERSION[]="Phase4-BLEPAIR-FIX1-20261026";
+static constexpr char S3_FW_VERSION[]="Phase4-BLEPAIR-FIX2-20261026";
 static constexpr size_t MAX_CMD=96;
 // Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
 // UART frame payload (one-digit chunk index, total, delimiters).
@@ -86,16 +86,8 @@ class BrainSecurityCallbacks:public BLESecurityCallbacks{
 };
 class ServerEvents:public BLEServerCallbacks{
  void onConnect(BLEServer*)override{connectPending=true;}
-#if defined(CONFIG_BLUEDROID_ENABLED)
- void onConnect(BLEServer*,esp_ble_gatts_cb_param_t *params)override{
-  // Trigger pairing before protected GATT reads/writes.
-  if(params)BLESecurity::startSecurity(params->connect.remote_bda);
- }
-#elif defined(CONFIG_NIMBLE_ENABLED)
- void onConnect(BLEServer*,ble_gap_conn_desc *desc)override{
-  if(desc)BLESecurity::startSecurity(desc->conn_handle);
- }
-#endif
+ // The Arduino-ESP32 BLE stack already calls BLESecurity::startSecurity
+ // when security is configured. Avoid a second, racing SMP initiation.
  void onDisconnect(BLEServer*)override{disconnectPending=true;}
 };
 class CommandEvents:public BLECharacteristicCallbacks{
@@ -199,7 +191,11 @@ static void processFace(const CuteLink::Frame &f){
  lastFace=millis();
  if(!faceOnline)Serial.println("[S3] C5 UART connected");
  faceOnline=true;
- if(f.type=="HELLO"){
+ if(f.type=="PROBE"){
+  // Exact sequence echo verifies the C5 transmitted and the S3 received it.
+  // The C5's warning clears only after it also receives this matching ACK.
+  CuteLink::send(Serial1,f.seq,"ACK","PROBE");
+ } else if(f.type=="HELLO"){
   if(activeSeq)cancelCommand("FACE_RESTART");
   sendRadioStatus(true);
   CuteLink::send(Serial1,f.seq,"ACK","HELLO");

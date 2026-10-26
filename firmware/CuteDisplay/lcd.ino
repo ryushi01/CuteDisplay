@@ -158,10 +158,16 @@ static bool s3Online=false;
 static uint16_t c5Seq=0;
 static uint32_t lastS3=0;
 static constexpr uint32_t BRAIN_LOST_MS=6000UL;
-// Link warning is NOT a mode: it is composited last on every LCD redraw.
-// No retained pop-up deadline: it remains visible until valid S3 UART returns.
+static constexpr uint32_t BRAIN_PROBE_MS=1600UL;
+static uint32_t lastProbeSent=0,lastProbeAck=0;
+static uint16_t pendingProbeSeq=0;
+// Both directions must work: valid S3-to-C5 frames PLUS S3's exact response
+// to a recent numbered C5-to-S3 challenge are required to hide the warning.
 static bool brainLinkConnected(){
- return s3Online && (uint32_t)(millis()-lastS3)<BRAIN_LOST_MS;
+ const uint32_t now=millis();
+ return s3Online && lastS3!=0 && lastProbeAck!=0 &&
+        (uint32_t)(now-lastS3)<BRAIN_LOST_MS &&
+        (uint32_t)(now-lastProbeAck)<BRAIN_LOST_MS;
 }
 static bool lastDisplayedBrainLink=false;
 // C5 radios are disabled. Only S3 RADIO frames determine on-screen icons.
@@ -170,7 +176,7 @@ static bool brainBleClient=false,brainWifiConnected=false;
 static uint32_t brainRadioSeen=0;
 static String brainIP="-";
 static bool brainRadioFresh(){
- return s3Online && brainRadioSeen &&
+ return brainLinkConnected() && brainRadioSeen &&
         (uint32_t)(millis()-brainRadioSeen)<5500UL;
 }
 static bool displayBleConnected(){return brainRadioFresh() && brainBleClient;}
@@ -578,7 +584,7 @@ void drawBrainLinkOverlay(){
  rect(x,y,w,h,0xF800);
  rect(x+3,y+3,w-6,h-6,0x1082);
  textAt("BRAIN DISCONNECTED",52,53,2,0xFFFF);
- textAt("WAITING FOR S3 LINK",98,91,1,0xFFE0);
+ textAt("CHECKING UART TX + RX",93,91,1,0xFFE0);
  textAt("CHECK POWER AND UART",95,107,1,0xFFFF);
 }
 void drawConnectivityHUD(){
@@ -2587,6 +2593,13 @@ static void receiveCmdChunk(const CuteLink::Frame &f){
 static void toS3(const char *type,const String &value=""){
  CuteLink::send(Serial1,++c5Seq,type,value);
 }
+static void sendBrainProbe(uint32_t now){
+ lastProbeSent=now;
+ pendingProbeSeq=++c5Seq;
+ if(!pendingProbeSeq)pendingProbeSeq=++c5Seq;
+ if(!CuteLink::send(Serial1,pendingProbeSeq,"PROBE","C5"))
+  Serial.println("[UART] Failed sending C5-originated link probe");
+}
 static void replyStatus(uint16_t seq) {
  String v="lcd="+String(lcdReady?1:0)+";ble="+String(displayBleConnected()?1:0)+
           ";wifi="+String(displayWiFiConnected()?1:0)+";soc="+String(batteryReady?batteryLevel:-1);
@@ -2628,11 +2641,18 @@ static void serviceBrain() {
    toS3("LOG","C5 connected");
   }
   if(f.type=="HELLO"){
-   // An S3 reboot starts its sequence numbers over; discard old cached ACK.
+   // Remote reboot: require a NEW successful round trip.
+   lastProbeAck=0;
    resetCmdParts();
    lastAcceptedChunkSeq=0;lastAcceptedChunkResponse="";
    CuteLink::send(Serial1,f.seq,"ACK","HELLO");replyStatus(f.seq);
   }else if(f.type=="ACK"&&f.payload=="HELLO")replyStatus(f.seq);
+  else if(f.type=="ACK"&&f.payload=="PROBE"){
+   if(pendingProbeSeq!=0 && f.seq==pendingProbeSeq){
+    lastProbeAck=millis();
+    pendingProbeSeq=0;
+   }
+  }
   else if(f.type=="PING")CuteLink::send(Serial1,f.seq,"ACK","PING");
   else if(f.type=="HEARTBEAT") {
    // Silent liveness signal; lastS3 updated on every valid inbound frame.
@@ -2670,7 +2690,10 @@ static void serviceBrain() {
  }
  uint32_t now=millis();
  if(s3Online&&(uint32_t)(now-lastS3)>BRAIN_LOST_MS){
-  s3Online=false;Serial.println("[UART] S3 lost");
+  s3Online=false;
+  lastProbeAck=0;
+  pendingProbeSeq=0;
+  Serial.println("[UART] S3 RX timeout: bidirectional link lost");
  }
  if(!s3Online&&(uint32_t)(now-lastC5Hello)>2000UL){
   lastC5Hello=now;toS3("HELLO","C5");
@@ -2678,6 +2701,9 @@ static void serviceBrain() {
  if(s3Online&&(uint32_t)(now-lastC5Status)>5000UL){
   lastC5Status=now;replyStatus(++c5Seq);
  }
+ // Always probe, including while offline, to recover without restarting.
+ // Valid STATUS or RADIO frames alone are insufficient to clear the popup.
+ if((uint32_t)(now-lastProbeSent)>=BRAIN_PROBE_MS)sendBrainProbe(now);
 }
 
 void setup(){
