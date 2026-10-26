@@ -2,7 +2,11 @@
 
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
-## Upcoming first hardware experiment — single USB-C power (Option 1)
+## Phase 1 UART diagnostics — 2026-10-26 (untested source)
+
+`main` now includes diagnostic UART source with framed HELLO/ACK, a **S3 USB Serial Monitor console**, C5 status/battery queries and limited ASCII/mood/mascot test commands. Source **has not yet been compiled or hardware-tested**. Use **two separate USB supplies**, common GND and crossed TX/RX; keep the 5V-positive jumper removed. The phone still connects directly to C5; S3 BLE is not a proxy. Both firmware folders now contain the required `CuteLink.h`. See [exact wiring/flashing/console test](docs/hardware/uart-bringup.md).
+
+## Previous proposed single USB-C power experiment — Option 1
 
 ![Proposed LILYGO 5V/GND power-only connection to Freenove ESP32-S3; NOT approved until current capacity verified](docs/hardware/option1-lilygo-powers-s3.svg)
 

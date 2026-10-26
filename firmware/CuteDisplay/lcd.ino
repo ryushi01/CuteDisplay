@@ -25,6 +25,7 @@
 #include <cstring>
 #include "board_config.h"
 #include "axp2602.h"
+#include "CuteLink.h"
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -2479,8 +2480,71 @@ static void updateLAN(){
  }
 }
 
+// Phase-1 C5 UART: TX GPIO4 -> S3 RX21, RX GPIO5 <- S3 TX47.
+static CuteLink::Reader s3Reader;
+static bool s3Online=false;
+static uint16_t c5Seq=0;
+static uint32_t lastS3=0,lastC5Hello=0,lastC5Status=0;
+static void toS3(const char *type,const String &value=""){
+ CuteLink::send(Serial1,++c5Seq,type,value);
+}
+static void replyStatus(uint16_t seq) {
+ String v="lcd="+String(lcdReady?1:0)+";ble="+String(bleConnected?1:0)+
+          ";wifi="+String(wifiOnline()?1:0)+";soc="+String(batteryReady?batteryLevel:-1);
+ CuteLink::send(Serial1,seq,"STATUS",v);
+}
+static void replyBattery(uint16_t seq) {
+ // Battery current is not the total USB input current.
+ String v="soc="+String(batteryReady?batteryLevel:-1)+";v="+
+          String(lanVolts,3)+";a="+String(lanAmps,3);
+ CuteLink::send(Serial1,seq,"BATTERY",v);
+}
+static void serviceBrain() {
+ CuteLink::Frame f;
+ for(int n=0;n<4&&s3Reader.poll(Serial1,f);++n){
+  lastS3=millis();
+  if(!s3Online){
+   s3Online=true;Serial.println("[UART] S3 Brain link established");
+   toS3("LOG","C5 connected");
+  }
+  if(f.type=="HELLO"){
+   CuteLink::send(Serial1,f.seq,"ACK","HELLO");replyStatus(f.seq);
+  }else if(f.type=="ACK"&&f.payload=="HELLO")replyStatus(f.seq);
+  else if(f.type=="PING")CuteLink::send(Serial1,f.seq,"ACK","PING");
+  else if(f.type=="GET_STATUS")replyStatus(f.seq);
+  else if(f.type=="GET_BATTERY")replyBattery(f.seq);
+  else if(f.type=="TEXT"){
+   bool ascii=!f.payload.isEmpty()&&f.payload.length()<=80;
+   for(size_t i=0;ascii&&i<f.payload.length();++i)if((uint8_t)f.payload[i]>127)ascii=false;
+   if(!ascii||!lcdReady)CuteLink::send(Serial1,f.seq,"NACK","Bad text/not ready");
+   else{showMessage(f.payload);CuteLink::send(Serial1,f.seq,"ACK","TEXT");}
+  }else if(f.type=="MOOD"||f.type=="MASCOT"){
+   bool moodCmd=f.type=="MOOD";
+   if(!lcdReady||f.payload.length()!=1||f.payload[0]<'0'||
+      f.payload[0]>(moodCmd?'7':'5'))
+    CuteLink::send(Serial1,f.seq,"NACK","Invalid value/not ready");
+   else{
+    processCommand(String(moodCmd?"M:":"C:")+f.payload);
+    CuteLink::send(Serial1,f.seq,"ACK",f.type);
+   }
+  }else CuteLink::send(Serial1,f.seq,"NACK","Unknown request");
+ }
+ uint32_t now=millis();
+ if(s3Online&&(uint32_t)(now-lastS3)>10000UL){
+  s3Online=false;Serial.println("[UART] S3 lost");
+ }
+ if(!s3Online&&(uint32_t)(now-lastC5Hello)>2000UL){
+  lastC5Hello=now;toS3("HELLO","C5");
+ }
+ if(s3Online&&(uint32_t)(now-lastC5Status)>5000UL){
+  lastC5Status=now;replyStatus(++c5Seq);
+ }
+}
+
 void setup(){
  Serial.begin(115200);delay(700);
+ Serial1.begin(115200,SERIAL_8N1,5,4);
+ Serial.println("[UART] C5 UART1 active TX=GPIO4 RX=GPIO5");
  Serial.println("=== CUTEDISPLAY 3.9 RIGHT-SIDE ANIMATIONS ===");
  if(!initExternalCaches()) {
   Serial.println("[MEM] Fatal: PSRAM cache allocation failed. Check QIO PSRAM board setting.");
@@ -2517,6 +2581,7 @@ void setup(){
    (wifiEnabled&&!wifiSSID.isEmpty())?"yes":"no");
 }
 void loop(){
+ serviceBrain();
  char input[MAX_CMD+1]={0};
  for(int q=0;q<8&&commandQueue&&xQueueReceive(commandQueue,input,0)==pdTRUE;q++){
   processCommand(String(input));

@@ -1,14 +1,13 @@
 /*
- CuteDisplay ESP32-S3 Brain — Phase 0 BLE discovery and UART-ready skeleton.
+ CuteDisplay ESP32-S3 Brain — Phase 1 UART test and BLE diagnostic.
  Board target: Freenove ESP32-S3-CAM N16R8, Arduino-ESP32 3.x.
- NOTE: Candidate I2S and inter-board UART pins are documented in
- BrainPinPlan.h but are NOT configured or enabled by this sketch.
- Until the GPIO breakout and serial protocol are bench-tested, this firmware
- intentionally DOES NOT forward display commands or claim S3 audio support.
+ UART diagnostics are now included. Pins and frames have not been bench-tested.
+ I2S/AI/camera and iPhone BLE command forwarding are NOT implemented.
  Do not flash this sketch to the LILYGO T-Display-C5.
 */
 #include <Arduino.h>
 #include "BrainPinPlan.h"
+#include "CuteLink.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -43,15 +42,94 @@ class BrainCommandCallbacks : public BLECharacteristicCallbacks {
   }
 };
 
+// Serial=USB debug; Serial1=UART to C5; legacy BLE is diagnostic-only.
+static CuteLink::Reader c5Reader;
+static bool c5Online=false;
+static uint16_t s3Seq=0;
+static uint32_t lastC5=0,lastHello=0;
+static char consoleBuffer[112]={};
+static size_t consoleLen=0;
+static void toC5(const char *type,const String &value=""){
+ if(!CuteLink::send(Serial1,++s3Seq,type,value))Serial.println("[S3] Invalid UART payload");
+}
+static void serviceC5() {
+ CuteLink::Frame f;
+ for(int i=0;i<4&&c5Reader.poll(Serial1,f);++i){
+  lastC5=millis();
+  if(!c5Online)Serial.println("[S3] C5 UART connected");
+  c5Online=true;
+  if(f.type=="HELLO"){
+    CuteLink::send(Serial1,f.seq,"ACK","HELLO");
+    Serial.println("[C5] HELLO");
+  }else Serial.printf("[C5] seq=%u %s %s\n",f.seq,f.type.c_str(),f.payload.c_str());
+ }
+ uint32_t now=millis();
+ if(c5Online&&(uint32_t)(now-lastC5)>10000UL){
+  c5Online=false;Serial.println("[S3] C5 UART timed out");
+ }
+ if(!c5Online&&(uint32_t)(now-lastHello)>2000UL){
+  lastHello=now;toC5("HELLO","S3");
+ }
+}
+static void runConsole(String cmd) {
+ cmd.trim();
+ if(cmd=="help"){
+  Serial.println("[S3] help status hello ping battery msg <ASCII> mood <0-7> mascot <0-5>");
+  return;
+ }
+ if(cmd=="status"){
+  Serial.printf("[S3] online=%d BLE_client=%d invalid_frames=%lu\n",
+    c5Online?1:0,clientConnected?1:0,(unsigned long)c5Reader.invalid);
+  if(c5Online)toC5("GET_STATUS");
+  return;
+ }
+ if(cmd=="hello"){toC5("HELLO","S3");return;}
+ if(!c5Online){Serial.println("[S3] C5 offline; check crossed TX/RX and GND");return;}
+ if(cmd=="ping"){toC5("PING");return;}
+ if(cmd=="battery"){toC5("GET_BATTERY");return;}
+ if(cmd.startsWith("msg ")){
+  String value=cmd.substring(4);
+  if(value.isEmpty()||value.length()>80||!CuteLink::fieldOk(value)){
+    Serial.println("[S3] Text must be 1-80 ASCII bytes without pipes/newlines");return;
+  }
+  for(size_t i=0;i<value.length();++i)
+   if((uint8_t)value[i]>127){Serial.println("[S3] Japanese/Unicode not available yet");return;}
+  toC5("TEXT",value);return;
+ }
+ bool isMood=cmd.startsWith("mood "),isMascot=cmd.startsWith("mascot ");
+ if(isMood||isMascot){
+  String value=cmd.substring(isMood?5:7);
+  if(value.length()!=1||value[0]<'0'||value[0]>(isMood?'7':'5')){
+    Serial.println("[S3] Invalid mood/mascot index");return;
+  }
+  toC5(isMood?"MOOD":"MASCOT",value);return;
+ }
+ Serial.println("[S3] Unknown command; enter help");
+}
+static void serviceConsole() {
+ for(int i=0;i<96&&Serial.available()>0;++i){
+  int x=Serial.read();if(x<0)break;char ch=(char)x;
+  if(ch=='\r')continue;
+  if(ch=='\n'){
+   consoleBuffer[consoleLen]=0;
+   if(consoleLen)runConsole(String(consoleBuffer));
+   consoleLen=0;
+  }else if(consoleLen<sizeof(consoleBuffer)-1)consoleBuffer[consoleLen++]=ch;
+  else {consoleLen=0;Serial.println("[S3] Console line too long");}
+ }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(250);
   Serial.println("[S3] CuteDisplay brain development bootstrap");
-  Serial.println("[S3] Audio, camera, UART, AI and iOS migration are NOT activated");
-  Serial.printf("[S3] Planned UART TX=%d RX=%d, I2S BCLK=%d WS=%d DIN=%d DOUT=%d (INACTIVE)\n",
+  Serial.println("[S3] UART diagnostics only. Audio, AI, camera and phone migration INACTIVE");
+  Serial.printf("[S3] UART TX=%d RX=%d, I2S BCLK=%d WS=%d DIN=%d DOUT=%d (I2S INACTIVE)\n",
     BrainPinPlan::UART_TX, BrainPinPlan::UART_RX,
     BrainPinPlan::I2S_BCLK, BrainPinPlan::I2S_WS,
     BrainPinPlan::I2S_DIN, BrainPinPlan::I2S_DOUT);
+  Serial1.begin(BrainPinPlan::UART_BAUD, SERIAL_8N1, BrainPinPlan::UART_RX, BrainPinPlan::UART_TX);
+  Serial.println("[S3] UART1 started for C5; USB console: Newline + help");
   controlQueue = xQueueCreate(16, MAX_CMD_BYTES + 1);
   if (!controlQueue) {
     Serial.println("[S3] Fatal: cannot allocate BLE command queue");
@@ -79,6 +157,8 @@ void setup() {
 }
 
 void loop() {
+  serviceC5();
+  serviceConsole();
   if (pendingConnect) {
     pendingConnect = false;
     clientConnected = true;

@@ -1,0 +1,11 @@
+# UART phase 1: Flash and test (source not yet bench-tested)
+
+**Power:** Keep both boards on **separate USB-C supplies**; remove the 5V/5V jumper before attaching both USB inputs. Verify printed pin labels and use three wires: **S3 GPIO47 TX → C5 GPIO5 RX**, **C5 GPIO4 TX → S3 GPIO21 RX**, and **GND → GND**. Do not connect 5V to 5V or 3V3 to 3V3. Both MCU GPIOs are 3.3V logic. When only one board is powered, unplug signal wires to avoid I/O backfeeding.
+
+**Flash:** Disconnect UART wires for individual uploads. S3: open `firmware/CuteDisplayBrain/CuteDisplayBrain.ino` with `BrainPinPlan.h` and new `CuteLink.h` in the same sketch folder. Choose ESP32S3 Dev Module, 16MB flash, OPI PSRAM; connect USB-UART for uploading and monitoring. C5: open `firmware/CuteDisplay/lcd.ino` with its new `CuteLink.h`, working `board_config.h`, LILYGO AXP2602 library; choose ESP32C5 Dev Module, 16MB flash, QIO PSRAM.
+
+**Test:** Power both independently, connect 3 wires, open S3 Serial Monitor **115200 baud, Newline**. Expect `[S3] C5 UART connected`, `[C5] ... HELLO`, `[C5] ... STATUS`. Type `help`, `status`, `ping`, `battery`, `msg Hello Kitty`, `mood 1`, `mascot 1`. Text commands currently allow **ASCII only** (1–80 bytes); Japanese glyph transfer is future work. Keep the iPhone app separate during test to avoid conflicting display changes.
+
+**Protocol:** `@CD1|seq|type|payload|CRC8\n` (CRC8 polynomial 0x07 over `CD1|seq|type|payload`), 160-byte max frame and 96-byte payload, HELLO/ACK, selected C5 status/voltage/battery current reports, periodic status every 5s, 10s link timeout. No retries, ACK tracking, UTF-8 glyph chunks, or complete forwarding of historical C5 USB Serial logs. Early C5 boot logs still require its own USB monitor.
+
+**Migration status:** S3 BLE diagnostic service remains unconnected to iPhone control. C5 retains current iPhone BLE, LCD, battery and Wi-Fi logic. I2S, AI, camera, relay BLE services and single-USB power capacity remain untested. Do not assume a compiled/hardware-tested build; send compiler and UART logs to continue.

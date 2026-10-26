@@ -13,6 +13,12 @@ Tell the assistant:
 
 Read the actual repository before making code changes because this document can become stale.
 
+## Latest status — 2026-10-26 phase 1 UART test sources (not compiled/hardware verified)
+
+User flashed the previous S3 BLE diagnostic and confirmed its serial boot/advertising logs; user reports flashing current C5. S3 USB → C5 power booted both, but C5 USB → S3 lit power while S3 failed to boot. This is not a current-path safety rating, so user chose **separate USB supplies** for development and no 5V positive jumper. Do not power two USB supplies into common 5V rails.
+
+**New phase 1 source:** both Arduino firmware folders contain `CuteLink.h`; S3 UART1 GPIO47 TX/GPIO21 RX and USB console (help/status/ping/battery/msg/mood/mascot); C5 UART1 GPIO4 TX/GPIO5 RX, HELLO/ACK and diagnostics. iPhone still connects straight to C5; S3 BLE service remains diagnostic only. **New firmware NOT compiled/flashed/bench-tested yet.** Use [UART bring-up guide](hardware/uart-bringup.md). No robust retries, Japanese glyph UART, C5 battery BLE proxy, iPhone migration or AI/audio/camera.
+
 ## Product goal
 
 Build a cute, multilingual (English/Japanese/French), animated, compact AI companion. Kitty/mascot remains on the **right side** of the LILYGO screen, with user messages/AI text readable elsewhere. Smooth, expressive mood-aware animations and accessories are a priority. Keep response text, BLE configuration, battery status, reconnection behavior and existing appearance controls working. The AI backend can be OpenAI or a separate user-hosted CPU-only Ollama/Open WebUI server (STT/TTS off-device). Camera support is **postponed**, not abandoned.
@@ -65,7 +71,7 @@ These choices avoid documented S3 camera GPIO4–13,15–18, SD GPIO38–40 and 
 
 LILYGO GPIO4/5 are *proposed* UART pins and should be checked physically and against any board-specific firmware pin use before wiring. Existing C5 LCD GPIO26/7/9/8/23/25, battery I²C 2/3/10, and GPIO0 user button must remain untouched.
 
-**UART software is not yet implemented.** Use versioned framed messages, length checks, sequence/ACK, device-ready handshake, text segmentation/Japanese glyph transport and reconnect state synchronization. Do not force iPhone app over to S3 before battery/status/commands are fully relayed.
+**Basic phase-1 UART diagnostics are now implemented in source, not hardware validated.** Versioned bounded frames, CRC8, sequence ACK, HELLO, status/battery, ASCII console tests exist. Reliable retries, Japanese glyph chunks, BLE proxy and reconnection sync are not implemented. Do not migrate iPhone pairing yet.
 
 ## Current FIRST physical experiment: Option 1 — ONE USB-C ON LILYGO
 
