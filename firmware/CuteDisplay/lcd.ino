@@ -42,10 +42,6 @@
 #include "esp_idf_version.h"
 #include "driver/i2s_std.h"
 
-// Declare custom types before Arduino IDE auto-generated function prototypes.
-struct Drink;
-bool parseEntry(String entry, Drink &result);
-
 #define PIN_CS 26
 #define PIN_DC 8
 #define PIN_RST 23
