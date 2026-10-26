@@ -1,52 +1,63 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1020" viewBox="0 0 1500 1020" role="img" aria-label="CuteDisplay proposed ELEGOO 830-point breadboard with ESP32-S3 brain and LILYGO T-Display-C5 face. S3 connects to INMP441 microphone, MAX98357A amplifier and UART to LILYGO. Camera omitted. GPIO numbers not yet assigned; use labeled signals and common ground.">
-<rect width="1500" height="1020" fill="#f8fafc"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-label="CuteDisplay ESP32 S3 brain and LILYGO C5 face breadboard proposal. S3 GPIO41 shared BCLK, GPIO42 shared WS, GPIO1 mic data, GPIO2 amplifier data, GPIO47 UART TX to C5 GPIO5 RX, S3 GPIO21 UART RX from C5 GPIO4 TX; ground common. Camera omitted.">
+<rect width="1600" height="1180" fill="#f8fafc"/>
 <g font-family="Arial,Helvetica,sans-serif">
-<text x="60" y="62" font-size="37" font-weight="700" fill="#1b3350">CuteDisplay — proposed S3 + LILYGO breadboard</text>
-<text x="60" y="100" font-size="22" fill="#536b85">ELEGOO 830-point breadboard • top view • camera intentionally omitted • NOT a ready-to-wire GPIO map</text>
-<rect x="48" y="130" width="1404" height="720" rx="26" fill="#fff" stroke="#becbd9" stroke-width="3"/>
-<rect x="78" y="165" width="1344" height="610" rx="20" fill="#f6f8fc" stroke="#c8d4e2" stroke-width="2"/>
-<g fill="#8e9cad"><text x="94" y="189" font-size="17">1</text><text x="365" y="189" font-size="17">16</text><text x="704" y="189" font-size="17">32</text><text x="1030" y="189" font-size="17">48</text><text x="1345" y="189" font-size="17">63</text></g>
-<path d="M92 214 H1400" stroke="#d75162" stroke-width="5"/><path d="M92 229 H1400" stroke="#588ac9" stroke-width="5"/>
-<path d="M92 714 H1400" stroke="#d75162" stroke-width="5"/><path d="M92 729 H1400" stroke="#588ac9" stroke-width="5"/>
-<text x="102" y="252" font-size="17" fill="#7b8a9a">A–E</text><text x="102" y="696" font-size="17" fill="#7b8a9a">F–J</text>
-<path d="M90 474 H1410" stroke="#b3bdca" stroke-width="18" stroke-dasharray="3 9" opacity=".55"/>
-<text x="103" y="460" fill="#8090a1" font-size="16">centre trench</text>
-<!-- S3 board occupies left zone, LILYGO right; connector faces remain recognizable -->
-<rect x="139" y="283" width="490" height="337" rx="21" fill="#e9f8f0" stroke="#238765" stroke-width="4"/>
-<text x="167" y="324" font-size="29" font-weight="700" fill="#146246">Freenove ESP32-S3 Brain</text>
-<text x="167" y="355" font-size="18" fill="#476f5a">BLE + Wi-Fi + future audio / AI bridge</text>
-<rect x="169" y="384" width="420" height="72" rx="10" fill="#264e48"/>
-<text x="193" y="414" font-size="21" fill="#fff">USB-C power (separate supply)</text>
-<text x="193" y="441" font-size="17" fill="#c2e8d4">Camera pin reservations to verify</text>
-<rect x="169" y="477" width="420" height="121" rx="12" fill="#fff" stroke="#a9d4be"/>
-<text x="189" y="506" font-size="18" font-weight="700" fill="#165d43">Future S3 header signals (pins TBD)</text>
-<text x="189" y="533" font-size="18" fill="#9d6318">I²S BCLK + WS  →  mic and amp</text>
-<text x="189" y="558" font-size="18" fill="#227abb">MIC DIN  ←  INMP441 SD</text>
-<text x="189" y="582" font-size="18" fill="#b05b72">AMP DOUT  →  MAX98357A DIN</text>
-<rect x="844" y="283" width="476" height="337" rx="21" fill="#fff1f7" stroke="#c85b90" stroke-width="4"/>
-<text x="874" y="323" font-size="28" font-weight="700" fill="#852c5e">LILYGO T-Display-C5</text>
-<text x="874" y="354" font-size="18" fill="#814c6b">Existing animation and display firmware</text>
-<rect x="871" y="382" width="420" height="121" rx="12" fill="#26374d"/>
-<text x="897" y="423" font-size="28" fill="#fff">Hello! Kitty ♡</text>
-<text x="897" y="456" font-size="18" fill="#cfdef0">AI response text · mascot expressions</text>
-<text x="874" y="545" font-size="19" font-weight="700" fill="#7d355e">USB-C power separately</text>
-<text x="874" y="577" font-size="18" fill="#7d355e">UART RX / TX / GND on side headers</text>
-<g stroke-width="7" fill="none" stroke-linecap="round">
-<path d="M629 380 H713 V365 H844" stroke="#d68725"/>
-<path d="M629 409 H746 V408 H844" stroke="#2867bc"/>
-<path d="M629 442 H780 V452 H844" stroke="#444b55"/>
-</g>
-<g font-size="16" font-weight="700"><text x="656" y="351" fill="#a15c0e">S3 TX → C5 RX</text><text x="650" y="395" fill="#205aa7">C5 TX → S3 RX</text><text x="671" y="474" fill="#424b59">GND ↔ GND</text></g>
-<rect x="117" y="785" width="397" height="45" rx="12" fill="#e7f7ff" stroke="#a1c9db"/>
-<text x="135" y="815" font-size="18" fill="#165676">INMP441 microphone → S3 I²S RX</text>
-<rect x="539" y="785" width="454" height="45" rx="12" fill="#fff3df" stroke="#e3c18a"/>
-<text x="554" y="815" font-size="18" fill="#815318">MAX98357A amplifier ← S3 I²S TX</text>
-<rect x="1017" y="785" width="355" height="45" rx="12" fill="#f1edff" stroke="#b2a1e0"/>
-<text x="1034" y="815" font-size="18" fill="#5a4292">8Ω speaker ← SPK+ / SPK−</text>
-<path d="M514 807 H539 M993 807 H1017" stroke="#7c8aa0" stroke-width="4" stroke-dasharray="7 7"/>
-<rect x="60" y="865" width="1380" height="116" rx="17" fill="#fff8e8" stroke="#e2c080" stroke-width="2"/>
-<text x="87" y="898" font-size="22" font-weight="700" fill="#86571c">Electrical connections and safety</text>
-<text x="87" y="925" font-size="18" fill="#6d5b42">S3 ↔ C5: TX to RX, RX to TX, shared GND; 3.3 V logic only. Never connect 5 V to a GPIO.</text>
-<text x="87" y="950" font-size="18" fill="#6d5b42">Mic VDD = regulated 3.3 V; amplifier VIN = verified rated supply. All grounds common; speaker SPK− never to GND.</text>
-<text x="87" y="974" font-size="16" fill="#7c6c57">I²S and UART GPIO numbers, exact rail segments and breadboard row positions will be finalized after inspecting the Freenove pinout.</text>
+<text x="55" y="57" font-size="39" font-weight="700" fill="#193454">CuteDisplay • Dual-board breadboard pin plan</text>
+<text x="55" y="94" font-size="22" fill="#536980">ESP32-S3 brain + LILYGO C5 face + I²S microphone/amplifier • NO camera wiring</text>
+<rect x="55" y="120" width="1490" height="793" rx="23" fill="#ffffff" stroke="#bccddd" stroke-width="3"/>
+<rect x="76" y="141" width="1448" height="740" rx="18" fill="#f0f3f9" stroke="#ccd6e2"/>
+<path d="M98 175 H1502 M98 195 H1502" fill="none" stroke-width="5" stroke="#df7781"/>
+<path d="M98 208 H1502" fill="none" stroke-width="5" stroke="#658fcb"/>
+<path d="M98 828 H1502" fill="none" stroke-width="5" stroke="#df7781"/>
+<path d="M98 851 H1502" fill="none" stroke-width="5" stroke="#658fcb"/>
+<text x="104" y="170" font-size="16" fill="#ac4552">+ (example power rail, supply verified before use)</text>
+<text x="104" y="241" font-size="16" fill="#3d70ae">− (common GND, verify continuity)</text>
+<path d="M100 519 H1502" stroke="#b7c4d5" stroke-width="17" stroke-dasharray="3 11" opacity=".7"/>
+<text x="105" y="500" font-size="17" fill="#72859b">breadboard center channel · schematic layout, not exact hole positions</text>
+<!-- primary boards -->
+<rect x="115" y="292" width="590" height="445" rx="20" fill="#e8f8ef" stroke="#269367" stroke-width="4"/>
+<text x="147" y="337" font-size="31" font-weight="700" fill="#156648">FREENOVE ESP32-S3 (BRAIN)</text>
+<text x="147" y="366" font-size="18" fill="#427361">BLE first setup + Wi-Fi AI backend</text>
+<rect x="148" y="389" width="520" height="316" rx="13" fill="#fff" stroke="#aad6c0" stroke-width="2"/>
+<text x="172" y="423" font-size="20" font-weight="700" fill="#275b47">Pin labels • candidate exposed GPIOs</text>
+<text x="172" y="462" font-size="20" fill="#b37710">GPIO41  →  I²S BCLK (shared)</text>
+<text x="172" y="501" font-size="20" fill="#1b8771">GPIO42  →  I²S WS/LRC (shared)</text>
+<text x="172" y="540" font-size="20" fill="#2768bb">GPIO1    ←  MIC SD (input)</text>
+<text x="172" y="579" font-size="20" fill="#9e4892">GPIO2    →  AMP DIN (output)</text>
+<text x="172" y="626" font-size="20" fill="#bf6427">GPIO47 TX →  C5 GPIO5 RX</text>
+<text x="172" y="662" font-size="20" fill="#a73762">GPIO21 RX ←  C5 GPIO4 TX</text>
+<rect x="946" y="329" width="533" height="371" rx="20" fill="#fff0f5" stroke="#bd5484" stroke-width="4"/>
+<text x="976" y="371" font-size="30" font-weight="700" fill="#903b66">LILYGO T-DISPLAY-C5</text>
+<rect x="982" y="393" width="457" height="133" rx="14" fill="#1f334d"/>
+<text x="1013" y="436" font-size="27" fill="#fff">Hello! Kitty ♡</text>
+<text x="1013" y="469" font-size="18" fill="#cfdef0">Mascots · AI response text</text>
+<text x="1013" y="495" font-size="18" fill="#cfdef0">Battery · local animation loop</text>
+<text x="982" y="566" font-size="22" fill="#b05a21">GPIO5 RX ← S3 GPIO47 TX</text>
+<text x="982" y="603" font-size="22" fill="#aa315c">GPIO4 TX → S3 GPIO21 RX</text>
+<text x="982" y="641" font-size="22" fill="#526172">GND ↔ S3 GND</text>
+<!-- only 3 interboard wires, separate horizontal tracks -->
+<path d="M706 626 H772 V564 H944" fill="none" stroke="#d98332" stroke-width="7" stroke-linecap="round"/>
+<path d="M944 603 H841 V663 H706" fill="none" stroke="#d44878" stroke-width="7" stroke-linecap="round"/>
+<path d="M706 700 H807 V737 H944 V642" fill="none" stroke="#4d5e73" stroke-width="7" stroke-linecap="round"/>
+<text x="742" y="551" font-size="16" font-weight="700" fill="#b36921">S3 TX → C5 RX</text>
+<text x="754" y="689" font-size="16" font-weight="700" fill="#a93662">C5 TX → S3 RX</text>
+<text x="838" y="757" font-size="16" font-weight="700" fill="#46576b">common GND</text>
+<rect x="112" y="765" width="1385" height="39" rx="10" fill="#e1e7f0"/>
+<text x="135" y="791" font-size="19" fill="#4a5e76">Separate USB power for S3 and C5 during initial tests; link GND, never bridge two 5V or 3V3 outputs.</text>
+<!-- audio module boxes below board with unambiguous signal net tables -->
+<rect x="78" y="945" width="442" height="180" rx="16" fill="#e8f7ff" stroke="#82b5d4" stroke-width="3"/>
+<text x="102" y="983" font-size="26" font-weight="700" fill="#1a597b">INMP441 MICROPHONE</text>
+<text x="102" y="1018" font-size="20" fill="#a06d0c">SCK ← S3 GPIO41   •   WS ← GPIO42</text>
+<text x="102" y="1052" font-size="20" fill="#2968b0">SD → S3 GPIO1</text>
+<text x="102" y="1085" font-size="20" fill="#465b6c">VDD = 3V3  •  GND = GND  •  L/R = GND</text>
+<rect x="540" y="945" width="528" height="180" rx="16" fill="#fff1da" stroke="#d8b36f" stroke-width="3"/>
+<text x="565" y="983" font-size="26" font-weight="700" fill="#845a20">MAX98357A AMPLIFIER</text>
+<text x="565" y="1018" font-size="20" fill="#92650c">BCLK ← S3 GPIO41  •  LRC ← GPIO42</text>
+<text x="565" y="1052" font-size="20" fill="#974888">DIN ← S3 GPIO2</text>
+<text x="565" y="1085" font-size="20" fill="#615748">VIN = verified 5V supply  •  GND = GND</text>
+<rect x="1088" y="945" width="412" height="180" rx="16" fill="#f1eefe" stroke="#a7a0d8" stroke-width="3"/>
+<text x="1112" y="983" font-size="26" font-weight="700" fill="#5c5098">8Ω / 1W SPEAKER</text>
+<text x="1112" y="1018" font-size="20" fill="#655a98">SPK+ ← amplifier SPK+</text>
+<text x="1112" y="1052" font-size="20" fill="#655a98">SPK− ← amplifier SPK−</text>
+<text x="1112" y="1085" font-size="19" fill="#8b4450">Never connect SPK− to GND</text>
+<text x="78" y="1152" font-size="17" fill="#596b7e">Pin plan is conflict-reviewed against camera, microSD and PSRAM use; NOT a claim of tested physical header/rail placement.</text>
 </g></svg>
