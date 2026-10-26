@@ -1,8 +1,40 @@
 # CuteDisplay: ESP32-S3 brain + LILYGO C5 face — proposed pinout
 
-> **Status:** S3 GPIO47↔GPIO21 and C5 GPIO6↔GPIO1 have each passed independent UART loopback tests on the user's hardware. The S3↔C5 link is **not yet tested end-to-end**. Diagram shows electrical net connectivity, not exact hole placement or physical header order; inspect labels and reliable/soldered contacts. UART diagnostics exist in source; I²S/AI are inactive.
+> **Status 2026-10-27:** S3↔C5 UART is LIVE and tested, including a successful S3-delivered C5 v1→v2 firmware upgrade, reboot and working Kitty/iPhone app. **Audio GPIOs are proposed and NOT yet electrically/firmware tested.** Diagram is a netlist, not an exact physical breadboard placement. Verify your Freenove model and silk-screen labels before wiring; audio I²S code is not currently active.
 
 ![Proposed S3 + C5 breadboard wiring](cutedisplay-s3-c5-breadboard.svg)
+
+
+## Next milestone: local record → playback, before AI networking
+
+**Board identification gate:** this pinout assumes the Freenove FNK0085/FNK0085B ESP32-S3-WROOM CAM style board already in our project. **Do not transfer it blindly to FNK0102 or other Freenove S3 variants**, which may contain onboard microphone/amplifier/LCD and assign GPIO41/42/1 differently. Compare your actual silk-screen, camera/SD attachments and schematic. GPIO41/42 may conflict with optional external JTAG; use USB-JTAG, and keep GPIO19/20, 47/21 UART and camera/SD/PSRAM pins reserved. Physical 3V3/5V header output current and header availability are not yet established.
+
+**Current approved candidate audio wiring — S3 only (C5 receives no audio wires):**
+
+| Net | S3 terminal | Audio endpoint |
+|---|---|---|
+| Shared I²S BCLK | GPIO41 output | INMP441 SCK **and** MAX98357A BCLK |
+| Shared I²S WS/LRCLK | GPIO42 output | INMP441 WS **and** MAX98357A LRC |
+| Microphone serial data | GPIO1 input | INMP441 SD/DOUT |
+| Speaker serial data | GPIO2 output | MAX98357A DIN |
+| Microphone power | verified S3 3V3 | INMP441 VDD |
+| Mic channel select | GND | INMP441 L/R (left) |
+| Amplifier power | verified appropriately rated supply 3.3–5V per breakout | MAX98357A VIN/VCC |
+| Shared reference | GND | both modules GND + S3/C5 GND |
+| Speaker | not connected to GPIO | amplifier SPK+ and SPK− to 8 Ω / 1 W speaker |
+
+**Risk review / precautions:**
+
+1. **Never put 5 V on INMP441 or any GPIO.** Verify amplifier breakout VIN rating and 5V availability/current; a 3.3V amp supply may be suitable for low-volume initial tests if it can handle current. Do not assume a breadboard rail is continuous; measure first.
+2. **MAX98357A speaker outputs are bridge-tied:** connect the speaker across SPK+ and SPK− only; **SPK− must never be grounded**. Limit output gain/PCM amplitude: at 5V the module could exceed the 1W speaker rating. Leave GAIN at breakout default only if tested at low level; check SD/enable default and channel selection on your exact module.
+3. **Shared I²S clocks mean full-duplex compatibility must be tested:** microphone and amplifier need matching BCLK, WS, sample rate, slot width and correct microphone left-channel extraction/shift. Use an ESP32-S3 I²S full-duplex capable driver configuration, or prove compatibility before enabling both together. Initial test can record to RAM/PSRAM and then play back sequentially, not simultaneous, but ensure clock and driver reconfiguration are correct.
+4. **Audio noise and radio interference:** keep mic data and clock wiring short, avoid long unscreened speaker leads adjacent to the microphone. Keep BLE and Wi-Fi as-is for baseline; audio quality with simultaneous radio traffic is a later gate, not a reason to remove Bluetooth.
+5. **S3 power headroom:** speaker peaks can sag USB 5V or 3V3 and reset the S3/C5. Test modest volume with a suitable USB supply. Never bridge two USB 5V power sources through the boards.
+6. **Firmware remains unchanged in this wiring-only commit.** No claim of successful recording, DAC playback, echo cancellation, OTA or streaming audio. UART OTA already tested and must remain functional. No wiring on C5 I²S pins: its GPIO1/6 are already dedicated to UART.
+
+**Recommended first functional test:** power OFF and wire mic + amplifier + speaker as above; verify continuity/voltages and that Kitty/phone still work; then use a dedicated S3-local test that captures 2–3 seconds of mono PCM at 16 kHz, stores it in RAM/PSRAM, and plays it at low output gain. Inspect the S3 USB Serial Monitor for I²S initialization, nonzero microphone levels, playback completion and resets. Only after passing local record/playback should we add a UI trigger, buffering during Wi-Fi/BLE, STT/TTS or server processing.
+
+Manufacturer references: [Freenove FNK0085 camera pin map](https://docs.freenove.com/projects/fnk0085/en/latest/fnk0085/codes/Python/Preface.html), [Adafruit MAX98357 speaker/output guide](https://learn.adafruit.com/adafruit-max98357-i2s-class-d-mono-amp), [Freenove FNK0102 alternate onboard audio pin map](https://docs.freenove.com/projects/fnk0102/en/latest/fnk0102/codes/Main/Preface.html).
 
 ## Connectivity decision
 

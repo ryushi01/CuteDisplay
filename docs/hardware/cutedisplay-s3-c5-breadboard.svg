@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-label="CuteDisplay ESP32 S3 brain and LILYGO C5 face breadboard proposal. S3 GPIO41 shared BCLK, GPIO42 shared WS, GPIO1 mic data, GPIO2 amplifier data, GPIO47 UART TX to C5 GPIO1 RX, S3 GPIO21 UART RX from C5 GPIO6 TX; ground common. Camera omitted.">
 <rect width="1600" height="1180" fill="#f8fafc"/>
 <g font-family="Arial,Helvetica,sans-serif">
-<text x="55" y="57" font-size="39" font-weight="700" fill="#193454">CuteDisplay • Dual-board breadboard pin plan</text>
-<text x="55" y="94" font-size="22" fill="#536980">ESP32-S3 brain + LILYGO C5 face + I²S microphone/amplifier • NO camera wiring</text>
+<text x="55" y="57" font-size="39" font-weight="700" fill="#193454">CuteDisplay • Dual-board + audio wiring • test plan</text>
+<text x="55" y="94" font-size="22" fill="#536980">Freenove FNK0085-style S3 • INMP441 + MAX98357A + 8Ω speaker • CAMERA RESERVED</text>
 <rect x="55" y="120" width="1490" height="793" rx="23" fill="#ffffff" stroke="#bccddd" stroke-width="3"/>
 <rect x="76" y="141" width="1448" height="740" rx="18" fill="#f0f3f9" stroke="#ccd6e2"/>
 <path d="M98 175 H1502 M98 195 H1502" fill="none" stroke-width="5" stroke="#df7781"/>
@@ -42,7 +42,7 @@
 <text x="754" y="689" font-size="16" font-weight="700" fill="#a93662">C5 TX → S3 RX</text>
 <text x="838" y="757" font-size="16" font-weight="700" fill="#46576b">common GND</text>
 <rect x="112" y="765" width="1385" height="39" rx="10" fill="#e1e7f0"/>
-<text x="135" y="791" font-size="19" fill="#4a5e76">Separate USB power for S3 and C5 during initial tests; link GND, never bridge two 5V or 3V3 outputs.</text>
+<text x="135" y="791" font-size="19" fill="#4a5e76">POWER OFF TO WIRE. Common GND; never bridge two USB 5V rails. Check amp power/current before use.</text>
 <!-- audio module boxes below board with unambiguous signal net tables -->
 <rect x="78" y="945" width="442" height="180" rx="16" fill="#e8f7ff" stroke="#82b5d4" stroke-width="3"/>
 <text x="102" y="983" font-size="26" font-weight="700" fill="#1a597b">INMP441 MICROPHONE</text>
@@ -53,11 +53,11 @@
 <text x="565" y="983" font-size="26" font-weight="700" fill="#845a20">MAX98357A AMPLIFIER</text>
 <text x="565" y="1018" font-size="20" fill="#92650c">BCLK ← S3 GPIO41  •  LRC ← GPIO42</text>
 <text x="565" y="1052" font-size="20" fill="#974888">DIN ← S3 GPIO2</text>
-<text x="565" y="1085" font-size="20" fill="#615748">VIN = verified 5V supply  •  GND = GND</text>
+<text x="565" y="1085" font-size="20" fill="#615748">VIN = rated 3V3 or 5V* • GND = GND</text>
 <rect x="1088" y="945" width="412" height="180" rx="16" fill="#f1eefe" stroke="#a7a0d8" stroke-width="3"/>
 <text x="1112" y="983" font-size="26" font-weight="700" fill="#5c5098">8Ω / 1W SPEAKER</text>
 <text x="1112" y="1018" font-size="20" fill="#655a98">SPK+ ← amplifier SPK+</text>
 <text x="1112" y="1052" font-size="20" fill="#655a98">SPK− ← amplifier SPK−</text>
-<text x="1112" y="1085" font-size="19" fill="#8b4450">Never connect SPK− to GND</text>
-<text x="78" y="1152" font-size="17" fill="#596b7e">UART pins: each board passed standalone loopback; S3-C5 link NOT yet verified. Graphic is not physical hole placement.</text>
+<text x="1112" y="1085" font-size="19" fill="#8b4450">SPK− NEVER to GND; low volume!</text>
+<text x="78" y="1152" font-size="17" fill="#596b7e">UART + S3-to-C5 firmware OTA VERIFIED; audio GPIOs NOT YET TESTED. Verify exact S3 board/header markings.</text>
 </g></svg>

@@ -6,6 +6,13 @@ The user **successfully flashed the C5 OTA receiver by USB, then updated C5 v1 �
 
 # CuteDisplay 🎀
 
+## Current wiring: S3 Brain + C5 Kitty + I²S microphone + amplifier + speaker
+
+![CuteDisplay complete dual-board UART and proposed microphone/amplifier/speaker wiring](docs/hardware/cutedisplay-s3-c5-breadboard.svg)
+
+**UART + one-S3-upload C5 update are hardware verified; audio wiring is a proposed next test, not yet verified.** The audio modules connect to the Freenove FNK0085-style S3, not the C5: GPIO41 shared BCLK; GPIO42 shared WS; GPIO1 microphone data; GPIO2 amplifier DIN; INMP441 3V3 and GND; MAX98357A rated supply and GND; speaker across SPK+/SPK− only. Protect the existing S3 GPIO47 TX → C5 GPIO1 RX and C5 GPIO6 TX → S3 GPIO21 RX UART. Verify S3 board variant, labelled pins, amplifier supply and available current before connecting. **No audio firmware changes have been made yet.** [Full audio wiring, risk review, and planned local record/play test](docs/hardware/s3-c5-breadboard-plan.md).
+
+
 ## Combined C5 v2 + S3 firmware built successfully (October 2026)
 
 **Confirmed successful GitHub Actions build** [run 40365456603](https://github.com/ryushi01/CuteDisplay/actions/runs/40365456603), based on commit \`611130d\`. Download artifact **CuteDisplay-S3-includes-C5-v2**. It contains C5 version 1 bootstrap application (~1.2 MB), C5 version 2 update (~1.2 MB), compiled bundled S3 app (~2.3 MB), and complete Arduino IDE sketch folders. Both builds used Arduino-ESP32 3.3.12 and matching 16MB dual-OTA custom partition tables. **Physical firmware transfer and C5 reboot remain unverified.** C5 must be flashed with OTA-capable version 1 via direct USB once; then only S3 USB is needed. [Easy upload instructions](docs/hardware/one-s3-upload-c5-v2.md).

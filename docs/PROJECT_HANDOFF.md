@@ -1,3 +1,7 @@
+## Next hardware stage — audio wiring review (2026-10-27)
+
+The main README now displays the full combined wiring SVG and links to the reviewed audio pinout. Provisional S3 audio: shared I²S BCLK GPIO41, WS GPIO42; INMP441 data GPIO1, MAX98357A data GPIO2; microphone at 3.3V; amplifier at module-rated supply; common GND; 8Ω/1W speaker SPK+/SPK− (floating, not grounded). All audio pins are on S3; C5 UART GPIO1/6 and S3 UART GPIO47/21 unchanged. Audio GPIO availability, I²S full-duplex clocks/driver, power/current, amplifier channel/gain, microphone and speaker output are **not bench-tested**. Check physical Freenove variant (FNK0085 vs FNK0102), preserve camera/SD/PSRAM/USB reserves. First S3 test should be 2–3 seconds of 16kHz mono local record to RAM/PSRAM then low-volume playback, before STT/TTS. No firmware altered. [Wiring, conflict audit and test checklist](hardware/s3-c5-breadboard-plan.md).
+
 ## VERIFIED HARDWARE MILESTONE — 2026-10-27
 
 The user **successfully flashed the C5 OTA receiver by USB, then updated C5 v1 → v2 solely via the S3 USB upload and existing 921600-baud UART**. S3 Serial Monitor confirmed **C5 v1**, inactive OTA slot **6,553,600 bytes**, subsequent **SUCCESS: new display firmware confirmed after reboot**. Kitty restarted, responds normally, and iPhone BLE/app controls work. The transient CHECK UART warning cleared. No extra update wires are required. Keep C5 USB as recovery if firmware cannot boot.
