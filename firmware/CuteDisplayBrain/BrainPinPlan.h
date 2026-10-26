@@ -12,7 +12,8 @@ inline constexpr int UART_TX  = 47;  // S3 TX -> LILYGO C5 GPIO1 RX
 inline constexpr int UART_RX  = 21;  // S3 RX <- LILYGO C5 GPIO6 TX
 inline constexpr int C5_UART_TX = 6;
 inline constexpr int C5_UART_RX = 1;
-inline constexpr int UART_BAUD = 115200;
+// Matched by C5 lcd.ino. Both boards MUST be flashed together.
+inline constexpr int UART_BAUD = 921600;
 // Keep BLE enabled for iPhone onboarding and offline local management.
 // Wi-Fi is for AI backend; camera integration deliberately postponed.
 }

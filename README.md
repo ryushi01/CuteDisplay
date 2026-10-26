@@ -2,6 +2,16 @@
 
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
+## Phase 4 — persistent Brain-disconnect popup and faster UART (source pending device test)
+
+**Requested behavior:** The LILYGO C5 shows a centered, opaque **BRAIN DISCONNECTED** pop-up as soon as it boots without a valid Brain UART connection or stops receiving valid Brain frames for about **6 seconds**. The warning remains visible across Kitty animations, messages, battery and Wi-Fi popups because it is composited last on every LCD redraw. It is dismissed **only when the C5 again receives valid CRC-checked frames from the S3**; a state-transition repaint clears it immediately. This indicates **S3-to-C5 UART liveness**, not Wi-Fi access or successful iPhone pairing. The C5's own BLE and Wi-Fi remain disabled.
+
+**UART optimized:** S3 and C5 both use **921,600 baud, 8N1** on the *same verified wires* (S3 TX GPIO47 → C5 RX GPIO1, C5 TX GPIO6 → S3 RX GPIO21, common ground), and 2 KB RX+TX serial buffers. A framed send now uses one buffered `Stream.write` instead of six `print` calls. The S3's BLE-to-UART command chunk is 45 UTF-8 bytes hex-encoded (up from 38), and C5 accepts matching 90-character encoded segments. Both receivers drain more framed packets per service pass. `CuteLink.h` is **identical in both sketch directories**. This increases the serial line rate **8× compared with the original 115,200-baud setting**; 8N1 theoretical upper bound is **92,160 raw data bytes/s**, before framing, acknowledgments, glyph processing, BLE and Wi-Fi scheduling. The app still waits for each C5 acknowledgment to prevent queue overflow. Throughput has **not yet been measured**.
+
+**IMPORTANT:** This is an **uncompiled / unflashed / untested** source update; you MUST flash **both boards** together or their UART baud rates will differ and the popup will remain. Arduino USB Serial Monitor stays at **115200** (not 921600). With unreliable breadboard/Dupont wiring, 921600 may cause CRC errors and timeouts: revert *both* serial baud settings to 460800 or 115200 if that happens. No rewiring or new pins. Save the previous Git commit as a rollback.
+
+Read [Phase 4 flashing and pop-up test](docs/hardware/brain-link-921600.md) before changing both boards.
+
 ## Phase 3 Bluetooth + UART flow control fix (source updated, **awaiting hardware retest**)
 
 The user's iPhone connected to **CuteDisplay-Brain-DEV** but FFF1 writes returned **"authentication is insufficient"**; settings/messages/Wi-Fi provisioning failed. S3 logs also showed `WARNING: command queue full; BLE write not delivered` and `Face UART timed out` after repeated C5 STATUS frames. These are **observed user results on the previous Phase 3 build**, not evidence that the repairs below already work.

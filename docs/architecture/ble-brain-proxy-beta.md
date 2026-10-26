@@ -35,3 +35,12 @@
 - The 5V shared-power current rating and USB backfeed behavior have not been measured.
 - The C5 Bluetooth/Wi-Fi remains intentionally disabled and cannot be a fallback without USB reflashing the old firmware.
 - Wi-Fi status is association, not proof of Internet or AI-server reachability. S3 AI/voice/camera integrations remain future work.
+
+
+## Phase 4 update — persistent link-loss warning and increased UART speed
+
+**Phase 4 source is not yet compiled/flashed/verified on hardware.** It requires *both* C5 and S3 firmware to match at **921600 baud**; do not flash only one side. Arduino **USB** Serial Monitor remains **115200**. C5 now shows a persistent topmost `BRAIN DISCONNECTED` overlay until valid frames from S3 return. With the Brain unavailable on power-up, the overlay stays indefinitely. After ~6 seconds of UART silence it reappears. It does not mean that the iPhone or S3 Wi-Fi is disconnected; those are reflected by separate HUD status icons. Local C5 BLE and Wi-Fi remain disabled.
+
+One frame write per message, 2K RX+TX UART ring buffers on both ESP32s, faster reader service and larger 45-byte message segments improve physical serial throughput. The BLE app still uses end-to-end ACK pacing; do **not** remove it to increase speed, as earlier versions overflowed the S3 queue. Line bitrate increased from 115200 to 921600 (theoretical 92,160 user-data bytes per second before all protocol overhead); the system's real measured BLE-to-display rate is not yet known.
+
+See [complete test/rollback instructions](../hardware/brain-link-921600.md).

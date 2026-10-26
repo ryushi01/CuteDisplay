@@ -13,6 +13,14 @@ Tell the assistant:
 
 Read the actual repository before making code changes because this document can become stale.
 
+## Latest source — 2026-10-26 Phase 4 persistent UART-link popup & 921600 baud (NOT TESTED)
+
+At user's request, the C5 LCD now draws a **persistent opaque BRAIN DISCONNECTED** foreground pop-up from startup / after **6 seconds with no valid S3 UART frames**. It is composited after mascot, text, battery, Wi-Fi, and connection HUD, so nothing hides it. A new valid CRC-checked S3 frame causes the C5 loop to redraw immediately and **remove** the warning. The message indicates the physical UART Brain/Face connection only; iPhone BLE connection and S3 Wi-Fi are separate indicator states. C5 BLE and C5 Wi-Fi remain **OFF**. GPIO0 long hold still toggles only **S3 Wi-Fi** via UART.
+
+UART settings on **both** boards changed from 115200 to **921600, 8N1**, with **2K receive + 2K transmit driver ring buffers**, 1 buffered frame write instead of many print calls, more frames drained per loop, and BLE UART hex command segments now **45 bytes** (90 hex digits). `CuteLink.h` was updated **identically** for both boards; S3 source uses `BrainPinPlan.h` for UART_BAUD=921600; C5 uses the matching literal 921600. **No wire/pin changes:** S3 TX47→C5 RX1, C5 TX6→S3 RX21, common GND. **USB Serial Monitor remains 115200.** 921600 is an increased serial bitrate, **not** proof of maximum UART/BLE throughput; bench reliability/CRC/loss and supply brownouts unverified. If line errors occur, roll back **both** boards to 115200 or change both settings to 460800. **Both firmwares MUST be flashed as a pair** or the UART stays disconnected. Source has NOT been compiled, flashed or tested yet.
+
+The user's previous app errors, security and queue-flooding repair notes remain in older sections. iOS source from Phase 3 is unchanged by Phase 4; for the **full source bundle**, download GitHub commit archive with both Arduino sketch folders (including headers), the complete iOS app source, docs and diagrams. See [Phase-4 pop-up/fast UART test](hardware/brain-link-921600.md).
+
 ## Latest field failure and repair — 2026-10-26 (NOT YET RETESTED)
 
 User tried the earlier Phase-3 firmware/app on physical S3+C5 and reported iPhone BLE apparently connecting, but error **"Send failed: authentication is insufficient"** on commands; message, mascot settings and S3 Wi-Fi setup would not work. Subsequent S3 logs:

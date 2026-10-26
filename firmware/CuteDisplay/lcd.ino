@@ -156,6 +156,14 @@ BLECharacteristic *networkCharacteristic=nullptr;
 // Shared with C5 UART service, so telemetry functions can mirror readings.
 static bool s3Online=false;
 static uint16_t c5Seq=0;
+static uint32_t lastS3=0;
+static constexpr uint32_t BRAIN_LOST_MS=6000UL;
+// Link warning is NOT a mode: it is composited last on every LCD redraw.
+// No retained pop-up deadline: it remains visible until valid S3 UART returns.
+static bool brainLinkConnected(){
+ return s3Online && (uint32_t)(millis()-lastS3)<BRAIN_LOST_MS;
+}
+static bool lastDisplayedBrainLink=false;
 // C5 radios are disabled. Only S3 RADIO frames determine on-screen icons.
 // No "fallback to C5 radio" when the brain link drops.
 static bool brainBleClient=false,brainWifiConnected=false;
@@ -561,6 +569,18 @@ int jpMessageScale() { return max(1, min(4, messageSize)); }
 int asciiMessageScale() { return max(1, min(6, messageSize + 1)); }
 void drawBatteryOverlay();
 void textAt(const String &s,int x,int y,int scale,uint16_t color);
+void drawBrainLinkOverlay(){
+ if(brainLinkConnected())return;
+ // Persistent, opaque foreground warning. Covers any animated content
+ // underneath but does not destroy message, animation or user preferences.
+ const int x=32,y=43,w=256,h=86;
+ rect(x+3,y+4,w,h,0x0000);
+ rect(x,y,w,h,0xF800);
+ rect(x+3,y+3,w-6,h-6,0x1082);
+ textAt("BRAIN DISCONNECTED",52,53,2,0xFFFF);
+ textAt("WAITING FOR S3 LINK",98,91,1,0xFFE0);
+ textAt("CHECK POWER AND UART",95,107,1,0xFFFF);
+}
 void drawConnectivityHUD(){
  // Fixed tiny status HUD. Draw over the existing upper-right mascot area,
  // with no changes to character geometry or text-area margins.
@@ -1932,6 +1952,9 @@ void drawMessage() {
  else {drawMascot();richText(message,scrollX,max(0,(LCD_H-multilineHeight)/2),a,j,themeColor(),contentRight());}
  drawBatteryOverlay();
  drawConnectivityHUD();
+ // Must be LAST so the warning cannot be covered by any other overlay,
+ // including battery/charging popups or mascot animations.
+ drawBrainLinkOverlay();
  finishDrawing();
 }
 void showMessage(String s) {
@@ -2496,7 +2519,7 @@ static void updateLAN(){
 
 // Phase-1 C5 UART: TX GPIO6 -> S3 RX21, RX GPIO1 <- S3 TX47.
 static CuteLink::Reader s3Reader;
-static uint32_t lastS3=0,lastC5Hello=0,lastC5Status=0;
+static uint32_t lastC5Hello=0,lastC5Status=0;
 // One serialized 96-byte BLE command split into <=38-byte hex UART frames.
 // Cache the last chunk response for idempotent link-layer retransmission.
 static char pendingCommand[97]={};
@@ -2530,7 +2553,7 @@ static void receiveCmdChunk(const CuteLink::Frame &f){
  }
  int n=idx-'0', count=total-'0';
  String encoded=f.payload.substring(4);
- if(encoded.isEmpty() || encoded.length()>76 || encoded.length()%2){
+ if(encoded.isEmpty() || encoded.length()>90 || encoded.length()%2){
   CuteLink::send(Serial1,f.seq,"NACK","LENGTH");return;
  }
  if(n==0){resetCmdParts();pendingTotal=count;pendingStarted=millis();}
@@ -2598,7 +2621,7 @@ static void handleRadioFrame(const String &s){
 }
 static void serviceBrain() {
  CuteLink::Frame f;
- for(int n=0;n<4&&s3Reader.poll(Serial1,f);++n){
+ for(int n=0;n<12&&s3Reader.poll(Serial1,f);++n){
   lastS3=millis();
   if(!s3Online){
    s3Online=true;Serial.println("[UART] S3 Brain link established");
@@ -2646,7 +2669,7 @@ static void serviceBrain() {
   }else CuteLink::send(Serial1,f.seq,"NACK","Unknown request");
  }
  uint32_t now=millis();
- if(s3Online&&(uint32_t)(now-lastS3)>10000UL){
+ if(s3Online&&(uint32_t)(now-lastS3)>BRAIN_LOST_MS){
   s3Online=false;Serial.println("[UART] S3 lost");
  }
  if(!s3Online&&(uint32_t)(now-lastC5Hello)>2000UL){
@@ -2660,8 +2683,9 @@ static void serviceBrain() {
 void setup(){
  Serial.begin(115200);delay(700);
  Serial1.setRxBufferSize(2048);
- Serial1.begin(115200,SERIAL_8N1,1,6);
- Serial.println("[UART] C5 UART1 active TX=GPIO6 RX=GPIO1");
+ Serial1.setTxBufferSize(2048);
+ Serial1.begin(921600,SERIAL_8N1,1,6);
+ Serial.println("[UART] C5 UART1 active TX=GPIO6 RX=GPIO1 baud=921600");
  Serial.println("=== CUTEDISPLAY 3.9 RIGHT-SIDE ANIMATIONS ===");
  if(!initExternalCaches()) {
   Serial.println("[MEM] Fatal: PSRAM cache allocation failed. Check QIO PSRAM board setting.");
@@ -2728,6 +2752,16 @@ void loop(){
   lastDisplayedBle=displayBleConnected();
   wifiLastConnected=displayWiFiConnected();
   if(lcdReady && now-lastStatusRedraw>=250){lastStatusRedraw=now;redrawCurrent();}
+ }
+ // Force an immediate repaint at BOTH edges of the physical UART link.
+ // A stale/no-frames state always shows the persistent warning; the warning
+ // clears only after at least one valid new Brain frame passes CRC parsing.
+ bool linkVisible=brainLinkConnected();
+ if(linkVisible!=lastDisplayedBrainLink){
+  lastDisplayedBrainLink=linkVisible;
+  Serial.println(linkVisible?"[LCD] Brain reconnected - warning cleared":
+                             "[LCD] Brain missing - persistent warning");
+  if(lcdReady)redrawCurrent();
  }
  updatePersonalityPose(now);
  if(stateDirty && now-stateDirtyAt>=3500UL)saveDisplayState();

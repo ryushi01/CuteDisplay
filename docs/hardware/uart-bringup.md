@@ -13,3 +13,7 @@
 **Migration status:** S3 BLE diagnostic service remains unconnected to iPhone control. C5 retains current iPhone BLE, LCD, battery and Wi-Fi logic. I2S, AI, camera, relay BLE services and single-USB power capacity remain untested. The *separate loopback sketches* have passed individually. The pin-updated integrated firmware has been flashed and confirmed for HELLO, C5 STATUS telemetry and one message command. Retest any new protocol changes before calling the link reliable under resets, extended runtime or heavy network/audio load.
 
 **Later:** The user reports a working S3-only USB power boot with 5V header sharing and UART still functional, but the current rating/backfeed path remain unverified. A limited opt-in BLE relay was subsequently added to the S3 firmware (source not tested yet): [Phase 2 test](ble-relay-test.md).
+
+## Updated Phase 4 link settings (historical UART steps above are for earlier firmware)
+
+**New firmware on both boards:** `921600` baud, GPIO pair unchanged. The previous 115200 value in old test screenshots/source snippets applies only to older builds. **USB Serial Monitor remains at 115200 baud**, regardless of the UART connection speed. Persistent Brain disconnected popup is documented in [Phase 4 bench guide](brain-link-921600.md). With a power/boot/baud mismatch on either board, the C5 displays the popup until both boards run compatible UART firmware.

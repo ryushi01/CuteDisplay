@@ -23,7 +23,9 @@
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr size_t MAX_CMD=96;
-static constexpr int SEG_BYTES=38;
+// Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
+// UART frame payload (one-digit chunk index, total, delimiters).
+static constexpr int SEG_BYTES=45;
 static constexpr uint32_t PROXY_WINDOW_MS=600000UL;
 static BLECharacteristic *controlChar=nullptr,*batteryChar=nullptr,*powerChar=nullptr,*networkChar=nullptr;
 static bool clientConnected=false;
@@ -399,7 +401,7 @@ static void sendRadioStatus(bool immediate){
 
 static void pollFace(){
  CuteLink::Frame f;
- for(int i=0;i<8 && frameReader.poll(Serial1,f);++i)processFace(f);
+ for(int i=0;i<16 && frameReader.poll(Serial1,f);++i)processFace(f);
  uint32_t now=millis();
  if(faceOnline&&(uint32_t)(now-lastFace)>10000UL){
   faceOnline=false;
@@ -528,8 +530,10 @@ void setup(){
  Serial.begin(115200);delay(250);
  Serial.println("[S3] CuteDisplay Phase 3 secure BLE proxy beta");
  Serial1.setRxBufferSize(2048);
+ Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
- Serial.printf("[S3] UART TX=%d RX=%d 115200\n",BrainPinPlan::UART_TX,BrainPinPlan::UART_RX);
+ Serial.printf("[S3] UART TX=%d RX=%d baud=%d\n",
+    BrainPinPlan::UART_TX,BrainPinPlan::UART_RX,BrainPinPlan::UART_BAUD);
  incomingCommands=xQueueCreate(16,MAX_CMD+1);
  networkQueue=xQueueCreate(48,97);
  if(!incomingCommands||!networkQueue){

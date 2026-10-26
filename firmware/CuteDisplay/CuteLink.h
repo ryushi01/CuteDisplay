@@ -1,5 +1,5 @@
 #pragma once
-// Phase-1 diagnostics (same copy in both sketches). NOT for production use.
+// UART frame protocol (identical source in both board sketches). Bench-test transport; pairing/command semantics handled separately.
 // Frame: @CD1|sequence|type|payload|CRC8<LF>, CRC-8 0x07 over body.
 #include <Arduino.h>
 namespace CuteLink {
@@ -21,8 +21,17 @@ inline bool send(Stream &s,uint16_t seq,const char *kind,const String &payload="
  String b="CD1|"+String(seq)+"|"+type+"|"+payload;
  if(b.length()+5>LIMIT)return false;
  uint8_t check=crc(b);const char *hex="0123456789ABCDEF";
- s.print('@');s.print(b);s.print('|');s.print(hex[check>>4]);s.print(hex[check&15]);s.print('\n');
- return true;
+ // One bounded, buffered UART write is much more efficient at 921600 baud
+ // than six individual Stream::print() calls per frame.
+ const size_t bodyBytes=b.length(),totalBytes=bodyBytes+5;
+ char wire[LIMIT+1];
+ wire[0]='@';
+ memcpy(wire+1,b.c_str(),bodyBytes);
+ wire[bodyBytes+1]='|';
+ wire[bodyBytes+2]=hex[check>>4];
+ wire[bodyBytes+3]=hex[check&15];
+ wire[bodyBytes+4]='\n';
+ return s.write((const uint8_t*)wire,totalBytes)==totalBytes;
 }
 inline int unhex(char c) {
  if(c>='0'&&c<='9')return c-'0';
