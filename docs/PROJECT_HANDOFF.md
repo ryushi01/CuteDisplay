@@ -13,6 +13,14 @@ Tell the assistant:
 
 Read the actual repository before making code changes because this document can become stale.
 
+## Latest hardware verification — 2026-10-26 UART idle heartbeat works
+
+User explicitly confirmed **"it works"** after flashing the latest S3 and C5 sketches containing the phase-2 idle keepalive fix (commit `f2e352c`). Treat the **3-second S3 HEARTBEAT accepted silently by C5** as user-tested on the running two-board prototype; the preceding repeated HELLO/reconnect symptom is considered resolved by this report. No new Serial Monitor transcript was supplied for the heartbeat verification, and prolonged stress/resets were not measured.
+
+Current baseline: S3 Brain USB-C ↔ S3 5V output to LILYGO 5V header (user-reported working single-USB prototype only; electrical path/current/backfeed *not certified*); S3 GPIO47 TX → C5 GPIO1 RX, C5 GPIO6 TX → S3 GPIO21 RX, common GND. LILYGO's separate USB-C must stay unplugged with shared 5V connected. BLE diagnostic `C:1` write → S3 UART MASCOT → C5 ACK had already been verified. Existing iPhone app connects directly to C5 and must remain usable.
+
+**Next engineering sequence:** 1) secure/authorize S3 BLE onboarding instead of relying on the unauthenticated five-minute diagnostic gate, 2) reliable framed UART commands and receipt/response tracking with reset/state synchronization, 3) UTF-8 Japanese/French text and glyph packets, 4) mirror C5 battery/power/Wi-Fi telemetry through equivalent S3 BLE services, 5) stage iPhone app selection of S3 while retaining direct C5 recovery BLE. None of those features are confirmed implemented. Keep the current working firmware pair as a recovery baseline before changing protocol, and do not add audio/AI loads until single-USB power is rated/verified.
+
 ## Latest test report — 2026-10-26 BLE-to-UART succeeds; C5 idle reconnect explained and fix committed
 
 **New user-confirmed result:** After installing the Phase-2 BLE S3 sketch and keeping the previously working C5 display firmware, the user supplied S3 USB monitor logs:
