@@ -2480,7 +2480,7 @@ static void updateLAN(){
  }
 }
 
-// Phase-1 C5 UART: TX GPIO4 -> S3 RX21, RX GPIO5 <- S3 TX47.
+// Phase-1 C5 UART: TX GPIO6 -> S3 RX21, RX GPIO1 <- S3 TX47.
 static CuteLink::Reader s3Reader;
 static bool s3Online=false;
 static uint16_t c5Seq=0;
@@ -2543,8 +2543,8 @@ static void serviceBrain() {
 
 void setup(){
  Serial.begin(115200);delay(700);
- Serial1.begin(115200,SERIAL_8N1,5,4);
- Serial.println("[UART] C5 UART1 active TX=GPIO4 RX=GPIO5");
+ Serial1.begin(115200,SERIAL_8N1,1,6);
+ Serial.println("[UART] C5 UART1 active TX=GPIO6 RX=GPIO1");
  Serial.println("=== CUTEDISPLAY 3.9 RIGHT-SIDE ANIMATIONS ===");
  if(!initExternalCaches()) {
   Serial.println("[MEM] Fatal: PSRAM cache allocation failed. Check QIO PSRAM board setting.");

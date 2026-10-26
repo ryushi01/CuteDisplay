@@ -1,6 +1,6 @@
 # CuteDisplay: ESP32-S3 brain + LILYGO C5 face — proposed pinout
 
-> **Status: conflict-reviewed, NOT bench-validated.** The diagram shows electrical net connectivity on a spacious conceptual breadboard, not exact row placement or physical header order. Before plugging wires in, inspect the printed labels and the *exact* Freenove FNK0085B breakout pin diagram. Neither the UART bridge nor I²S audio is active in today's firmware.
+> **Status:** S3 GPIO47↔GPIO21 and C5 GPIO6↔GPIO1 have each passed independent UART loopback tests on the user's hardware. The S3↔C5 link is **not yet tested end-to-end**. Diagram shows electrical net connectivity, not exact hole placement or physical header order; inspect labels and reliable/soldered contacts. UART diagnostics exist in source; I²S/AI are inactive.
 
 ![Proposed S3 + C5 breadboard wiring](cutedisplay-s3-c5-breadboard.svg)
 
@@ -11,9 +11,9 @@
 - **Wired UART** carries text, mood, animation commands and battery telemetry between S3 and C5. The C5 stays autonomous for LCD rendering. **Camera use is deferred, but its pins are reserved.**
 - **Transition:** the current iPhone app still talks to C5; the S3 BLE diagnostic service `FFF0`/`FFF1` is *not yet* a functional replacement. Do not cut off C5 BLE until UART relay, telemetry and iOS migration pass end-to-end tests.
 
-## Proposed exact signal assignments
+## Current UART assignment and proposed audio signals
 
-These are the **candidate GPIO assignments to use for implementation and first bench tests**. They avoid the commonly documented Freenove camera, SD and octal-PSRAM pins. GPIO41/42 overlap the ESP32-S3's optional external JTAG functions; do not enable external JTAG on these pins. The S3 package's USB-JTAG through GPIO19/20 is left untouched. Check breakout availability on the *specific* FNK0085B and any on-board peripherals before declaring the wiring final.
+**UART GPIOs reflect the individual successful S3 and C5 loopback tests**; inter-board testing is next. Audio assignments remain candidates. They avoid the commonly documented Freenove camera, SD and octal-PSRAM pins. GPIO41/42 overlap the ESP32-S3's optional external JTAG functions; do not enable external JTAG on these pins. The S3 package's USB-JTAG through GPIO19/20 is left untouched. Check breakout availability on the *specific* FNK0085B and any on-board peripherals before declaring the wiring final.
 
 | Net | Freenove ESP32-S3 | Module or LILYGO T-Display-C5 | Direction |
 | --- | --- | --- | --- |
@@ -21,8 +21,8 @@ These are the **candidate GPIO assignments to use for implementation and first b
 | I²S WS/LRCLK | **GPIO42** | INMP441 **WS** + MAX98357A **LRC** | S3 → both |
 | I²S microphone data | **GPIO1** | INMP441 **SD/DOUT** | Mic → S3 |
 | I²S speaker data | **GPIO2** | MAX98357A **DIN** | S3 → amplifier |
-| UART control to face | **GPIO47 TX** | LILYGO **GPIO5 RX** | S3 → C5 |
-| UART telemetry from face | **GPIO21 RX** | LILYGO **GPIO4 TX** | C5 → S3 |
+| UART control to face | **GPIO47 TX** | LILYGO **GPIO1 RX** | S3 → C5 |
+| UART telemetry from face | **GPIO21 RX** | LILYGO **GPIO6 TX** | C5 → S3 |
 | UART reference | **GND** | LILYGO **GND** | Shared ground |
 | Microphone supply | Regulated **3V3** | INMP441 **VDD** | 3.3 V only |
 | Microphone channel | **GND** | INMP441 **L/R** | Left channel |
@@ -44,7 +44,7 @@ These are the **candidate GPIO assignments to use for implementation and first b
 | UART0 debugging | **43, 44** (not used here) |
 | External JTAG alternatives | **39–42**, hence 41/42 are only valid when not using that JTAG mode |
 
-Manufacturer pin mappings and board variants can differ. Confirm against the Freenove `FNK0085` documentation and the board's printed labels. For C5, the built-in LCD already uses GPIO26/7/9/8/23/25, AXP2602 uses 2/3 and interrupt 10, button uses GPIO0; candidate UART GPIO4/5 avoid those known firmware reservations.
+Manufacturer pin mappings and board variants can differ. Confirm against the Freenove `FNK0085` documentation and the board's printed labels. For C5, the built-in LCD already uses GPIO26/7/9/8/23/25, AXP2602 uses 2/3 and interrupt 10, button uses GPIO0; the new UART GPIO6/1 avoid those known firmware reservations and passed a direct C5 loopback (TX6 → RX1); earlier GPIO4/5 did not receive due to a bad contact.
 
 Sources:
 - [Freenove FNK0085 manufacturer documentation](https://docs.freenove.com/projects/fnk0085/en/latest/)
@@ -60,6 +60,6 @@ Sources:
 4. Add Wi-Fi speech streaming and measure audio under simultaneous BLE configuration traffic. Prefer fixing buffering, task scheduling and traffic load **before** considering Wi-Fi-only operation; BLE is needed for initial provisioning.
 5. Integrate the independent AI backend. Defer onboard camera and optional Waveshare display migration until measurements support them.
 
-The firmware pin constants are documented in [`firmware/CuteDisplayBrain/BrainPinPlan.h`](../../firmware/CuteDisplayBrain/BrainPinPlan.h). These constants by themselves do **not** enable UART or I²S.
+The S3 pin constants are documented in [`firmware/CuteDisplayBrain/BrainPinPlan.h`](../../firmware/CuteDisplayBrain/BrainPinPlan.h). UART is initialized in both main sketches; I²S remains inactive. The complete power-safe UART flash/monitor checklist is in [uart-bringup.md](uart-bringup.md).
 
 [README](../../README.md) · [Historical retired LILYGO C5 audio guide](lilygo-c5-audio-breadboard.md)

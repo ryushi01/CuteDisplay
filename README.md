@@ -2,9 +2,9 @@
 
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
-## Phase 1 UART diagnostics — 2026-10-26 (untested source)
+## Phase 1 UART diagnostics — 2026-10-26 (standalone loopbacks tested)
 
-`main` now includes diagnostic UART source with framed HELLO/ACK, a **S3 USB Serial Monitor console**, C5 status/battery queries and limited ASCII/mood/mascot test commands. Source **has not yet been compiled or hardware-tested**. Use **two separate USB supplies**, common GND and crossed TX/RX; keep the 5V-positive jumper removed. The phone still connects directly to C5; S3 BLE is not a proxy. Both firmware folders now contain the required `CuteLink.h`. See [exact wiring/flashing/console test](docs/hardware/uart-bringup.md).
+`main` now includes diagnostic UART source with framed HELLO/ACK, a **S3 USB Serial Monitor console**, C5 status/battery queries and limited ASCII/mood/mascot test commands. The original S3 and C5 UART-capable sketches booted on their boards; S3 GPIO47↔21 and C5 GPIO6↔1 have now **passed standalone loopback tests**. The new C5 GPIO6/GPIO1 integrated build and the two-board handshake **remain untested**. Use **two separate USB supplies**, common GND and crossed TX/RX; keep the 5V-positive jumper removed. The phone still connects directly to C5; S3 BLE is not a proxy. Both firmware folders now contain the required `CuteLink.h`. See [exact wiring/flashing/console test](docs/hardware/uart-bringup.md).
 
 ## Previous proposed single USB-C power experiment — Option 1
 
@@ -63,8 +63,8 @@ The new diagram replaces the former LILYGO microphone/speaker drawing. **INMP441
 | I²S word-select to INMP441 WS + MAX98357A LRC | **S3 GPIO42** |
 | Microphone data INMP441 SD → S3 | **S3 GPIO1 (input)** |
 | Amplifier data S3 → MAX98357A DIN | **S3 GPIO2 (output)** |
-| UART S3 → C5 display | **S3 GPIO47 TX → LILYGO GPIO5 RX** |
-| UART C5 → S3 telemetry | **LILYGO GPIO4 TX → S3 GPIO21 RX** |
+| UART S3 → C5 display | **S3 GPIO47 TX → LILYGO GPIO1 RX** |
+| UART C5 → S3 telemetry | **LILYGO GPIO6 TX → S3 GPIO21 RX** |
 | Reference and supplies | Common **GND**; mic **3V3**; amplifier rated **5V/VIN** after validation; separate board USB power |
 
 **GPIO41/42 caution:** These can conflict with external JTAG on ESP32-S3. Do not enable external JTAG on these pins. Check that GPIO41, GPIO42, GPIO47, GPIO21, GPIO1 and GPIO2 are exposed and free on your exact Freenove board before wiring. The diagram intentionally omits camera circuitry but reserves camera pins for future use.
@@ -80,13 +80,13 @@ See the [new S3+C5 breadboard wiring and safety plan](docs/hardware/s3-c5-breadb
 ### Current code status
 
 - **LILYGO firmware:** `firmware/CuteDisplay/lcd.ino` — existing working face, animations, messages, battery and legacy BLE/Wi-Fi; no audio loopback.
-- **ESP32-S3 development firmware:** `firmware/CuteDisplayBrain/CuteDisplayBrain.ino` — independent BLE diagnostic endpoint `CuteDisplay-Brain-DEV` (`FFF0`/`FFF1`). **No UART bridging, I²S audio, camera or AI connectivity yet.**
+- **ESP32-S3 development firmware:** `firmware/CuteDisplayBrain/CuteDisplayBrain.ino` — independent BLE diagnostic endpoint `CuteDisplay-Brain-DEV` (`FFF0`/`FFF1`). **Phase-1 UART diagnostics are implemented; no iPhone BLE forwarding, I²S audio, camera or AI connectivity yet.**
 - **iOS app:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift` — **still pairs with LILYGO**, until the S3 bridge and battery telemetry are implemented and validated.
 - **External AI backend:** OpenAI or self-hosted Ollama/Open WebUI with STT/TTS remains independent and not yet integrated.
 
 ## Repository synchronization status — 2026-10-26
 
-**Current hardware targets:** LILYGO T-Display-C5 existing controller **and** Freenove ESP32-S3-CAM brain development board. The S3 BLE diagnostic sketch now includes the proposed pin-plan constants but still does **not** initialize UART, I²S, Wi-Fi AI transport or iPhone control routing. iPhone-to-S3 migration is planned, not complete.
+**Current hardware targets:** LILYGO T-Display-C5 existing controller **and** Freenove ESP32-S3-CAM brain development board. The S3 BLE diagnostic sketch now initializes phase-1 UART diagnostics, but **does not** initialize I²S, Wi-Fi AI transport or iPhone control routing. iPhone-to-S3 migration is planned, not complete.
 
 **Feature simplification (2026-10-26):** Drinks Mode has been removed completely from the **current firmware and iPhone application source**. The firmware now displays messages and animated characters only; drink-list drawing, pagination, staged upload commands (`D:RESET`, `D:ADD`, `D:SHOW`), and drink persistence were removed. The iPhone app no longer has the Drinks screen, drink preview, drink synchronization, drink data in saved profiles, or drink-upload logic in BluetoothManager. Old saved profiles continue to decode without their obsolete extra fields. The existing BLE control messages for mascots, themes, messages, battery, and Wi-Fi remain supported.
  The [former C5 audio breadboard wiring guide](docs/hardware/lilygo-c5-audio-breadboard.md) is now a **superseded historical record**, not the current wiring plan. Audio hardware is being reassigned to the ESP32-S3 brain; the new pinout is pending hardware verification.

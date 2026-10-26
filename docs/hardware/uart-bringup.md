@@ -1,6 +1,8 @@
-# UART phase 1: Flash and test (source not yet bench-tested)
+# UART phase 1: Flash and test (individual UART loopbacks confirmed; cross-board link pending)
 
-**Power:** Keep both boards on **separate USB-C supplies**; remove the 5V/5V jumper before attaching both USB inputs. Verify printed pin labels and use three wires: **S3 GPIO47 TX → C5 GPIO5 RX**, **C5 GPIO4 TX → S3 GPIO21 RX**, and **GND → GND**. Do not connect 5V to 5V or 3V3 to 3V3. Both MCU GPIOs are 3.3V logic. When only one board is powered, unplug signal wires to avoid I/O backfeeding.
+**Bench result (2026-10-26):** S3 GPIO47↔GPIO21 direct UART loopback passed (self-received `HELLO` and `ACK`); LILYGO GPIO6↔GPIO1 direct UART loopback passed (`TX: TEST_18`/`RX: TEST_18` through at least TEST_22). The previous GPIO4↔GPIO5 jumper yielded TX-only output and is retired. Loose/unsoldered header contact was the root of missing C5 RX on the test rig. **End-to-end S3↔C5 HELLO/ACK is NOT yet confirmed.** Ensure solid electrical header contacts before connecting the boards.
+
+**Power:** Keep both boards on **separate USB-C supplies**; remove the 5V/5V jumper before attaching both USB inputs. Verify printed pin labels and use three wires: **S3 GPIO47 TX → C5 GPIO1 RX**, **C5 GPIO6 TX → S3 GPIO21 RX**, and **GND → GND**. Do not connect 5V to 5V or 3V3 to 3V3. Both MCU GPIOs are 3.3V logic. When only one board is powered, unplug signal wires to avoid I/O backfeeding.
 
 **Flash:** Disconnect UART wires for individual uploads. S3: open `firmware/CuteDisplayBrain/CuteDisplayBrain.ino` with `BrainPinPlan.h` and new `CuteLink.h` in the same sketch folder. Choose ESP32S3 Dev Module, 16MB flash, OPI PSRAM; connect USB-UART for uploading and monitoring. C5: open `firmware/CuteDisplay/lcd.ino` with its new `CuteLink.h`, working `board_config.h`, LILYGO AXP2602 library; choose ESP32C5 Dev Module, 16MB flash, QIO PSRAM.
 
@@ -8,4 +10,4 @@
 
 **Protocol:** `@CD1|seq|type|payload|CRC8\n` (CRC8 polynomial 0x07 over `CD1|seq|type|payload`), 160-byte max frame and 96-byte payload, HELLO/ACK, selected C5 status/voltage/battery current reports, periodic status every 5s, 10s link timeout. No retries, ACK tracking, UTF-8 glyph chunks, or complete forwarding of historical C5 USB Serial logs. Early C5 boot logs still require its own USB monitor.
 
-**Migration status:** S3 BLE diagnostic service remains unconnected to iPhone control. C5 retains current iPhone BLE, LCD, battery and Wi-Fi logic. I2S, AI, camera, relay BLE services and single-USB power capacity remain untested. Do not assume a compiled/hardware-tested build; send compiler and UART logs to continue.
+**Migration status:** S3 BLE diagnostic service remains unconnected to iPhone control. C5 retains current iPhone BLE, LCD, battery and Wi-Fi logic. I2S, AI, camera, relay BLE services and single-USB power capacity remain untested. The *separate loopback sketches* have passed individually. This pin-updated integrated firmware still needs a fresh build/flash and end-to-end UART test; send the Brain USB UART logs to continue.

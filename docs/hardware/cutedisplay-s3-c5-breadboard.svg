@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-label="CuteDisplay ESP32 S3 brain and LILYGO C5 face breadboard proposal. S3 GPIO41 shared BCLK, GPIO42 shared WS, GPIO1 mic data, GPIO2 amplifier data, GPIO47 UART TX to C5 GPIO5 RX, S3 GPIO21 UART RX from C5 GPIO4 TX; ground common. Camera omitted.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-label="CuteDisplay ESP32 S3 brain and LILYGO C5 face breadboard proposal. S3 GPIO41 shared BCLK, GPIO42 shared WS, GPIO1 mic data, GPIO2 amplifier data, GPIO47 UART TX to C5 GPIO1 RX, S3 GPIO21 UART RX from C5 GPIO6 TX; ground common. Camera omitted.">
 <rect width="1600" height="1180" fill="#f8fafc"/>
 <g font-family="Arial,Helvetica,sans-serif">
 <text x="55" y="57" font-size="39" font-weight="700" fill="#193454">CuteDisplay • Dual-board breadboard pin plan</text>
@@ -23,16 +23,16 @@
 <text x="172" y="501" font-size="20" fill="#1b8771">GPIO42  →  I²S WS/LRC (shared)</text>
 <text x="172" y="540" font-size="20" fill="#2768bb">GPIO1    ←  MIC SD (input)</text>
 <text x="172" y="579" font-size="20" fill="#9e4892">GPIO2    →  AMP DIN (output)</text>
-<text x="172" y="626" font-size="20" fill="#bf6427">GPIO47 TX →  C5 GPIO5 RX</text>
-<text x="172" y="662" font-size="20" fill="#a73762">GPIO21 RX ←  C5 GPIO4 TX</text>
+<text x="172" y="626" font-size="20" fill="#bf6427">GPIO47 TX →  C5 GPIO1 RX</text>
+<text x="172" y="662" font-size="20" fill="#a73762">GPIO21 RX ←  C5 GPIO6 TX</text>
 <rect x="946" y="329" width="533" height="371" rx="20" fill="#fff0f5" stroke="#bd5484" stroke-width="4"/>
 <text x="976" y="371" font-size="30" font-weight="700" fill="#903b66">LILYGO T-DISPLAY-C5</text>
 <rect x="982" y="393" width="457" height="133" rx="14" fill="#1f334d"/>
 <text x="1013" y="436" font-size="27" fill="#fff">Hello! Kitty ♡</text>
 <text x="1013" y="469" font-size="18" fill="#cfdef0">Mascots · AI response text</text>
 <text x="1013" y="495" font-size="18" fill="#cfdef0">Battery · local animation loop</text>
-<text x="982" y="566" font-size="22" fill="#b05a21">GPIO5 RX ← S3 GPIO47 TX</text>
-<text x="982" y="603" font-size="22" fill="#aa315c">GPIO4 TX → S3 GPIO21 RX</text>
+<text x="982" y="566" font-size="22" fill="#b05a21">GPIO1 RX ← S3 GPIO47 TX</text>
+<text x="982" y="603" font-size="22" fill="#aa315c">GPIO6 TX → S3 GPIO21 RX</text>
 <text x="982" y="641" font-size="22" fill="#526172">GND ↔ S3 GND</text>
 <!-- only 3 interboard wires, separate horizontal tracks -->
 <path d="M706 626 H772 V564 H944" fill="none" stroke="#d98332" stroke-width="7" stroke-linecap="round"/>
@@ -59,5 +59,5 @@
 <text x="1112" y="1018" font-size="20" fill="#655a98">SPK+ ← amplifier SPK+</text>
 <text x="1112" y="1052" font-size="20" fill="#655a98">SPK− ← amplifier SPK−</text>
 <text x="1112" y="1085" font-size="19" fill="#8b4450">Never connect SPK− to GND</text>
-<text x="78" y="1152" font-size="17" fill="#596b7e">Pin plan is conflict-reviewed against camera, microSD and PSRAM use; NOT a claim of tested physical header/rail placement.</text>
+<text x="78" y="1152" font-size="17" fill="#596b7e">UART pins: each board passed standalone loopback; S3-C5 link NOT yet verified. Graphic is not physical hole placement.</text>
 </g></svg>
