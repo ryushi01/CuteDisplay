@@ -872,40 +872,11 @@ extension BluetoothManager: CBPeripheralDelegate {
     }
 
     private func maintainLAN() {
-        // Phase-3 S3 owns WiFi; the old C5 TCP/8848 fallback is disabled.
-        // Never reuse the saved C5 LAN token/IP when switching accessories.
-        return
-        if bleReady() {
-            if wifiFallbackConnected { stopLANFallback() }
-            return
+        // The ESP32-S3 is the only Wi-Fi controller.
+        // The old LILYGO TCP/8848 LAN fallback must never reconnect.
+        if wifiFallbackConnected || lanConnection != nil {
+            stopLANFallback()
         }
-        guard autoReconnect, !intentionalDisconnect,
-              !wifiFallbackConnected, lanConnection == nil,
-              let token = lanToken, token.count == 32,
-              Self.validIPv4(lanIP),
-              Date().timeIntervalSince(lanLastAttempt) >= 8 else { return }
-        lanLastAttempt = Date()
-        guard let port = NWEndpoint.Port(rawValue: 8848) else { return }
-        let conn = NWConnection(host: NWEndpoint.Host(lanIP), port: port, using: .tcp)
-        lanConnection = conn
-        lanAuthenticated = false
-        lanBytes.removeAll()
-        conn.stateUpdateHandler = { [weak self, weak conn] state in
-            guard let self, let conn, self.lanConnection === conn else { return }
-            switch state {
-            case .ready:
-                guard let token = self.lanToken else { return }
-                conn.send(content: Data(("AUTH " + token + "\n").utf8),
-                          completion: .contentProcessed { [weak self] error in
-                    if let error { self?.lanFailure(error.localizedDescription) }
-                })
-                self.receiveLAN(conn)
-            case .failed(let error): self.lanFailure(error.localizedDescription)
-            case .cancelled: break
-            default: break
-            }
-        }
-        conn.start(queue: .main)
     }
 
     private func receiveLAN(_ connection: NWConnection) {
