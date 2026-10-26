@@ -1,6 +1,8 @@
 import Foundation
 import CoreBluetooth
 import Network
+import CryptoKit
+import Security
 import AccessorySetupKit
 import Combine
 import UIKit
@@ -13,6 +15,7 @@ struct CuteAuthorizedAccessory: Identifiable {
 
 final class BluetoothManager: NSObject, ObservableObject {
     @Published var isConnected = false
+    @Published var bluetoothBrainConnected = false
     @Published var wifiFallbackConnected = false
     private var lanConnection: NWConnection?
     private var lanBytes = Data()
@@ -20,8 +23,13 @@ final class BluetoothManager: NSObject, ObservableObject {
     private var lanLastAttempt: Date = .distantPast
     private var lanAuthenticated = false
     private var lanCommandInFlight = false
-    private var lanToken: String? = UserDefaults.standard.string(forKey: "cuteLanToken")
-    private var lanIP: String = UserDefaults.standard.string(forKey: "cuteLanIP") ?? ""
+    private var lanToken: String?
+    private var lanIP = ""
+    private var lanBrowser: NWBrowser?
+    private var brainServiceEndpoint: NWEndpoint?
+    private var lanLastReply = Date.distantPast
+    private var nextBLEAttempt = Date.distantPast
+    private var brainBLEReady = false
     @Published var isScanning = false
     @Published var status = "Starting Bluetooth..."
     @Published var brightness = 75
@@ -98,8 +106,10 @@ final class BluetoothManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        // Local-network fallback is foreground/best-effort; iOS may suspend sockets.
+        // Foreground best-effort; CoreBluetooth restoration handles eligible
+        // background reconnects under the operating system's own limits.
         lanTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
+            self?.maintainBluetoothReconnect()
             self?.maintainLAN()
             self?.pollLANStatus()
         }
@@ -194,12 +204,10 @@ final class BluetoothManager: NSObject, ObservableObject {
         intentionalDisconnect = true
         if isScanning { central?.stopScan(); isScanning = false }
         stopLANFallback()
-        // Credentials below were issued by old C5 firmware; the S3 deliberately
-        // has no LAN fallback server, so do not reconnect through the old C5.
+        // A LAN capability belongs to a specific authorized S3 Brain.
         lanToken = nil
         lanIP = ""
-        UserDefaults.standard.removeObject(forKey: "cuteLanToken")
-        UserDefaults.standard.removeObject(forKey: "cuteLanIP")
+        brainServiceEndpoint = nil
         if let current = peripheral { central?.cancelPeripheralConnection(current) }
         clearConnection()
         rememberAuthorized(selected)
@@ -322,7 +330,7 @@ final class BluetoothManager: NSObject, ObservableObject {
                 // Service discovery is not BLE security/bonding.
                 // A read of encrypted FFF1 triggers pairing on iOS, and the
                 // app becomes usable only after didUpdateValueFor succeeds.
-                if !isConnected {
+                if !brainBLEReady {
                     status = "Securing Bluetooth with the Brain..."
                     if characteristic.properties.contains(.read) {
                         device.readValue(for: characteristic)
@@ -333,7 +341,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             } else if service.uuid == networkServiceUUID && characteristic.uuid == networkCharacteristicUUID {
                 networkCharacteristic = characteristic
                 networkDetailsAvailable = true
-                if isConnected {
+                if brainBLEReady {
                     if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
                         device.setNotifyValue(true, for: characteristic)
                     } else if characteristic.isNotifying && !networkRefreshStarted {
@@ -346,7 +354,7 @@ final class BluetoothManager: NSObject, ObservableObject {
                 }
             } else if (service.uuid == powerServiceUUID && characteristic.uuid == powerCharacteristicUUID)
                         || (service.uuid == batteryServiceUUID && characteristic.uuid == batteryLevelUUID) {
-                if isConnected {
+                if brainBLEReady {
                     if characteristic.properties.contains(.notify) && !characteristic.isNotifying {
                         device.setNotifyValue(true, for: characteristic)
                     }
@@ -373,19 +381,68 @@ final class BluetoothManager: NSObject, ObservableObject {
         }
     }
 
+    // The LAN key is sent exclusively over encrypted Brain BLE and saved
+    // in iOS Keychain, scoped to this authorized accessory's BLE UUID.
+    private func brainKeyAccount(_ id: UUID) -> String {
+        "CuteDisplay-Brain-LAN-\(id.uuidString)"
+    }
+    private func removeBrainKey(_ id: UUID) {
+        let item: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "CuteDisplay.BrainLAN",
+            kSecAttrAccount as String: brainKeyAccount(id)
+        ]
+        SecItemDelete(item as CFDictionary)
+    }
+    private func saveBrainKey(_ hex: String, for id: UUID) {
+        guard hex.count == 64, hex.allSatisfy({ $0.isHexDigit }) else { return }
+        removeBrainKey(id)
+        let item: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "CuteDisplay.BrainLAN",
+            kSecAttrAccount as String: brainKeyAccount(id),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: Data(hex.lowercased().utf8)
+        ]
+        if SecItemAdd(item as CFDictionary, nil) == errSecSuccess {
+            lanToken = hex.lowercased()
+        }
+    }
+    private func readBrainKey(_ id: UUID) -> String? {
+        let item: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "CuteDisplay.BrainLAN",
+            kSecAttrAccount as String: brainKeyAccount(id),
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(item as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let hex = String(data: data, encoding: .utf8),
+              hex.count == 64, hex.allSatisfy({ $0.isHexDigit }) else { return nil }
+        return hex
+    }
     private func rememberAuthorized(_ id: UUID) {
         rememberedDeviceID = id.uuidString
         UserDefaults.standard.set(rememberedDeviceID, forKey: "cutePeripheralID")
+        lanToken = readBrainKey(id)
+        lanIP = UserDefaults.standard.string(forKey: "cuteBrainIP.\(id.uuidString)") ?? ""
+        // Old C5 LAN credentials must never be used to authenticate to S3.
+        UserDefaults.standard.removeObject(forKey: "cuteLanToken")
     }
     private func clearRememberedDevice() {
-        // Forgetting the accessory must also revoke its saved LAN fallback credentials.
         stopLANFallback()
+        if let id = rememberedDeviceID.flatMap(UUID.init(uuidString:)) {
+            removeBrainKey(id)
+            UserDefaults.standard.removeObject(forKey: "cuteBrainIP.\(id.uuidString)")
+        }
         lanToken = nil
         lanIP = ""
-        UserDefaults.standard.removeObject(forKey: "cuteLanToken")
-        UserDefaults.standard.removeObject(forKey: "cuteLanIP")
         rememberedDeviceID = nil
         UserDefaults.standard.removeObject(forKey: "cutePeripheralID")
+        UserDefaults.standard.removeObject(forKey: "cuteLanToken")
+        UserDefaults.standard.removeObject(forKey: "cuteLanIP")
     }
     func connect() {
         intentionalDisconnect = false
@@ -412,11 +469,12 @@ final class BluetoothManager: NSObject, ObservableObject {
     func setAutoReconnect(_ enabled: Bool) {
         autoReconnect = enabled
         UserDefaults.standard.set(enabled, forKey: "cuteAutoReconnect")
-        if enabled && !isConnected { startConnection() }
+        if enabled && !bleReady() { startConnection() }
         if !enabled {
-            stopLANFallback()
+            // This setting controls Bluetooth reconnect only. Authenticated
+            // Brain LAN fallback can remain online if the user chooses.
             if isScanning { central?.stopScan(); isScanning = false }
-            if !bleReady() { isConnected = false }
+            if !wifiFallbackConnected && !bleReady() { isConnected = false }
         }
     }
     // Remove authorization through the system UI, not by only deleting UserDefaults.
@@ -430,6 +488,16 @@ final class BluetoothManager: NSObject, ObservableObject {
         accessorySession.removeAccessory(accessory) { [weak self] error in
             if let error { self?.status = "Remove failed: \(error.localizedDescription)" }
         }
+    }
+    private func maintainBluetoothReconnect() {
+        guard autoReconnect, !intentionalDisconnect, accessorySessionReady,
+              authorizedIdentifier() != nil, !bleReady(),
+              Date().timeIntervalSince(nextBLEAttempt) > 6 else { return }
+        nextBLEAttempt = Date()
+        // A pending CoreBluetooth connect normally waits for the device
+        // to return to range. Don't cancel it just because LAN is active.
+        guard peripheral == nil && !isScanning else { return }
+        startConnection()
     }
     private func startConnection() {
         if isSimulator { status = "Simulator / Demo Mode"; return }
@@ -476,6 +544,8 @@ final class BluetoothManager: NSObject, ObservableObject {
         minutesToFull = nil
         lastPowerUpdate = nil
         }
+        brainBLEReady = false
+        bluetoothBrainConnected = false
         commandCharacteristic = nil
         networkCharacteristic = nil
         networkDetailsAvailable = false
@@ -504,6 +574,10 @@ final class BluetoothManager: NSObject, ObservableObject {
     // Wi-Fi credentials are provisioned over the connected BLE link.
     // Only use a network that you control. Password is never logged.
     func connectWiFi(ssid: String, password: String) {
+        guard bleReady() else {
+            status = "Connect to the S3 Brain over Bluetooth to provision Wi-Fi securely"
+            return
+        }
         let name = ssid.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty && name.utf8.count <= 32,
               password.utf8.count <= 63,
@@ -519,6 +593,10 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
 
     func configureIP(dhcp: Bool, ip: String, mask: String, gateway: String, dns: String) {
+        guard bleReady() else {
+            status = "Connect to the S3 Brain over Bluetooth to change IP settings"
+            return
+        }
         if dhcp { enqueue(["W:DHCP", "W:INFO"]); return }
         let values = [ip, mask, gateway, dns]
         guard values.allSatisfy({ Self.validIPv4($0) }) else {
@@ -536,9 +614,13 @@ final class BluetoothManager: NSObject, ObservableObject {
         }
     }
     func refreshNetworkDetails() {
+        if !bleReady(), wifiFallbackConnected {
+            pollLANStatus()
+            return
+        }
         // Request one field per acknowledged BLE write instead of relying on
         // a burst of notifications from the ESP32.
-        enqueue(["W:GET:LINK","W:GET:STATE","W:GET:FAIL",
+        enqueue(["W:GET:KEY","W:GET:LINK","W:GET:STATE","W:GET:FAIL",
                  "W:GET:MODE","W:GET:IP","W:GET:MASK",
                  "W:GET:GW","W:GET:DNS","W:GET:RSSI","W:GET:SSID"])
     }
@@ -558,9 +640,16 @@ final class BluetoothManager: NSObject, ObservableObject {
             self.pingResult = "No ping result received within 8 seconds"
         }
     }
-    func disconnectWiFi() { enqueue(["W:OFF"]) }
-    func enableWiFi() { enqueue(["W:ON"]) }
-    func forgetWiFi() { enqueue(["W:FORGET"]) }
+    func disconnectWiFi() { brainWiFiSetting("W:OFF") }
+    func enableWiFi() { brainWiFiSetting("W:ON") }
+    func forgetWiFi() { brainWiFiSetting("W:FORGET") }
+    private func brainWiFiSetting(_ command: String) {
+        guard bleReady() else {
+            status = "S3 Brain Wi-Fi settings require encrypted Bluetooth"
+            return
+        }
+        enqueue([command])
+    }
 
     func configureMascot(accessory: Int, objectMode: Int, object: Int,
                          frequency: Int, intensity: Int, personality: Bool) {
@@ -677,12 +766,16 @@ final class BluetoothManager: NSObject, ObservableObject {
 
     private func enqueue(_ commands: [String]) {
         if isSimulator { status = "Demo Mode — no Bluetooth sent"; return }
-        guard (peripheral != nil && commandCharacteristic != nil && isConnected) || wifiFallbackConnected else {
+        guard bleReady() || wifiFallbackConnected else {
             status = "Not connected to CuteDisplay"
             return
         }
         guard commands.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 96 }) else {
             status = "Bluetooth command exceeds 96 bytes"
+            return
+        }
+        if !bleReady() && commands.contains(where: { $0.hasPrefix("W:") }) {
+            status = "S3 Brain Wi-Fi/IP changes require Bluetooth"
             return
         }
         pendingCommands.append(contentsOf: commands)
@@ -691,7 +784,7 @@ final class BluetoothManager: NSObject, ObservableObject {
 
     private func sendNext() {
         guard !waitingForWrite, !pendingCommands.isEmpty else { return }
-        if let peripheral, let characteristic = commandCharacteristic, peripheral.state == .connected {
+        if bleReady(), let peripheral, let characteristic = commandCharacteristic {
             // Brain commands require an end-to-end ACK; without the FFF1
             // notification subscription we must NOT flood the UART queue.
             let brainProxy = characteristic.properties.contains(.notify)
@@ -714,12 +807,14 @@ final class BluetoothManager: NSObject, ObservableObject {
                     self.commandCompleted(errorMessage: "Brain UART response timed out (20s)")
                 }
             }
-        } else if wifiFallbackConnected {
+        } else if wifiFallbackConnected && lanAuthenticated {
             let next = pendingCommands.removeFirst()
             waitingForWrite = true
             lanConnection?.send(content: Data(("CMD " + next + "\n").utf8),
                                 completion: .contentProcessed { [weak self] error in
-                if let error { self?.lanFailure(error.localizedDescription) }
+                if let error {
+                    DispatchQueue.main.async { self?.lanFailure(error.localizedDescription) }
+                }
             })
         }
     }
@@ -775,7 +870,8 @@ extension BluetoothManager: CBCentralManagerDelegate {
                         didFailToConnect device: CBPeripheral, error: Error?) {
         clearConnection()
         status = error?.localizedDescription ?? "Connection failed"
-        if autoReconnect && !intentionalDisconnect { startConnection() }
+        nextBLEAttempt = Date()
+        // The foreground timer retries if the saved peripheral reappears.
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -783,7 +879,10 @@ extension BluetoothManager: CBCentralManagerDelegate {
         // Ignore a late callback from the previous accessory after switching.
         guard peripheral?.identifier == device.identifier else { return }
         clearConnection()
-        status = error == nil ? "Disconnected" : "Disconnected: \(error!.localizedDescription)"
+        if !wifiFallbackConnected {
+            status = error == nil ? "Brain Bluetooth disconnected" :
+                                    "Brain Bluetooth disconnected: \(error!.localizedDescription)"
+        }
         if autoReconnect && !intentionalDisconnect { startConnection() }
     }
 }
@@ -808,7 +907,9 @@ extension BluetoothManager: CBPeripheralDelegate {
         if characteristic.uuid == commandUUID {
             if let error {
                 status = "Brain command notifications unavailable: \(error.localizedDescription)"
-                isConnected = false
+                brainBLEReady = false
+                bluetoothBrainConnected = false
+                isConnected = wifiFallbackConnected
                 pendingCommands.removeAll()
                 awaitingBrainAck = false
                 waitingForWrite = false
@@ -832,11 +933,15 @@ extension BluetoothManager: CBPeripheralDelegate {
                     didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         if characteristic.uuid == commandUUID {
             if let error {
-                isConnected = false
-                status = "Bluetooth pairing required: \(error.localizedDescription)"
+                brainBLEReady = false
+                bluetoothBrainConnected = false
+                isConnected = wifiFallbackConnected
+                if !wifiFallbackConnected {
+                    status = "Bluetooth pairing required: \(error.localizedDescription)"
+                }
                 return
             }
-            if !isConnected {
+            if !brainBLEReady {
                 // A protected read proves encryption, but NOT that the S3
                 // firmware has finished enabling its UART command proxy.
                 // Do not flush saved mascot/glyph/Wi-Fi commands until READY.
@@ -864,8 +969,23 @@ extension BluetoothManager: CBPeripheralDelegate {
                     return
                 }
                 brainReadyReadAttempts = 0
+                if !isBrain {
+                    status = "This is not the S3 Brain. Select the Brain in Bluetooth settings."
+                    isConnected = wifiFallbackConnected
+                    return
+                }
+                brainBLEReady = true
+                bluetoothBrainConnected = true
                 isConnected = true
-                status = isBrain ? "Connected securely to Brain" : "Connected to CuteDisplay"
+                status = isBrain ? "Connected securely to Brain (Bluetooth)" :
+                         "Pair the S3 Brain for network features"
+                if wifiFallbackConnected && waitingForWrite {
+                    // LAN command completion is indeterminate at handover;
+                    // do not duplicate the command via Bluetooth.
+                    waitingForWrite = false
+                    pendingCommands.removeAll()
+                    status = "Bluetooth restored; previous LAN command not replayed"
+                }
                 stopLANFallback()
                 beginBrainDataSubscriptions(on: peripheral)
                 // For Brain, sendNext waits until FFF1 notification is active.
@@ -934,16 +1054,16 @@ extension BluetoothManager: CBPeripheralDelegate {
             case "IP":
                 if fields.count > 2 {
                     wifiIP = fields[2]
-                    if Self.validIPv4(fields[2]) {
+                    if Self.validIPv4(fields[2]), let id = authorizedIdentifier() {
                         lanIP = fields[2]
-                        UserDefaults.standard.set(lanIP, forKey: "cuteLanIP")
+                        UserDefaults.standard.set(lanIP, forKey: "cuteBrainIP.\(id.uuidString)")
                     }
                 }
             case "KEY":
-                if fields.count > 2, fields[2].count == 32,
-                   fields[2].allSatisfy({ $0.isHexDigit }) {
-                    lanToken = fields[2]
-                    UserDefaults.standard.set(fields[2], forKey: "cuteLanToken")
+                if fields.count > 2, fields[2].count == 64,
+                   fields[2].allSatisfy({ $0.isHexDigit }),
+                   let id = authorizedIdentifier() {
+                    saveBrainKey(fields[2], for: id)
                 }
             case "MASK": if fields.count > 2 { wifiMask = fields[2] }
             case "GW": if fields.count > 2 { wifiGateway = fields[2] }
@@ -1019,9 +1139,11 @@ extension BluetoothManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral,
                     didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         if let error, (error as NSError).code == 5 {
-            // CBATTError.insufficientAuthentication: never pretend write
-            // worked. Require a successful protected FFF1 read/re-pair.
-            isConnected = false
+            // CBATTError.insufficientAuthentication: preserve any authenticated
+            // LAN fallback, but require a new protected BLE read.
+            brainBLEReady = false
+            bluetoothBrainConnected = false
+            isConnected = wifiFallbackConnected
             status = "Brain Bluetooth encryption required; reconnect and pair again"
             if let control = commandCharacteristic { peripheral.readValue(for: control) }
         }
@@ -1067,60 +1189,178 @@ extension BluetoothManager: CBPeripheralDelegate {
     // Wi-Fi fallback: connects only to a previously provisioned, reachable LAN IP.
     // No automatic enabling of the ESP32 Wi-Fi radio or cloud service.
     private func bleReady() -> Bool {
-        peripheral?.state == .connected && commandCharacteristic != nil
+        brainBLEReady && peripheral?.state == .connected && commandCharacteristic != nil
+    }
+
+    // The Brain publishes _cutedisplay._tcp via mDNS. Also retain its last
+    // authenticated BLE-reported IP as a fallback if discovery is delayed.
+    // Every socket is forced onto local Wi-Fi (never cellular).
+    private func beginBrainDiscovery() {
+        guard lanBrowser == nil else { return }
+        let parameters = NWParameters.tcp
+        parameters.requiredInterfaceType = .wifi
+        let browser = NWBrowser(for: .bonjour(type: "_cutedisplay._tcp", domain: nil),
+                                using: parameters)
+        browser.browseResultsChangedHandler = { [weak self] results, _ in
+            DispatchQueue.main.async {
+                self?.brainServiceEndpoint = results.first?.endpoint
+            }
+        }
+        browser.stateUpdateHandler = { [weak self] state in
+            if case .failed = state {
+                DispatchQueue.main.async {
+                    self?.lanBrowser?.cancel()
+                    self?.lanBrowser = nil
+                }
+            }
+        }
+        lanBrowser = browser
+        browser.start(queue: .main)
     }
 
     private func maintainLAN() {
-        // The ESP32-S3 is the only Wi-Fi controller.
-        // The old LILYGO TCP/8848 LAN fallback must never reconnect.
-        if wifiFallbackConnected || lanConnection != nil {
-            stopLANFallback()
+        guard !intentionalDisconnect, !bleReady(),
+              authorizedIdentifier() != nil, lanToken?.count == 64 else {
+            if lanConnection != nil || lanBrowser != nil { stopLANFallback() }
+            return
         }
+        beginBrainDiscovery()
+        if let connection = lanConnection {
+            // A TCP connection can remain "ready" after Wi-Fi is lost.
+            if lanAuthenticated,
+               Date().timeIntervalSince(lanLastReply) > 16 {
+                lanFailure("Brain stopped responding over local Wi-Fi")
+            }
+            return
+        }
+        guard Date().timeIntervalSince(lanLastAttempt) > 7 else { return }
+        let ipEndpoint: NWEndpoint? = Self.validIPv4(lanIP) ?
+            .hostPort(host: NWEndpoint.Host(lanIP),
+                      port: NWEndpoint.Port(rawValue: 8848)!) : nil
+        // Alternate between remembered IP and Bonjour to recover DHCP changes.
+        let useBonjour = Int(Date().timeIntervalSince1970 / 7).isMultiple(of: 2)
+        guard let endpoint = useBonjour ?
+                (brainServiceEndpoint ?? ipEndpoint) :
+                (ipEndpoint ?? brainServiceEndpoint) else { return }
+        lanLastAttempt = Date()
+        let parameters = NWParameters.tcp
+        parameters.requiredInterfaceType = .wifi
+        let connection = NWConnection(to: endpoint, using: parameters)
+        lanConnection = connection
+        lanAuthenticated = false
+        lanLastReply = Date()
+        lanBytes.removeAll()
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            DispatchQueue.main.async {
+                guard let self, let connection, self.lanConnection === connection else { return }
+                switch state {
+                case .ready:
+                    self.receiveLAN(connection)
+                case .failed(let error):
+                    self.lanFailure(error.localizedDescription)
+                case .cancelled:
+                    self.lanFailure("Connection cancelled")
+                default: break
+                }
+            }
+        }
+        connection.start(queue: .main)
+    }
+
+    private func brainChallengeResponse(_ nonce: String) -> String? {
+        guard nonce.count == 32, nonce.allSatisfy({ $0.isHexDigit }),
+              let token = lanToken, token.count == 64 else { return nil }
+        var bytes: [UInt8] = []
+        for offset in stride(from: 0, to: 64, by: 2) {
+            let start = token.index(token.startIndex, offsetBy: offset)
+            let end = token.index(start, offsetBy: 2)
+            guard let byte = UInt8(token[start..<end], radix: 16) else { return nil }
+            bytes.append(byte)
+        }
+        let mac = HMAC<SHA256>.authenticationCode(
+            for: Data(nonce.utf8), using: SymmetricKey(data: Data(bytes)))
+        return mac.map { String(format: "%02x", $0) }.joined()
     }
 
     private func receiveLAN(_ connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { [weak self, weak connection] data, _, complete, error in
-            guard let self, let connection, self.lanConnection === connection else { return }
-            if let data { self.lanBytes.append(data) }
-            while let newline = self.lanBytes.firstIndex(of: 10) {
-                let line = String(decoding: self.lanBytes.prefix(upTo: newline), as: UTF8.self)
-                self.lanBytes.removeSubrange(...newline)
-                self.handleLANLine(line.trimmingCharacters(in: .whitespacesAndNewlines))
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) {
+            [weak self, weak connection] data, _, complete, error in
+            DispatchQueue.main.async {
+                guard let self, let connection,
+                      self.lanConnection === connection else { return }
+                if let data { self.lanBytes.append(data) }
+                if self.lanBytes.count > 4096 {
+                    self.lanFailure("Excessive Brain LAN response")
+                    return
+                }
+                while let newline = self.lanBytes.firstIndex(of: 10) {
+                    let line = String(decoding: self.lanBytes.prefix(upTo: newline), as: UTF8.self)
+                    self.lanBytes.removeSubrange(...newline)
+                    self.handleLANLine(line.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                if complete || error != nil {
+                    self.lanFailure(error?.localizedDescription ?? "Connection closed")
+                } else {
+                    self.receiveLAN(connection)
+                }
             }
-            if complete || error != nil { self.lanFailure(error?.localizedDescription ?? "Connection closed") }
-            else { self.receiveLAN(connection) }
         }
     }
 
     private func handleLANLine(_ line: String) {
-        if line == "OK" {
+        lanLastReply = Date()
+        if line.hasPrefix("CHALLENGE ") {
+            guard let response = brainChallengeResponse(String(line.dropFirst(10))) else {
+                lanFailure("Invalid Brain LAN authentication challenge")
+                return
+            }
+            lanConnection?.send(content: Data(("AUTH " + response + "\n").utf8),
+                                completion: .contentProcessed { [weak self] error in
+                if let error { DispatchQueue.main.async { self?.lanFailure(error.localizedDescription) } }
+            })
+        } else if line == "OK" {
             lanAuthenticated = true
             wifiFallbackConnected = true
             isConnected = true
-            status = "Connected over Wi-Fi (Bluetooth unavailable)"
+            wifiConnected = true
+            wifiConnectionState = "CONNECTED"
+            networkDetailsAvailable = true
+            if Self.validIPv4(lanIP) { wifiIP = lanIP }
+            status = "Connected to S3 Brain over local Wi-Fi"
+            pollLANStatus()
             sendNext()
         } else if line == "ACK" {
+            guard waitingForWrite, wifiFallbackConnected, !bleReady() else { return }
             commandCompleted(errorMessage: nil)
-        } else if line == "NACK" || line == "DENIED" {
-            if line == "DENIED" { lanFailure("Wi-Fi authentication failed; reconnect with Bluetooth") }
-            else { commandCompleted(errorMessage: "Command rejected over Wi-Fi") }
-        } else if line.hasPrefix("S:") {
-            let f = line.dropFirst(2).split(separator: ",")
-            guard f.count >= 8, let level = Int(f[0]),
-                  let voltage = Double(f[1]), let current = Double(f[2]),
-                  let temperature = Int(f[3]), let health = Int(f[4]),
-                  let empty = Int(f[5]), let full = Int(f[6]),
-                  (0...100).contains(level), voltage > 0 else { return }
-            batteryLevel = level
-            checkLowBattery(level)
-            batteryVoltage = voltage
-            batteryCurrent = current
-            batteryTemperature = temperature
-            batteryHealth = health
-            minutesToEmpty = empty
-            minutesToFull = full
-            lastPowerUpdate = Date()
-            wifiConnected = f[7] == "1"
+        } else if line.hasPrefix("NACK") || line == "DENIED" {
+            if line == "DENIED" {
+                lanFailure("Brain rejected LAN authentication; reconnect over BLE")
+            } else if waitingForWrite {
+                commandCompleted(errorMessage: line == "NACK:BLE_REQUIRED"
+                    ? "S3 network configuration requires Bluetooth"
+                    : "Brain LAN command rejected: " + line)
+            }
+        } else if line.hasPrefix("N:") {
+            let parts = line.split(separator: ":", maxSplits: 2,
+                                   omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 3 else { return }
+            switch parts[1] {
+            case "LINK": wifiConnected = parts[2] == "1"
+            case "STATE": wifiConnectionState = parts[2]
+            case "IP":
+                wifiIP = parts[2]
+                if Self.validIPv4(parts[2]),
+                   let id = authorizedIdentifier() {
+                    lanIP = parts[2]
+                    UserDefaults.standard.set(lanIP, forKey: "cuteBrainIP.\(id.uuidString)")
+                }
+            case "MODE": wifiDHCP = parts[2] == "DHCP"
+            case "MASK": wifiMask = parts[2]
+            case "GW": wifiGateway = parts[2]
+            case "DNS": wifiDNS = parts[2]
+            case "RSSI": wifiRSSI = Int(parts[2]) ?? 0
+            default: break
+            }
         }
     }
 
@@ -1128,6 +1368,10 @@ extension BluetoothManager: CBPeripheralDelegate {
         lanConnection?.stateUpdateHandler = nil
         lanConnection?.cancel()
         lanConnection = nil
+        lanBrowser?.stateUpdateHandler = nil
+        lanBrowser?.browseResultsChangedHandler = nil
+        lanBrowser?.cancel()
+        lanBrowser = nil
         lanAuthenticated = false
         wifiFallbackConnected = false
         lanBytes.removeAll()
@@ -1136,15 +1380,21 @@ extension BluetoothManager: CBPeripheralDelegate {
     private func lanFailure(_ reason: String) {
         guard lanConnection != nil else { return }
         stopLANFallback()
-        waitingForWrite = false
-        isConnected = bleReady()
-        if !isConnected { status = "Wi-Fi fallback unavailable: " + reason }
+        if !bleReady() {
+            isConnected = false
+            status = "Brain Wi-Fi fallback: " + reason
+        }
+        if waitingForWrite && !bleReady() {
+            waitingForWrite = false
+            pendingCommands.removeAll()
+        }
     }
 
     private func pollLANStatus() {
-        guard wifiFallbackConnected, !bleReady() else { return }
-        lanConnection?.send(content: Data("STATUS\n".utf8), completion: .contentProcessed { [weak self] error in
-            if let error { self?.lanFailure(error.localizedDescription) }
+        guard wifiFallbackConnected, !bleReady(), lanAuthenticated else { return }
+        lanConnection?.send(content: Data("STATUS\n".utf8),
+                            completion: .contentProcessed { [weak self] error in
+            if let error { DispatchQueue.main.async { self?.lanFailure(error.localizedDescription) } }
         })
     }
 

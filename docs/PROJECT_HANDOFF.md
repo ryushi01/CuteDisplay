@@ -1,5 +1,12 @@
 # CuteDisplay — Project Handoff / Resume Here
 
+## Current Phase 5 — Brain-owned Wi-Fi fallback and BLE auto-reconnect (source only, not tested)
+
+User confirmed encrypted iPhone→S3 BLE and message updates work, S3↔C5 UART works at 921600, and S3 Wi-Fi works on 2.4 GHz IoT WLAN. User now wants automatic reconnect when in Bluetooth range, authenticated Wi-Fi fallback when phone is on same network, and **all iPhone network/Bluetooth/IP controls to belong exclusively to the S3 Brain**. Do not modify C5 code or the verified UART, nor change the BLE security profile.
+
+Phase-5 beta: S3 now provides a Wi-Fi TCP/8848 command server and advertises mDNS `_cutedisplay._tcp`. It generates persistent 256-bit token in `brainlan` NVS, exposes it **only over encrypted BLE FFF6** via `W:GET:KEY`, and authenticates Wi-Fi clients using nonce/HMAC-SHA256. IP/subnet access is restricted to the S3's LAN. The app stores the key in Keychain scoped to the selected authorized Brain UUID, discovers by last BLE-reported IP or Bonjour, and only uses local Wi-Fi for fallback when BLE is unavailable. It resumes BLE when CoreBluetooth connects, and does not replay uncertain in-flight commands. The app uses `STATUS` from Brain for network/IP values. Plain LAN commands are **not encrypted**; Wi-Fi credentials, Wi-Fi/IP changes and BLE setup are restricted to encrypted BLE. LILYGO direct LAN/BLE credentials no longer used. Add `NSBonjourServices: [_cutedisplay._tcp]` and Local Network description to actual Xcode target Info. iOS background auto-reconnect is subject to OS limits. **No builds/hardware tests performed.** See [Phase-5 first tests and rollback](hardware/brain-lan-reconnect.md).
+
+
 ## Current verified milestone — 27 October 2026: BLE/messages OK; S3 Wi-Fi onboarding investigation
 
 The user confirmed **iPhone Bluetooth pairing and updating a message now work**, plus the dual-board UART link works. Preserve the working **S3 Bluetooth compatibility profile** `setAuthenticationMode(true,false,false)` with encrypted FFF1/FFF6, existing iPhone pacing, tested 921600 baud S3↔C5 UART, and C5 firmware/popup. No renewed BLE or UART troubleshooting unless new evidence requires it.

@@ -2,6 +2,10 @@
 
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
+## Phase 5 beta: Brain BLE auto-reconnect and authenticated LAN fallback
+
+All Bluetooth, Wi-Fi and IP management is now owned by the **ESP32-S3 Brain**, with C5 radios disabled. The paired Brain automatically reconnects over Bluetooth when it becomes reachable (subject to iOS app state/background limits). When Bluetooth is unavailable and the phone can reach the same S3 Wi-Fi subnet, the app can use a Brain **TCP/8848** fallback discovered by remembered IP or Bonjour. A 256-bit Brain token is provisioned through encrypted BLE FFF6 and stored in iPhone Keychain, then used for LAN HMAC challenge-response. **LAN commands are not encrypted:** display controls only; all Wi-Fi credential/IP changes require BLE. The C5 UART and firmware are unchanged. Add `NSBonjourServices` to the actual Xcode target. **Source only; not yet compiled or hardware-tested.** See [Phase-5 test and recovery guide](docs/hardware/brain-lan-reconnect.md).
+
 ## Current Phase 4 Wi-Fi telemetry (27 October 2026)
 
 **User verified: iPhone BLE pairing/messages + S3/C5 UART are functional.** Do not change those working paths. Latest S3 firmware and iPhone sources add Wi-Fi association-state updates, router disconnect reason reporting, credential validation and DHCP reset, so the iPhone can report why **S3 Wi-Fi** did not connect instead of assuming that `ACK:WIFI` equals success. C5 local radios remain disabled and C5 firmware is unchanged. ESP32-S3 joins **2.4 GHz Wi-Fi only**. [Wi-Fi first-test instructions](docs/hardware/brain-wifi-onboarding.md). Source build/hardware testing pending.

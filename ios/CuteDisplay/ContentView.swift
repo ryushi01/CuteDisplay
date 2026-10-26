@@ -257,7 +257,7 @@ struct ContentView: View {
 
     private var wifiSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("CUTE DISPLAY WI-FI")
+            sectionTitle("S3 BRAIN — WI-FI & IP")
             HStack(spacing: 8) {
                 Image(systemName: bluetooth.wifiConnected ? "wifi" : "wifi.slash")
                     .foregroundStyle(bluetooth.wifiConnected ? .green : .orange)
@@ -301,13 +301,13 @@ struct ContentView: View {
                 .accessibilityLabel(showWiFiPassword ? "Hide password" : "Show password")
             }
             .textFieldStyle(.roundedBorder)
-            Button("Connect CuteDisplay to Wi-Fi") {
+            Button("Connect S3 Brain to Wi-Fi") {
                 UserDefaults.standard.set(wifiName, forKey: "cuteWiFiName")
                 bluetooth.connectWiFi(ssid: wifiName, password: wifiPassword)
                 wifiPassword = ""
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!bluetooth.isConnected || wifiName.isEmpty)
+            .disabled(!bluetooth.bluetoothBrainConnected || wifiName.isEmpty)
             HStack(spacing: 8) {
                 Button("Reconnect") { bluetooth.enableWiFi() }
                 Button("Disconnect") { bluetooth.disconnectWiFi() }
@@ -317,7 +317,7 @@ struct ContentView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(!bluetooth.isConnected)
+            .disabled(!bluetooth.bluetoothBrainConnected)
             Divider()
             HStack {
                 Button("IP Settings") {
@@ -327,12 +327,12 @@ struct ContentView: View {
 
             }
             .buttonStyle(.bordered)
-            .disabled(!bluetooth.isConnected)
+            .disabled(!bluetooth.bluetoothBrainConnected)
             Text("The ESP32-S3 connects to 2.4 GHz Wi-Fi only. The LILYGO's own Wi-Fi is disabled; its left-button long press toggles Brain Wi-Fi.")
                 .font(.caption2).foregroundStyle(.secondary)
-            Text("Configure over Brain Bluetooth. A successful command acknowledgment means the connection attempt started; watch the Wi-Fi state and any failure reason above for the actual result.")
+            Text("Brain Wi-Fi and IP settings are changed over encrypted Bluetooth only. When Bluetooth is out of range, saved message and mascot controls can use the authenticated S3 Brain LAN connection.")
                 .font(.caption2).foregroundStyle(.secondary)
-            Text("Personal Hotspot works when the iPhone exposes a compatible Wi-Fi network. For security, use a trusted network; Wi-Fi setup over BLE is not an end-to-end encrypted provisioning protocol.")
+            Text("LAN fallback requires the phone and Brain to reach each other on the same subnet; IoT guest isolation can block access. Provisioning and first LAN-key exchange require Brain Bluetooth.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding()
@@ -478,12 +478,12 @@ struct ContentView: View {
                 Divider()
             }
             HStack {
-                Label(bluetooth.rememberedDeviceID == nil ? "No remembered device" : "CuteDisplay remembered", systemImage: "checkmark.shield")
+                Label(bluetooth.rememberedDeviceID == nil ? "No paired Brain" : "S3 Brain remembered", systemImage: "checkmark.shield")
                     .font(.subheadline)
                 Spacer()
             }
             if !bluetooth.authorizedDevices.isEmpty {
-                Picker("Active Bluetooth device", selection: Binding(
+                Picker("Authorized S3 Brain", selection: Binding(
                     get: { bluetooth.rememberedDeviceID ?? "" },
                     set: { bluetooth.selectAuthorizedDevice($0) }
                 )) {
@@ -492,10 +492,10 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                Text("This firmware uses Brain Bluetooth and Wi-Fi only. LILYGO wireless is disabled; restore C5 firmware by USB if Brain pairing fails.")
+                Text("All Bluetooth, Wi-Fi, gateway, DNS and IP settings belong to the S3 Brain. The LILYGO's radios remain off.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            Toggle("Automatically reconnect", isOn: Binding(
+            Toggle("Auto-reconnect Brain Bluetooth", isOn: Binding(
                 get: { bluetooth.autoReconnect },
                 set: { bluetooth.setAutoReconnect($0) }
             )).tint(.green)
@@ -508,9 +508,12 @@ struct ContentView: View {
             }
             Divider()
             HStack(spacing: 8) {
-                Image(systemName: "antenna.radiowaves.left.and.right")
+                Image(systemName: bluetooth.bluetoothBrainConnected ? "bluetooth" :
+                      bluetooth.wifiFallbackConnected ? "wifi" : "antenna.radiowaves.left.and.right")
                     .foregroundStyle(bluetooth.isConnected ? .green : .orange)
-                Text(bluetooth.isSimulator ? "Simulator / Demo Mode" : bluetooth.status)
+                Text(bluetooth.isSimulator ? "Simulator / Demo Mode" :
+                     bluetooth.bluetoothBrainConnected ? "S3 Brain • Bluetooth (preferred)" :
+                     bluetooth.wifiFallbackConnected ? "S3 Brain • Local Wi-Fi fallback" : bluetooth.status)
                     .font(.subheadline)
                     .lineLimit(3)
                 Spacer()
@@ -524,7 +527,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
 
-                Text("Bluetooth reconnection only refreshes battery telemetry; it does not change the current LCD screen.")
+                Text("The app prefers Brain Bluetooth, automatically retries a remembered Brain when reachable, and falls back to Brain Wi-Fi if needed. iOS may delay background reconnection.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -533,7 +536,7 @@ struct ContentView: View {
                     if bluetooth.isConnected { bluetooth.disconnect() }
                     else { bluetooth.connect() }
                 } label: {
-                    Label(bluetooth.isConnected ? "Disconnect" : bluetooth.isScanning ? "Searching..." : "Connect to Display",
+                    Label(bluetooth.isConnected ? "Disconnect" : bluetooth.isScanning ? "Searching..." : "Connect to Brain",
                           systemImage: "bluetooth")
                         .frame(maxWidth: .infinity)
                         .padding(12)

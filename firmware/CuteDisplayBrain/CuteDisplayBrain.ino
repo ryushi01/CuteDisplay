@@ -6,6 +6,9 @@
 */
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
+#include <mbedtls/md.h>
+#include <esp_system.h>
 #include <Preferences.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -26,7 +29,7 @@
 #include "CuteLink.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
-static constexpr char S3_FW_VERSION[]="Phase4-WIFI-DIAG1-20261027";
+static constexpr char S3_FW_VERSION[]="Phase5-BRAIN-LAN-20261027";
 static constexpr size_t MAX_CMD=96;
 // Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
 // UART frame payload (one-digit chunk index, total, delimiters).
@@ -47,6 +50,17 @@ static volatile uint8_t wifiDisconnectReason=0;
 static uint8_t lastWiFiFailure=0;
 static String wifiCommandReply="ACK:WIFI";
 static IPAddress configuredIP,configuredMask,configuredGateway,configuredDNS;
+static constexpr uint16_t BRAIN_LAN_PORT=8848;
+static WiFiServer brainLAN(BRAIN_LAN_PORT);
+static WiFiClient lanClient;
+static bool lanListening=false,lanAuthenticated=false,lanAwaitingCommand=false,brainMDNS=false;
+static String lanSecret,lanNonce;
+static char lanLine[192]={0};
+static size_t lanLineLen=0;
+static uint32_t lanLastActivity=0;
+static void pollBrainLAN();
+static void stopBrainLAN();
+static void initBrainLANSecret();
 
 static volatile bool connectPending=false,disconnectPending=false;
 static QueueHandle_t incomingCommands=nullptr,networkQueue=nullptr;
@@ -117,9 +131,16 @@ static uint16_t sendLink(const char *kind,const String &payload=""){
  return seq;
 }
 static void proxyResult(const String &value){
+ if(lanAwaitingCommand &&
+    (value.startsWith("ACK:CMD")||value.startsWith("ERR:"))){
+  if(lanClient && lanAuthenticated)
+   lanClient.println(value.startsWith("ACK:")?"ACK":"NACK");
+  lanAwaitingCommand=false;
+  return;
+ }
  if(!controlChar)return;
  controlChar->setValue(value.c_str());
- if(clientConnected)controlChar->notify();
+ if(clientConnected && bleAuthenticated)controlChar->notify();
 }
 static void cancelCommand(const char *reason){
  if(activeSeq){
@@ -133,7 +154,8 @@ static void stopProxy(){
  proxyEnabled=false;
  proxyDeadline=0;
  if(incomingCommands)xQueueReset(incomingCommands);
- cancelCommand("PROXY_OFF");
+ // An iPhone BLE disconnect must not cancel a LAN-originated C5 command.
+ if(!lanAwaitingCommand)cancelCommand("PROXY_OFF");
 }
 static String hexify(const String &part){
  const char *hex="0123456789ABCDEF";
@@ -333,6 +355,10 @@ static void networkInfo(const String &field){
   return;
  }
  if(field=="FAIL"){pushNetwork("N:FAIL:"+String(lastWiFiFailure));return;}
+ if(field=="KEY"){
+  if(bleAuthenticated && lanSecret.length()==64)pushNetwork("N:KEY:"+lanSecret);
+  return;
+ }
  if(field=="MODE"){pushNetwork(String("N:MODE:")+(wifiDHCP?"DHCP":"STATIC"));return;}
  if(field=="IP"){pushNetwork("N:IP:"+(brainWiFiOnline()?WiFi.localIP().toString():String("-")));return;}
  if(field=="MASK"){pushNetwork("N:MASK:"+(brainWiFiOnline()?WiFi.subnetMask().toString():String("-")));return;}
@@ -633,6 +659,164 @@ static void pollUSB(){
   else{usbLen=0;Serial.println("[S3] USB line too long");}
  }
 }
+// Local control is available only after encrypted-BLE provisioning.
+// The key is persistent in the S3's NVS and never transmitted on LAN.
+static int lanHex(char c){
+ if(c>='0'&&c<='9')return c-'0';
+ if(c>='a'&&c<='f')return c-'a'+10;
+ if(c>='A'&&c<='F')return c-'A'+10;
+ return -1;
+}
+static String lanEncode(const uint8_t *bytes,size_t n){
+ const char*digits="0123456789abcdef";
+ String out;out.reserve(n*2);
+ for(size_t i=0;i<n;++i){out+=digits[bytes[i]>>4];out+=digits[bytes[i]&15];}
+ return out;
+}
+static void initBrainLANSecret(){
+ Preferences prefs;
+ if(!prefs.begin("brainlan",false)){
+  Serial.println("[S3] LAN key NVS unavailable; LAN control disabled");
+  return;
+ }
+ lanSecret=prefs.getString("secret","");
+ if(lanSecret.length()!=64)lanSecret="";
+ for(size_t i=0;i<lanSecret.length();++i){
+  if(lanHex(lanSecret[i])<0){lanSecret="";break;}
+ }
+ if(lanSecret.isEmpty()){
+  uint8_t secretBytes[32];esp_fill_random(secretBytes,sizeof(secretBytes));
+  lanSecret=lanEncode(secretBytes,sizeof(secretBytes));
+  memset(secretBytes,0,sizeof(secretBytes));
+  if(prefs.putString("secret",lanSecret)!=lanSecret.length())
+    lanSecret="";
+ }
+ prefs.end();
+ if(lanSecret.length()!=64)Serial.println("[S3] LAN key could not be persisted");
+}
+static bool verifyBrainLANHMAC(const String &hmac){
+ if(lanSecret.length()!=64||lanNonce.length()!=32||hmac.length()!=64)return false;
+ uint8_t secret[32]={0};
+ for(int i=0;i<32;i++){
+  int a=lanHex(lanSecret[i*2]),b=lanHex(lanSecret[i*2+1]);
+  if(a<0||b<0)return false;
+  secret[i]=(uint8_t)((a<<4)|b);
+ }
+ uint8_t expected[32]={0};
+ const mbedtls_md_info_t *md=mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+ int ok=md?mbedtls_md_hmac(md,secret,sizeof(secret),
+                (const uint8_t*)lanNonce.c_str(),lanNonce.length(),expected):-1;
+ memset(secret,0,sizeof(secret));
+ if(ok!=0)return false;
+ uint8_t differences=0;
+ for(int i=0;i<32;i++){
+  int a=lanHex(hmac[i*2]),b=lanHex(hmac[i*2+1]);
+  if(a<0||b<0){differences=1;continue;}
+  differences|=(uint8_t)(expected[i]^((a<<4)|b));
+ }
+ memset(expected,0,sizeof(expected));
+ return differences==0;
+}
+static void stopBrainLAN(){
+ if(lanAwaitingCommand)cancelCommand("LAN_LINK_LOST");
+ if(lanClient)lanClient.stop();
+ lanAuthenticated=false;lanAwaitingCommand=false;
+ lanNonce="";lanLineLen=0;
+ if(lanListening){brainLAN.end();lanListening=false;}
+ if(brainMDNS){MDNS.end();brainMDNS=false;}
+}
+static void handleBrainLANLine(const String &line){
+ if(!lanClient)return;
+ if(!lanAuthenticated){
+  if(line.startsWith("AUTH ")&&verifyBrainLANHMAC(line.substring(5))){
+   lanAuthenticated=true;lanNonce="";
+   lanClient.println("OK");
+   Serial.println("[S3] LAN authenticated");
+  }else{
+   lanClient.println("DENIED");lanClient.stop();
+  }
+  return;
+ }
+ if(line=="STATUS"){
+  lanClient.println("N:LINK:1");
+  lanClient.println("N:STATE:CONNECTED");
+  lanClient.println("N:IP:"+WiFi.localIP().toString());
+  lanClient.println("N:MODE:"+String(wifiDHCP?"DHCP":"STATIC"));
+  lanClient.println("N:MASK:"+WiFi.subnetMask().toString());
+  lanClient.println("N:GW:"+WiFi.gatewayIP().toString());
+  lanClient.println("N:DNS:"+WiFi.dnsIP().toString());
+  lanClient.println("N:RSSI:"+String(WiFi.RSSI()));
+  return;
+ }
+ if(!line.startsWith("CMD ")){lanClient.println("NACK");return;}
+ String command=line.substring(4);
+ // LAN traffic is unencrypted: network credentials and IP changes are BLE-only.
+ if(command.startsWith("W:")){lanClient.println("NACK:BLE_REQUIRED");return;}
+ if(command.isEmpty()||command.length()>MAX_CMD){
+  lanClient.println("NACK:INVALID_SIZE");return;
+ }
+ if(lanAwaitingCommand||activeSeq||
+    (incomingCommands&&uxQueueMessagesWaiting(incomingCommands))){
+  lanClient.println("NACK:BUSY");return;
+ }
+ if(!faceOnline){lanClient.println("NACK:FACE_OFFLINE");return;}
+ lanAwaitingCommand=true;
+ acceptCommand(command);
+}
+static void pollBrainLAN(){
+ if(!brainWiFiOnline()||lanSecret.length()!=64){
+  if(lanListening||lanClient||brainMDNS)stopBrainLAN();
+  return;
+ }
+ if(!lanListening){
+  brainLAN.begin();
+  lanListening=true;
+  if(MDNS.begin("cutedisplay-brain")){
+   MDNS.addService("cutedisplay","tcp",BRAIN_LAN_PORT);
+   brainMDNS=true;
+  }
+  Serial.printf("[S3] Brain LAN listening %s:%u (Bonjour=%d)\n",
+    WiFi.localIP().toString().c_str(),(unsigned)BRAIN_LAN_PORT,brainMDNS);
+ }
+ WiFiClient incoming=brainLAN.accept();
+ if(incoming){
+  IPAddress theirIP=incoming.remoteIP(),ourIP=WiFi.localIP(),mask=WiFi.subnetMask();
+  bool sameSubnet=mask!=IPAddress(0,0,0,0);
+  for(int j=0;j<4;++j)
+   if((theirIP[j]&mask[j])!=(ourIP[j]&mask[j]))sameSubnet=false;
+  if(!sameSubnet||lanAwaitingCommand){incoming.stop();}
+  else{
+   if(lanClient)lanClient.stop();
+   lanClient=incoming;lanAuthenticated=false;
+   lanLineLen=0;lanLastActivity=millis();
+   uint8_t challenge[16];esp_fill_random(challenge,sizeof(challenge));
+   lanNonce=lanEncode(challenge,sizeof(challenge));
+   lanClient.println("CHALLENGE "+lanNonce);
+  }
+ }
+ if(!lanClient)return;
+ if(!lanClient.connected()||(uint32_t)(millis()-lanLastActivity)>45000UL){
+  if(lanAwaitingCommand)cancelCommand("LAN_CLIENT_LOST");
+  lanClient.stop();lanAuthenticated=false;lanNonce="";
+  lanAwaitingCommand=false;lanLineLen=0;return;
+ }
+ int budget=256;
+ while(budget-->0&&lanClient.available()){
+  int value=lanClient.read();
+  if(value<0)break;
+  const char character=(char)value;lanLastActivity=millis();
+  if(character=='\r')continue;
+  if(character=='\n'){
+   lanLine[lanLineLen]=0;
+   if(lanLineLen)handleBrainLANLine(String(lanLine));
+   lanLineLen=0;
+   if(!lanClient)break;
+  }else if((uint8_t)character<32||lanLineLen>=sizeof(lanLine)-1){
+   lanClient.println("NACK");lanClient.stop();
+   lanLineLen=0;break;
+  }else lanLine[lanLineLen++]=character;
+ }
+}
 void setup(){
  Serial.begin(115200);delay(250);
  Serial.printf("[S3] CuteDisplay Brain FW=%s\n",S3_FW_VERSION);
@@ -716,6 +900,7 @@ void setup(){
  Serial.println("[S3] Encrypted FFF1 writes; relay activates automatically once BLE pairs");
  // Start BLE before WiFi (avoids radio/heap fragmentation during BLE init).
  WiFi.onEvent(onBrainWiFiEvent);
+ initBrainLANSecret();
  restoreBrainWiFi();
  if(wifiEnabled)startBrainWiFi();
  else WiFi.mode(WIFI_OFF);
@@ -724,6 +909,7 @@ void loop(){
  pollFace();
  pollUSB();
  updateBrainWiFi();
+ pollBrainLAN();
  if(connectPending){
   connectPending=false;clientConnected=true;
   bleAuthenticated=false;
@@ -752,6 +938,8 @@ void loop(){
   proxyResult("PROXY_READY");
   networkInfo("LINK");
   networkInfo("STATE");
+  networkInfo("IP");
+  networkInfo("KEY");
   sendRadioStatus(true);
  }
  if(pairingFailed){
