@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" width="1200" height="700" role="img" aria-label="Proposed power-only Option 1: USB C power into LILYGO T-Display-C5, 5V header to Freenove ESP32-S3 5V input, ground to ground. Do not connect until C5 five-volt header power-path current rating is verified. No UART or audio connected.">
+<rect width="1200" height="700" fill="#f8fafc"/>
+<g font-family="Arial,Helvetica,sans-serif">
+<text x="52" y="67" font-size="36" font-weight="700" fill="#17324d">CuteDisplay • Option 1: power-only wiring</text>
+<text x="52" y="105" font-size="20" fill="#536b80">One USB-C cable on LILYGO → S3 power input (PROPOSED TEST • NOT YET APPROVED)</text>
+<rect x="52" y="145" width="1096" height="430" rx="24" fill="#fff" stroke="#bdccda" stroke-width="3"/>
+<rect x="90" y="210" width="380" height="300" rx="18" fill="#fcecf5" stroke="#c96b9f" stroke-width="3"/>
+<rect x="727" y="210" width="380" height="300" rx="18" fill="#e8f7ef" stroke="#5ba782" stroke-width="3"/>
+<text x="120" y="256" font-size="28" font-weight="700" fill="#922b62">LILYGO T-Display-C5</text>
+<text x="756" y="256" font-size="28" font-weight="700" fill="#216c4b">Freenove ESP32-S3</text>
+<rect x="117" y="286" width="320" height="92" rx="12" fill="#303c57"/>
+<text x="140" y="329" font-size="27" fill="#fff">Kitty LCD + battery</text>
+<text x="140" y="354" font-size="17" fill="#cfddec">Current display firmware</text>
+<rect x="750" y="286" width="335" height="92" rx="12" fill="#2e5049"/>
+<text x="779" y="330" font-size="24" fill="#fff">S3 brain (power test)</text>
+<text x="779" y="355" font-size="17" fill="#c4ecdc">All peripherals unplugged</text>
+<text x="122" y="425" font-size="22" font-weight="700" fill="#b73535">5V header (output?)</text>
+<text x="122" y="469" font-size="22" font-weight="700" fill="#3b5263">GND</text>
+<text x="779" y="425" font-size="22" font-weight="700" fill="#b73535">5V / VIN header input</text>
+<text x="779" y="469" font-size="22" font-weight="700" fill="#3b5263">GND</text>
+<circle cx="463" cy="417" r="8" fill="#dd5050"/><circle cx="735" cy="417" r="8" fill="#dd5050"/>
+<circle cx="463" cy="462" r="8" fill="#4e5d6c"/><circle cx="735" cy="462" r="8" fill="#4e5d6c"/>
+<path d="M470 417 H728" fill="none" stroke="#e04949" stroke-width="7"/>
+<path d="M470 462 H728" fill="none" stroke="#4e5d6c" stroke-width="7"/>
+<rect x="514" y="392" width="170" height="29" rx="7" fill="#fff"/>
+<text x="599" y="413" text-anchor="middle" font-size="20" font-weight="700" fill="#bb3333">5V (RED)</text>
+<rect x="527" y="467" width="146" height="26" rx="7" fill="#fff"/>
+<text x="600" y="486" text-anchor="middle" font-size="18" font-weight="700" fill="#334353">GND (BLACK)</text>
+<rect x="12" y="302" width="128" height="56" rx="9" fill="#e8efff" stroke="#7998cd" stroke-width="2"/>
+<text x="76" y="325" text-anchor="middle" font-size="18" font-weight="700" fill="#224b83">USB-C 5V</text>
+<text x="76" y="346" text-anchor="middle" font-size="14" fill="#224b83">ONLY HERE</text>
+<path d="M141 330 H162" stroke="#4775a8" stroke-width="5"/><path d="M158 323 L170 330 L158 337" fill="none" stroke="#4775a8" stroke-width="4"/>
+<rect x="52" y="598" width="1096" height="80" rx="14" fill="#fff3d8" stroke="#d6a849" stroke-width="2"/>
+<text x="77" y="626" font-size="20" font-weight="700" fill="#8a5219">STOP BEFORE CONNECTING: C5 5V header current capacity / power-path rating is NOT verified.</text>
+<text x="77" y="654" font-size="18" fill="#705a39">Measure 5V, confirm rated current and backfeed safety. Then start with S3 ONLY; leave UART, mic and amplifier disconnected.</text>
+</g></svg>
