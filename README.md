@@ -32,32 +32,33 @@ Development is incremental. The existing LILYGO display and iPhone controls rema
 
 ## Planned dual-board architecture
 
-```mermaid
-flowchart TD
-  Phone["iPhone app · future BLE pairing"] <-->|BLE| Brain["Freenove ESP32-S3-CAM · brain"]
-  Brain <-->|Wi-Fi / HTTPS| Server["External AI backend · OpenAI or Ollama, STT, TTS, vision"]
-  Brain <-->|UART · planned| Face["LILYGO T-Display-C5 · LCD, mascots, text, battery"]
-  Mic["INMP441 microphone"] --> Brain
-  Brain --> Amp["MAX98357A + 8Ω speaker"]
-  Camera["Onboard S3 camera"] --> Brain
-```
+![CuteDisplay: iPhone BLE and external AI server connect to Freenove ESP32-S3 brain; UART to LILYGO C5 display](docs/architecture/cutedisplay-dual-board.svg)
 
-**Implementation status:** The drawing describes the **target architecture**, not an already-connected S3 implementation. The LILYGO still runs its existing BLE and Wi-Fi services until the new S3-to-LILYGO UART bridge and app-side BLE migration are implemented and tested. The microphone and speaker are **not** connected to the LILYGO in the current firmware.
+**Camera integration is deferred.** The immediate target is BLE and UART between the S3 and LILYGO, followed by I²S audio and an independent OpenAI/Ollama voice backend. The LILYGO remains responsible for LCD messages, animations and battery monitoring.
 
-### Historical LILYGO audio wiring (superseded — do not assemble as the current build)
+## New ELEGOO 830 breadboard design — ESP32-S3 brain + LILYGO face
 
-![Legacy LILYGO C5 I²S microphone and amplifier wiring — historical reference only](docs/hardware/cutedisplay-c5-audio-wiring.svg)
+![Proposed CuteDisplay ELEGOO 830 breadboard with ESP32-S3 brain, LILYGO C5 face, microphone, amplifier and speaker; GPIO assignments pending](docs/hardware/cutedisplay-s3-c5-breadboard.svg)
 
-This wiring illustration documents the **retired C5 loopback prototype** and is kept for development history. **Do not wire audio to the LILYGO under the new plan.** The S3 audio pinout must be designed independently around camera and UART GPIO reservations. [Historical C5 wiring notes](docs/hardware/lilygo-c5-audio-breadboard.md).
+The new diagram replaces the former LILYGO microphone/speaker drawing. **INMP441 and MAX98357A now belong to the ESP32-S3**, and the S3 will communicate with the LILYGO via **crossed UART TX/RX plus shared GND**. Both boards can initially use separate USB-C power. **Do not bridge their positive power rails.** The S3 I²S and UART GPIO numbers are intentionally **not assigned yet** until the Freenove breakout pinout and camera-reserved GPIOs are verified. This is a connection plan, **not a verified hole-by-hole wiring diagram**.
+
+See the [new S3+C5 breadboard wiring and safety plan](docs/hardware/s3-c5-breadboard-plan.md). The [old C5 I²S wiring diagram](docs/hardware/cutedisplay-c5-audio-wiring.svg) and [historical assembly guide](docs/hardware/lilygo-c5-audio-breadboard.md) remain archived for reference only and must **not** be used for the new build.
+
+### Current code status
+
+- **LILYGO firmware:** `firmware/CuteDisplay/lcd.ino` — existing working face, animations, messages, battery and legacy BLE/Wi-Fi; no audio loopback.
+- **ESP32-S3 development firmware:** `firmware/CuteDisplayBrain/CuteDisplayBrain.ino` — independent BLE diagnostic endpoint `CuteDisplay-Brain-DEV` (`FFF0`/`FFF1`). **No UART bridging, I²S audio, camera or AI connectivity yet.**
+- **iOS app:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift` — **still pairs with LILYGO**, until the S3 bridge and battery telemetry are implemented and validated.
+- **External AI backend:** OpenAI or self-hosted Ollama/Open WebUI with STT/TTS remains independent and not yet integrated.
 
 ## Repository synchronization status — 2026-10-26
 
-**Current hardware target:** LILYGO T-Display-C5 **only**.
+**Current hardware targets:** LILYGO T-Display-C5 existing controller **and** Freenove ESP32-S3-CAM brain development board. iPhone-to-S3 migration is planned, not complete.
 
 **Feature simplification (2026-10-26):** Drinks Mode has been removed completely from the **current firmware and iPhone application source**. The firmware now displays messages and animated characters only; drink-list drawing, pagination, staged upload commands (`D:RESET`, `D:ADD`, `D:SHOW`), and drink persistence were removed. The iPhone app no longer has the Drinks screen, drink preview, drink synchronization, drink data in saved profiles, or drink-upload logic in BluetoothManager. Old saved profiles continue to decode without their obsolete extra fields. The existing BLE control messages for mascots, themes, messages, battery, and Wi-Fi remain supported.
  The [former C5 audio breadboard wiring guide](docs/hardware/lilygo-c5-audio-breadboard.md) is now a **superseded historical record**, not the current wiring plan. Audio hardware is being reassigned to the ESP32-S3 brain; the new pinout is pending hardware verification.
 
-**Current firmware:** `firmware/CuteDisplay/lcd.ino` (message-only display and animations; **audio loopback removed**). **Current iOS app sources:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift`. This synchronization is a source/documentation update, **not** an independently compiled/flashed hardware release. The new S3 audio and UART hardware has not yet been wired, compiled or bench-tested.
+**Current LILYGO firmware:** `firmware/CuteDisplay/lcd.ino` (message-only display and animations; **audio loopback removed**). **S3 diagnostic firmware:** `firmware/CuteDisplayBrain/CuteDisplayBrain.ino` (BLE discovery endpoint, not a functioning bridge). **Current iOS app sources:** `ios/CuteDisplay/ContentView.swift` and `ios/CuteDisplay/BluetoothManager.swift`. This synchronization is a source/documentation update, **not** an independently compiled/flashed hardware release. The new S3 audio and UART hardware has not yet been wired, compiled or bench-tested.
 
 **Planned next steps:** (1) S3 BLE endpoint, UART communication with the C5 and eventual iPhone re-pairing; (2) S3 INMP441 + MAX98357A audio test; (3) backend STT, Ollama/OpenAI and TTS; (4) S3 onboard camera/vision; (5) benchmark whether the Waveshare 1.9-inch screen and mascot rendering can eventually move onto the S3. These S3 capabilities are not yet implemented.
 
@@ -112,7 +113,10 @@ Preserve the app's bundle identifier and signing configuration to retain its sav
 firmware/CuteDisplay/lcd.ino       Current ESP32-C5 message/mascot controller; no local audio, Wi-Fi fallback retained
 ios/CuteDisplay/ContentView.swift  SwiftUI screen
 ios/CuteDisplay/BluetoothManager.swift  BLE communications
-docs/hardware/lilygo-c5-audio-breadboard.md Historical C5 audio experiment — superseded
+docs/hardware/s3-c5-breadboard-plan.md   Current S3+C5 wiring concept (GPIO assignment pending)
+docs/hardware/cutedisplay-s3-c5-breadboard.svg New breadboard diagram displayed above
+firmware/CuteDisplayBrain/CuteDisplayBrain.ino S3 BLE diagnostic bootstrap
+ docs/hardware/lilygo-c5-audio-breadboard.md Historical C5 audio experiment — superseded
 archive/                           Earlier downloadable versions
 ```
 
@@ -133,7 +137,7 @@ archive/                           Earlier downloadable versions
 
 ## BLE protocol
 
-Uses `FFF0` control service and `FFF1` read/write characteristic; battery service `180F` with characteristic `2A19`. Additional power telemetry is exposed by `FFF3`/`FFF4` (read/notify) as `SOC,volts,amps,tempC,healthPercent,minutesToEmpty,minutesToFull`. Positive amps = charging, negative amps = discharging. Example commands include `D:RESET` / `D:ADD:NAME,COUNT` / `D:SHOW`, `C:<id>`, `T:<id>`, `B:<percent>`, and `S:0` / `S:1` for surprise animations.
+The **current LILYGO firmware** uses `FFF0` control service and `FFF1` read/write characteristic; battery service `180F` with characteristic `2A19`. Power telemetry is exposed by `FFF3`/`FFF4` (read/notify) as `SOC,volts,amps,tempC,healthPercent,minutesToEmpty,minutesToFull`. Positive amps = charging, negative amps = discharging. Commands include `C:<id>`, `T:<id>`, `B:<percent>`, and `S:0` / `S:1` for surprise animations. Retired drinks commands are no longer supported. The **S3 diagnostic sketch** only advertises `FFF0`/`FFF1` and does not yet implement compatible battery telemetry or forwarding.
 
 ## Earlier versions
 
