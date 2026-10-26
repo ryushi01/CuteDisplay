@@ -1,5 +1,12 @@
 # CuteDisplay — Project Handoff / Resume Here
 
+## Current verified milestone — 27 October 2026: BLE/messages OK; S3 Wi-Fi onboarding investigation
+
+The user confirmed **iPhone Bluetooth pairing and updating a message now work**, plus the dual-board UART link works. Preserve the working **S3 Bluetooth compatibility profile** `setAuthenticationMode(true,false,false)` with encrypted FFF1/FFF6, existing iPhone pacing, tested 921600 baud S3↔C5 UART, and C5 firmware/popup. No renewed BLE or UART troubleshooting unless new evidence requires it.
+
+User could not connect the **S3 to Wi-Fi through the iPhone app**. Existing Wi-Fi `W:C` handler ACKed attempt immediately, leaving ambiguity whether credentials were accepted or network association actually succeeded. New S3+Swift source adds Wi-Fi disconnect-reason telemetry, connecting/retrying/connected state in the app, explicit credential validation, DHCP reset after static IP, and USB log of connection failures without exposing secrets. **Cause not yet known and successful Wi-Fi not yet verified.** New S3 banner `Phase4-WIFI-DIAG1-20261027`; iOS files BluetoothManager.swift and ContentView.swift updated; **C5 unchanged**. First test on a known 2.4 GHz network; request resulting numeric failure reason and app-visible detail if it fails. See [Wi-Fi onboarding guide](hardware/brain-wifi-onboarding.md).
+
+
 ## Current BLE-only compatibility test — 2026-10-26 (UNTESTED)
 
 **Most recent user clarification:** S3 ↔ LILYGO UART **WORKS**. Do **not** change UART speed, wiring, bidirectional PROBE/ACK, C5 display firmware or its persistent popup in response to this BLE issue. Discard all previously staged/uncommitted UART rollback ideas. Focus exclusively on iPhone ↔ S3 BLE.

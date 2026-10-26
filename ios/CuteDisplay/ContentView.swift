@@ -243,16 +243,41 @@ struct ContentView: View {
     }
 
     // MARK: - Wi-Fi setup and telemetry
+    private var brainWiFiSummary: String {
+        if !bluetooth.isConnected { return "Connect Bluetooth to check Wi-Fi" }
+        if bluetooth.wifiConnected { return "Brain Wi-Fi connected" }
+        switch bluetooth.wifiConnectionState {
+        case "CONNECTING": return "Brain connecting to Wi-Fi..."
+        case "RETRYING": return "Brain retrying Wi-Fi..."
+        case "CONFIGURING": return "Sending Wi-Fi settings..."
+        case "OFF": return "Brain Wi-Fi off"
+        default: return "Brain Wi-Fi disconnected"
+        }
+    }
+
     private var wifiSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle("CUTE DISPLAY WI-FI")
             HStack(spacing: 8) {
                 Image(systemName: bluetooth.wifiConnected ? "wifi" : "wifi.slash")
                     .foregroundStyle(bluetooth.wifiConnected ? .green : .orange)
-                Text(!bluetooth.isConnected ? "Connect Bluetooth to check Wi-Fi" :
-                     bluetooth.wifiConnected ? "Wi-Fi connected" : "Wi-Fi disconnected")
+                Text(brainWiFiSummary)
                     .font(.subheadline.bold())
                 Spacer()
+            }
+            if bluetooth.isConnected && !bluetooth.wifiConnectionError.isEmpty {
+                Label(bluetooth.wifiConnectionError, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            HStack {
+                Text("Brain Wi-Fi state: \(bluetooth.wifiConnectionState)")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                if bluetooth.wifiConnected {
+                    Text("IP: \(bluetooth.wifiIP)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             }
             TextField("Wi-Fi network (SSID)", text: $wifiName)
                 .textInputAutocapitalization(.never)
@@ -303,9 +328,9 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!bluetooth.isConnected)
-            Text("The device checks its default gateway automatically. Press the left button on CuteDisplay for full network details.")
+            Text("The ESP32-S3 connects to 2.4 GHz Wi-Fi only. The LILYGO's own Wi-Fi is disabled; its left-button long press toggles Brain Wi-Fi.")
                 .font(.caption2).foregroundStyle(.secondary)
-            Text("Configure while connected by Bluetooth. Credentials remain on the device, and it reconnects after a restart. Status refreshes with battery telemetry (about every 2 seconds).")
+            Text("Configure over Brain Bluetooth. A successful command acknowledgment means the connection attempt started; watch the Wi-Fi state and any failure reason above for the actual result.")
                 .font(.caption2).foregroundStyle(.secondary)
             Text("Personal Hotspot works when the iPhone exposes a compatible Wi-Fi network. For security, use a trusted network; Wi-Fi setup over BLE is not an end-to-end encrypted provisioning protocol.")
                 .font(.caption2).foregroundStyle(.secondary)

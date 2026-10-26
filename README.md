@@ -2,6 +2,10 @@
 
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
+## Current Phase 4 Wi-Fi telemetry (27 October 2026)
+
+**User verified: iPhone BLE pairing/messages + S3/C5 UART are functional.** Do not change those working paths. Latest S3 firmware and iPhone sources add Wi-Fi association-state updates, router disconnect reason reporting, credential validation and DHCP reset, so the iPhone can report why **S3 Wi-Fi** did not connect instead of assuming that `ACK:WIFI` equals success. C5 local radios remain disabled and C5 firmware is unchanged. ESP32-S3 joins **2.4 GHz Wi-Fi only**. [Wi-Fi first-test instructions](docs/hardware/brain-wifi-onboarding.md). Source build/hardware testing pending.
+
 ## Troubleshooting update — Brain BLE pairing status 1288 (`0x0508`)
 
 The user's field test returned `ERR:NOT_READY` with NimBLE pairing error `1288` (peer **unspecified SMP pairing failure**) and showed at least one older S3 firmware startup banner. The next S3 + iOS sources now log exact version and security status, offer USB-only NimBLE `ble bonds clear`, and delay app commands until the Brain explicitly reports `PROXY_READY`. The C5 firmware/wiring is unchanged. **Source only; not yet tested.** See [controlled pairing recovery instructions](docs/hardware/ble-pairing-1288.md).

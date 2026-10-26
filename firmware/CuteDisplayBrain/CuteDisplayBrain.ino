@@ -26,7 +26,7 @@
 #include "CuteLink.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
-static constexpr char S3_FW_VERSION[]="Phase4-BLE-COMPAT-20261026";
+static constexpr char S3_FW_VERSION[]="Phase4-WIFI-DIAG1-20261027";
 static constexpr size_t MAX_CMD=96;
 // Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
 // UART frame payload (one-digit chunk index, total, delimiters).
@@ -42,6 +42,10 @@ static bool wifiEnabled=false,wifiDHCP=true,wifiConnecting=false;
 static String wifiSSID,wifiPassword,staticIP,staticMask,staticGateway,staticDNS;
 static uint32_t wifiStarted=0,nextWiFiAttempt=0,lastWiFiPoll=0,lastRadioSent=0;
 static bool priorWifiConnected=false;
+static volatile bool wifiDisconnectPending=false;
+static volatile uint8_t wifiDisconnectReason=0;
+static uint8_t lastWiFiFailure=0;
+static String wifiCommandReply="ACK:WIFI";
 static IPAddress configuredIP,configuredMask,configuredGateway,configuredDNS;
 
 static volatile bool connectPending=false,disconnectPending=false;
@@ -180,7 +184,9 @@ static void reportPower(const String &v){
  }
 }
 static void pushNetwork(const String &v){
- if(!networkQueue||v.length()>96)return;
+ // Wi-Fi events can occur before a paired phone exists. Retain only the
+ // last failure locally; do not overflow a queue no phone is draining.
+ if(!networkQueue||!clientConnected||!bleAuthenticated||v.length()>96)return;
  char item[97]={};
  memcpy(item,v.c_str(),v.length());
  if(xQueueSend(networkQueue,item,0)!=pdTRUE)
@@ -244,6 +250,19 @@ static void processFace(const CuteLink::Frame &f){
 static bool brainWiFiOnline(){
  return wifiEnabled && WiFi.status()==WL_CONNECTED;
 }
+// Arduino Wi-Fi callbacks execute on a separate task: only record the
+// numeric disconnect reason here, then process/log/notify from loop().
+static void onBrainWiFiEvent(WiFiEvent_t event,WiFiEventInfo_t info){
+ if(event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED){
+  uint8_t reason=info.wifi_sta_disconnected.reason;
+  // Local intentional disconnect during W:C/reconfiguration is not an AP
+  // authentication failure.
+  if(reason!=8){
+   wifiDisconnectReason=reason;
+   wifiDisconnectPending=true;
+  }
+ }
+}
 static void persistBrainWiFi(){
  Preferences p;
  if(!p.begin("brainwifi",false))return;
@@ -272,24 +291,48 @@ static void startBrainWiFi(){
  if(!wifiEnabled || wifiSSID.isEmpty())return;
  WiFi.mode(WIFI_STA);
  WiFi.setAutoReconnect(false);
+ // Allow intentionally open test networks as the iPhone UI permits a blank
+ // password; otherwise retain a WPA2-or-better network minimum.
+ WiFi.setMinSecurity(wifiPassword.isEmpty()?WIFI_AUTH_OPEN:WIFI_AUTH_WPA2_PSK);
  if(!wifiDHCP){
   IPAddress ip,mask,gw,dns;
   if(ip.fromString(staticIP)&&mask.fromString(staticMask)&&
      gw.fromString(staticGateway)&&dns.fromString(staticDNS))
    WiFi.config(ip,gw,mask,dns);
+ }else{
+  // Returning from a previous static-IP configuration must explicitly
+  // restore DHCP. WiFi.mode(WIFI_OFF) alone may retain static IP state.
+  WiFi.config(INADDR_NONE,INADDR_NONE,INADDR_NONE);
  }
- WiFi.begin(wifiSSID.c_str(),wifiPassword.c_str());
+ wifiDisconnectPending=false;
  wifiConnecting=true;wifiStarted=millis();
- Serial.println("[S3] Brain WiFi connection started");
+ // Never print Wi-Fi passwords. The SSID is also omitted from USB logs.
+ Serial.printf("[S3] Brain WiFi joining: SSID_bytes=%u DHCP=%d (2.4GHz only)\n",
+   (unsigned)wifiSSID.length(),wifiDHCP?1:0);
+ pushNetwork("N:STATE:CONNECTING");
+ wl_status_t started=WiFi.begin(wifiSSID.c_str(),wifiPassword.c_str());
+ if(started==WL_CONNECT_FAILED){
+  wifiConnecting=false;
+  nextWiFiAttempt=millis()+20000UL;
+  pushNetwork("N:FAIL:BEGIN_FAIL");
+  pushNetwork("N:STATE:RETRYING");
+  Serial.println("[S3] Brain WiFi station refused begin(); retry scheduled");
+ }
 }
 static void stopBrainWiFi(){
  WiFi.disconnect(true,false);
  WiFi.mode(WIFI_OFF);
  wifiConnecting=false;nextWiFiAttempt=0;
+ wifiDisconnectPending=false;
 }
 static void networkInfo(const String &field){
  if(!clientConnected || !bleAuthenticated)return;
  if(field=="LINK"){pushNetwork(String("N:LINK:")+(brainWiFiOnline()?"1":"0"));return;}
+ if(field=="STATE"){
+  pushNetwork(String("N:STATE:")+(brainWiFiOnline()?"CONNECTED":wifiConnecting?"CONNECTING":wifiEnabled?"DISCONNECTED":"OFF"));
+  return;
+ }
+ if(field=="FAIL"){pushNetwork("N:FAIL:"+String(lastWiFiFailure));return;}
  if(field=="MODE"){pushNetwork(String("N:MODE:")+(wifiDHCP?"DHCP":"STATIC"));return;}
  if(field=="IP"){pushNetwork("N:IP:"+(brainWiFiOnline()?WiFi.localIP().toString():String("-")));return;}
  if(field=="MASK"){pushNetwork("N:MASK:"+(brainWiFiOnline()?WiFi.subnetMask().toString():String("-")));return;}
@@ -313,22 +356,36 @@ static void networkInfo(const String &field){
 // Safe firmware command filter: WiFi is handled on S3 and never reaches C5.
 static bool controlBrainWiFi(const String &cmd){
  if(!cmd.startsWith("W:"))return false;
+ wifiCommandReply="ACK:WIFI";
  if(cmd.startsWith("W:S:")){
   String v=cmd.substring(4);
   if(v.length()>0&&v.length()<=32)wifiSSID=v;
+  else wifiCommandReply="ERR:BAD_SSID";
  }else if(cmd.startsWith("W:P:")){
   String v=cmd.substring(4);
-  if(v.length()<=63)wifiPassword=v;
+  if(v.length()<=63&&(v.isEmpty()||v.length()>=8))wifiPassword=v;
+  else wifiCommandReply="ERR:BAD_PASSWORD";
  }else if(cmd=="W:C"||cmd=="W:ON"){
-  wifiEnabled=!wifiSSID.isEmpty();
+  if(wifiSSID.isEmpty()){
+   wifiCommandReply="ERR:NO_SSID";
+   return true;
+  }
+  wifiEnabled=true;
+  lastWiFiFailure=0;
+  pushNetwork("N:FAIL:0");
   persistBrainWiFi();
   stopBrainWiFi();
-  if(wifiEnabled)startBrainWiFi();
+  startBrainWiFi();
  }else if(cmd=="W:OFF"){
   wifiEnabled=false;persistBrainWiFi();stopBrainWiFi();
+  pushNetwork("N:STATE:OFF");
+  pushNetwork("N:LINK:0");
  }else if(cmd=="W:FORGET"){
   wifiEnabled=false;stopBrainWiFi();
   wifiSSID="";wifiPassword="";persistBrainWiFi();
+  lastWiFiFailure=0;
+  pushNetwork("N:STATE:OFF");
+  pushNetwork("N:LINK:0");
  }else if(cmd=="W:DHCP"){
   wifiDHCP=true;persistBrainWiFi();
   if(wifiEnabled){stopBrainWiFi();startBrainWiFi();}
@@ -348,12 +405,16 @@ static bool controlBrainWiFi(const String &cmd){
   }
  }else if(cmd=="W:INFO"){
   networkInfo("LINK");
+  networkInfo("STATE");
+  networkInfo("FAIL");
  }else if(cmd.startsWith("W:GET:")){
   // No S3 LAN fallback server/token exists yet. Never reuse C5 LAN token.
   networkInfo(cmd.substring(6));
  }else if(cmd.startsWith("W:PING:")){
   // Ping support deferred: state is emitted as NO_WIFI or UNSUPPORTED.
   pushNetwork(brainWiFiOnline()?"N:PING:INVALID":"N:PING:NO_WIFI");
+ }else{
+  wifiCommandReply="ERR:WIFI_UNKNOWN";
  }
  return true;
 }
@@ -381,13 +442,26 @@ static void updateBrainWiFi(){
  uint32_t now=millis();
  if((uint32_t)(now-lastWiFiPoll)<500UL)return;
  lastWiFiPoll=now;
+ if(wifiDisconnectPending){
+  uint8_t reason=wifiDisconnectReason;
+  wifiDisconnectPending=false;
+  if(wifiEnabled && !brainWiFiOnline()){
+   lastWiFiFailure=reason;
+   Serial.printf("[S3] WiFi station disconnected: reason=%u\n",(unsigned)reason);
+   pushNetwork("N:FAIL:"+String(reason));
+   pushNetwork("N:STATE:DISCONNECTED");
+  }
+ }
  bool online=brainWiFiOnline();
  if(online){wifiConnecting=false;nextWiFiAttempt=0;}
  if(wifiConnecting && !online && (uint32_t)(now-wifiStarted)>12000UL){
   wifiConnecting=false;
   WiFi.disconnect(false,false);
   nextWiFiAttempt=now+20000UL;
-  Serial.println("[S3] Brain WiFi connect timed out; next retry later");
+  Serial.printf("[S3] Brain WiFi timed out: status=%d reason=%u; retry in 20s\n",
+     (int)WiFi.status(),(unsigned)lastWiFiFailure);
+  pushNetwork("N:STATE:RETRYING");
+  if(!lastWiFiFailure)pushNetwork("N:FAIL:TIMEOUT");
  }
  if(wifiEnabled && !online && !wifiConnecting &&
      nextWiFiAttempt && (int32_t)(now-nextWiFiAttempt)>=0){
@@ -397,6 +471,14 @@ static void updateBrainWiFi(){
   priorWifiConnected=online;
   Serial.printf("[S3] Brain WiFi %s\n",online?"CONNECTED":"DISCONNECTED");
   networkInfo("LINK");
+  networkInfo("STATE");
+  if(online){
+   lastWiFiFailure=0;
+   pushNetwork("N:FAIL:0");
+   networkInfo("IP");
+   Serial.printf("[S3] Brain WiFi IP=%s RSSI=%d dBm\n",
+       WiFi.localIP().toString().c_str(),WiFi.RSSI());
+  }
  }
 }
 static void sendRadioStatus(bool immediate){
@@ -467,7 +549,7 @@ static void pollBLECommands(){
  if(!faceOnline){proxyResult("ERR:FACE_OFFLINE");return;}
  String incoming(item);
  if(controlBrainWiFi(incoming)){
-  proxyResult("ACK:WIFI");
+  proxyResult(wifiCommandReply);
   return;
  }
  acceptCommand(incoming);
@@ -633,6 +715,7 @@ void setup(){
  BLEDevice::startAdvertising();
  Serial.println("[S3] Encrypted FFF1 writes; relay activates automatically once BLE pairs");
  // Start BLE before WiFi (avoids radio/heap fragmentation during BLE init).
+ WiFi.onEvent(onBrainWiFiEvent);
  restoreBrainWiFi();
  if(wifiEnabled)startBrainWiFi();
  else WiFi.mode(WIFI_OFF);
@@ -668,6 +751,7 @@ void loop(){
   Serial.println("[S3] BLE encryption/bonding succeeded; app relay READY");
   proxyResult("PROXY_READY");
   networkInfo("LINK");
+  networkInfo("STATE");
   sendRadioStatus(true);
  }
  if(pairingFailed){

@@ -28,6 +28,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var batteryLevel: Int? = nil
     @Published var batteryVoltage: Double?
     @Published var wifiConnected = false
+    @Published var wifiConnectionState = "OFF"
+    @Published var wifiConnectionError = ""
     @Published var networkDetailsAvailable = false
     @Published var wifiIP = "—"
     @Published var wifiMask = "—"
@@ -510,7 +512,10 @@ final class BluetoothManager: NSObject, ObservableObject {
             status = "Wi-Fi SSID must be 1–32 bytes; password 8–63 bytes (or empty)"
             return
         }
+        wifiConnectionState = "CONFIGURING"
+        wifiConnectionError = ""
         enqueue(["W:S:\(name)", "W:P:\(password)", "W:C"])
+        status = "Sending Wi-Fi configuration to the Brain..."
     }
 
     func configureIP(dhcp: Bool, ip: String, mask: String, gateway: String, dns: String) {
@@ -533,7 +538,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     func refreshNetworkDetails() {
         // Request one field per acknowledged BLE write instead of relying on
         // a burst of notifications from the ESP32.
-        enqueue(["W:GET:KEY","W:GET:LINK","W:GET:MODE","W:GET:IP","W:GET:MASK",
+        enqueue(["W:GET:LINK","W:GET:STATE","W:GET:FAIL",
+                 "W:GET:MODE","W:GET:IP","W:GET:MASK",
                  "W:GET:GW","W:GET:DNS","W:GET:RSSI","W:GET:SSID"])
     }
     func ping(address: String) {
@@ -886,7 +892,43 @@ extension BluetoothManager: CBPeripheralDelegate {
             guard fields.count >= 2 else { return }
             switch fields[1] {
             case "LINK":
-                if fields.count > 2 { wifiConnected = fields[2] == "1" }
+                if fields.count > 2 {
+                    wifiConnected = fields[2] == "1"
+                    if wifiConnected {
+                        wifiConnectionState = "CONNECTED"
+                        wifiConnectionError = ""
+                    }
+                }
+            case "STATE":
+                if fields.count > 2 {
+                    wifiConnectionState = fields[2]
+                    if fields[2] == "CONNECTED" {
+                        wifiConnected = true
+                        wifiConnectionError = ""
+                    } else if fields[2] == "OFF" {
+                        wifiConnected = false
+                    }
+                }
+            case "FAIL":
+                if fields.count > 2 {
+                    let reason = fields[2]
+                    switch reason {
+                    case "0":
+                        wifiConnectionError = ""
+                    case "201":
+                        wifiConnectionError = "Network not found. Check SSID and use 2.4 GHz Wi-Fi."
+                    case "202":
+                        wifiConnectionError = "Router rejected authentication. Check Wi-Fi password and security."
+                    case "15", "204":
+                        wifiConnectionError = "Wi-Fi handshake failed. Check password and WPA settings."
+                    case "TIMEOUT":
+                        wifiConnectionError = "Connection timed out. Check Wi-Fi signal and router settings."
+                    case "BEGIN_FAIL":
+                        wifiConnectionError = "Brain Wi-Fi could not start. Check the S3 USB Serial Monitor."
+                    default:
+                        wifiConnectionError = "Wi-Fi disconnect reason: \(reason)"
+                    }
+                }
             case "MODE":
                 if fields.count > 2 { wifiDHCP = fields[2] == "DHCP" }
             case "IP":
