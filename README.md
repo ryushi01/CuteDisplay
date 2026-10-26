@@ -2,9 +2,9 @@
 
 > **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
 
-## Phase 1 UART diagnostics — 2026-10-26 (standalone loopbacks tested)
+## Phase 1 UART diagnostics — 2026-10-26 (S3 ↔ C5 end-to-end verified)
 
-`main` now includes diagnostic UART source with framed HELLO/ACK, a **S3 USB Serial Monitor console**, C5 status/battery queries and limited ASCII/mood/mascot test commands. The original S3 and C5 UART-capable sketches booted on their boards; S3 GPIO47↔21 and C5 GPIO6↔1 have now **passed standalone loopback tests**. The new C5 GPIO6/GPIO1 integrated build and the two-board handshake **remain untested**. Use **two separate USB supplies**, common GND and crossed TX/RX; keep the 5V-positive jumper removed. The phone still connects directly to C5; S3 BLE is not a proxy. Both firmware folders now contain the required `CuteLink.h`. See [exact wiring/flashing/console test](docs/hardware/uart-bringup.md).
+`main` now includes diagnostic UART source with framed HELLO/ACK, a **S3 USB Serial Monitor console**, C5 status/battery queries and limited ASCII/mood/mascot test commands. The original S3 and C5 UART-capable sketches booted on their boards; S3 GPIO47↔21 and C5 GPIO6↔1 have now **passed standalone loopback tests**. The user has now flashed the GPIO6/GPIO1 integrated C5 firmware, observed real UART HELLO and periodic STATUS frames on the S3 USB console, and successfully executed `msg Hello from Brain`: the LILYGO screen displayed the message. **S3 USB → UART → C5 display is working on the prototype**. This does not validate reconnect/retries, Japanese UART transport, all app features through S3 or hardware power ratings. Use **two separate USB supplies**, common GND and crossed TX/RX; keep the 5V-positive jumper removed. The phone still connects directly to C5; S3 BLE is not a proxy. Both firmware folders now contain the required `CuteLink.h`. See [exact wiring/flashing/console test](docs/hardware/uart-bringup.md).
 
 ## Previous proposed single USB-C power experiment — Option 1
 

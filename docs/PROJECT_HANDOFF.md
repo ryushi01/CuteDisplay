@@ -13,11 +13,11 @@ Tell the assistant:
 
 Read the actual repository before making code changes because this document can become stale.
 
-## Latest status — 2026-10-26 loopbacks passed; UART pin mapping updated; cross-board pending
+## Latest status — 2026-10-26 two-board UART HELLO, status and display command verified
 
 User flashed the previous S3 BLE diagnostic and confirmed its serial boot/advertising logs; user reports flashing current C5. S3 USB → C5 power booted both, but C5 USB → S3 lit power while S3 failed to boot. This is not a current-path safety rating, so user chose **separate USB supplies** for development and no 5V positive jumper. Do not power two USB supplies into common 5V rails.
 
-**Current phase-1 source:** both Arduino firmware folders contain `CuteLink.h`; S3 UART1 GPIO47 TX/GPIO21 RX and USB console (help/status/ping/battery/msg/mood/mascot); C5 now uses UART1 **GPIO6 TX/GPIO1 RX** (previous GPIO4 TX/GPIO5 RX retired), HELLO/ACK and diagnostics. S3 original phase-1 sketch and original C5 phase-1 sketch were flashed and booted. **Independent UART loopback verified on both boards:** S3 physical jumper GPIO47↔21 echoed its own HELLO/ACK; C5 physical jumper GPIO6↔1 repeatedly showed matching TEST_18 through TEST_22 TX/RX. Earlier TX-only behavior was traced to bad contact at the C5 header and user had to press connector firmly. **Full new C5 firmware pin change not flashed yet; S3↔C5 exchange is NOT confirmed.** iPhone still connects straight to C5; S3 BLE service remains diagnostic only. Use [UART bring-up guide](hardware/uart-bringup.md). No robust retries, Japanese glyph UART, C5 battery BLE proxy, iPhone migration or AI/audio/camera.
+**Current phase-1 source:** both Arduino firmware folders contain `CuteLink.h`; S3 UART1 GPIO47 TX/GPIO21 RX and USB console (help/status/ping/battery/msg/mood/mascot); C5 now uses UART1 **GPIO6 TX/GPIO1 RX** (previous GPIO4 TX/GPIO5 RX retired), HELLO/ACK and diagnostics. S3 original phase-1 sketch and original C5 phase-1 sketch were flashed and booted. **Independent UART loopback verified on both boards:** S3 physical jumper GPIO47↔21 echoed its own HELLO/ACK; C5 physical jumper GPIO6↔1 repeatedly showed matching TEST_18 through TEST_22 TX/RX. Earlier TX-only behavior was traced to bad contact at the C5 header and user had to press connector firmly. **VERIFIED END-TO-END on physical S3/C5 (2026-10-26):** User flashed pin-updated integrated C5 firmware, connected S3 GPIO47 TX → C5 GPIO1 RX; C5 GPIO6 TX → S3 GPIO21 RX; GND → GND, with separate USB power and no 5V jumper. S3 USB serial displayed real `[C5] HELLO`, `[C5] seq=51 LOG C5 connected` and periodic `[C5] seq=48 STATUS lcd=1;ble=1;wifi=1;soc=100` (also seq=49,50,52). From S3 USB Serial Monitor user sent `msg Hello from Brain` and saw that exact text on the LILYGO screen. This confirms bidirectional UART and text-command handling; not yet proof of reliability under resets or Wi-Fi/AI workloads. **Do not rewire or reassign the known-working GPIOs without reason.** iPhone still connects straight to C5; S3 BLE service remains diagnostic only. Use [UART bring-up guide](hardware/uart-bringup.md). No robust retries, Japanese glyph UART, C5 battery BLE proxy, iPhone migration or AI/audio/camera.
 
 ## Product goal
 
@@ -71,7 +71,7 @@ These choices avoid documented S3 camera GPIO4–13,15–18, SD GPIO38–40 and 
 
 LILYGO GPIO6 (TX) and GPIO1 (RX) are now selected after an actual local UART loopback pass; the original GPIO4/5 test produced TX-only output with poor jumper contact. Both S3 GPIO47/21 and C5 GPIO6/1 have passed standalone loopbacks, but the combined link still requires testing. Existing C5 LCD GPIO26/7/9/8/23/25, battery I²C 2/3/10, and GPIO0 user button must remain untouched.
 
-**Basic phase-1 UART diagnostics are implemented in source; the two UART controllers were validated independently by loopback, not yet as a cross-board link.** Versioned bounded frames, CRC8, sequence ACK, HELLO, status/battery, ASCII console tests exist. Reliable retries, Japanese glyph chunks, BLE proxy and reconnection sync are not implemented. Do not migrate iPhone pairing yet.
+**Basic phase-1 UART diagnostics are now physically VERIFIED end-to-end for HELLO/STATUS and one `TEXT` command.** Versioned bounded frames, CRC8, sequence ACK, HELLO, status/battery, ASCII console tests exist. Reliable retries, Japanese glyph chunks, BLE proxy and reconnection sync are not implemented. Do not migrate iPhone pairing yet.
 
 ## Current FIRST physical experiment: Option 1 — ONE USB-C ON LILYGO
 
@@ -96,7 +96,7 @@ BLE stays for onboarding, pairing, local settings and recovery; Wi-Fi connects t
 
 **Previously reported working by user:** Existing LILYGO display/iPhone integration, BLE reconnection/battery, animations, Drinks Mode removal. Actual firmware source changed to remove C5 I²S voice code, but no independent compile or physical regression test was performed here.
 
-**Not validated or incomplete:** full S3↔C5 UART exchange (individual loopbacks passed), S3 Bluetooth pairing from iPhone, I²S mic/speaker, simultaneous BLE/Wi-Fi/STT/TTS, camera, Waveshare migration, exact long-term mechanical wiring and **Option 1 single-USB-C power path rating**.
+**Not validated or incomplete:** robust UART recovery/retries and UTF-8/Japanese glyph transfer (basic S3↔C5 bidirectional UART is verified); S3 Bluetooth pairing/proxy from iPhone; I²S mic/speaker; simultaneous BLE/Wi-Fi/STT/TTS; camera; Waveshare migration; long-term physical header security and **Option 1 single-USB-C power path rating**.
 
 ## Engineering order to resume
 
