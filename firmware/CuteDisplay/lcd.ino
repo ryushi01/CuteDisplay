@@ -493,6 +493,17 @@ static constexpr uint32_t VOICE_HOLD_MS=1400;
 static constexpr uint32_t VOICE_SAMPLE_RATE=16000;
 static constexpr uint32_t VOICE_RECORD_MS=2000;
 // Four exposed pins reserved for the shared-clock full-duplex I2S bus.
+// Current LILYGO T-Display-C5 breadboard audio wiring (ELEGOO 830 points):
+// INMP441: VDD=3V3, GND=GND, SCK/BCLK=GPIO1, WS=GPIO4,
+//          SD/DOUT=GPIO5, L/R=GND (left channel).
+// MAX98357A: VIN=5V only after checking available USB/VBUS current,
+//            GND=GND, BCLK=GPIO1, LRC=GPIO4, DIN=GPIO6.
+// Speaker: connect only to amplifier SPK+ and SPK- (never to GND).
+// GPIO1/GPIO4 clocks are shared; GPIO5 mic input and GPIO6 amp output
+// must NOT be connected together. USB power rail and 3V3 must not be bridged.
+// This is Phase 1 sequential local loopback, not AI streaming.
+// For the top/bottom header positions and rail safety, see:
+// docs/hardware/lilygo-c5-audio-breadboard.md
 static constexpr gpio_num_t VOICE_BCLK=GPIO_NUM_1;
 static constexpr gpio_num_t VOICE_WS=GPIO_NUM_4;
 static constexpr gpio_num_t VOICE_MIC_DIN=GPIO_NUM_5;
