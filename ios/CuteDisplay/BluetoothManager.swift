@@ -6,6 +6,11 @@ import Combine
 import UIKit
 import UserNotifications
 
+struct CuteAuthorizedAccessory: Identifiable {
+    let id: String
+    let title: String
+}
+
 final class BluetoothManager: NSObject, ObservableObject {
     @Published var isConnected = false
     @Published var wifiFallbackConnected = false
@@ -44,6 +49,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var lastPowerUpdate: Date?
     @Published var autoReconnect = UserDefaults.standard.object(forKey: "cuteAutoReconnect") as? Bool ?? true
     @Published var rememberedDeviceID = UserDefaults.standard.string(forKey: "cutePeripheralID")
+    // Explicit accessory choice preserves the LILYGO as a recovery option.
+    @Published var authorizedDevices: [CuteAuthorizedAccessory] = []
     @Published var lowBatteryAlertsEnabled = UserDefaults.standard.object(forKey: "cuteLowBatteryAlerts") as? Bool ?? false
     @Published var lowBatteryThreshold = UserDefaults.standard.object(forKey: "cuteLowBatteryThreshold") as? Int ?? 20
     private var lowBatteryAlertArmed = true
@@ -150,14 +157,52 @@ final class BluetoothManager: NSObject, ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
-    // AccessorySetupKit is the authoritative accessory authorization store.
+    // AccessorySetupKit is the authoritative authorization store, not
+    // UserDefaults alone. Prefer a still-authorized remembered device.
     private func authorizedIdentifier() -> UUID? {
-        accessorySession.accessories.first(where: { $0.bluetoothIdentifier != nil })?.bluetoothIdentifier
+        let allowed = accessorySession.accessories.compactMap { $0.bluetoothIdentifier }
+        if let saved = rememberedDeviceID.flatMap(UUID.init(uuidString:)),
+           allowed.contains(saved) { return saved }
+        return allowed.first
+    }
+    private func refreshAuthorizedDevices() {
+        authorizedDevices = accessorySession.accessories.compactMap { accessory in
+            guard let id = accessory.bluetoothIdentifier else { return nil }
+            return CuteAuthorizedAccessory(
+                id: id.uuidString,
+                title: "\(accessory.displayName) (\(id.uuidString.suffix(4)))"
+            )
+        }
+    }
+    func selectAuthorizedDevice(_ selectedID: String) {
+        guard let selected = UUID(uuidString: selectedID),
+              accessorySession.accessories.contains(where: { $0.bluetoothIdentifier == selected })
+        else {
+            status = "Device is not authorized. Use Pair New Device first."
+            return
+        }
+        guard selected.uuidString != rememberedDeviceID else { return }
+        intentionalDisconnect = true
+        if isScanning { central?.stopScan(); isScanning = false }
+        stopLANFallback()
+        // Credentials below were issued by old C5 firmware; the S3 deliberately
+        // has no LAN fallback server, so do not reconnect through the old C5.
+        lanToken = nil
+        lanIP = ""
+        UserDefaults.standard.removeObject(forKey: "cuteLanToken")
+        UserDefaults.standard.removeObject(forKey: "cuteLanIP")
+        if let current = peripheral { central?.cancelPeripheralConnection(current) }
+        clearConnection()
+        rememberAuthorized(selected)
+        intentionalDisconnect = false
+        ensureBluetoothManager()
+        startConnection()
     }
     private func handleAccessoryEvent(_ event: ASAccessoryEvent) {
         switch event.eventType {
         case .activated:
             accessorySessionReady = true
+            refreshAuthorizedDevices()
             if authorizedIdentifier() == nil { clearRememberedDevice() }
             if let id = authorizedIdentifier() {
                 rememberAuthorized(id)
@@ -167,6 +212,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             }
         case .accessoryAdded, .accessoryChanged:
             pendingAccessory = event.accessory
+            refreshAuthorizedDevices()
             if event.eventType == .accessoryChanged, let id = authorizedIdentifier() {
                 rememberAuthorized(id)
                 ensureBluetoothManager()
@@ -174,21 +220,28 @@ final class BluetoothManager: NSObject, ObservableObject {
                 if autoReconnect { startConnection() }
             }
         case .pickerDidDismiss:
+            refreshAuthorizedDevices()
             if let id = pendingAccessory?.bluetoothIdentifier {
-                rememberAuthorized(id)
-                intentionalDisconnect = false
-                ensureBluetoothManager()
-                recoverRestoredPeripheralIfPossible()
-                startConnection()
+                selectAuthorizedDevice(id.uuidString)
             }
             pendingAccessory = nil
         case .accessoryRemoved:
-            guard authorizedIdentifier() == nil else { return }
-            clearRememberedDevice()
+            refreshAuthorizedDevices()
+            if let selected = rememberedDeviceID.flatMap(UUID.init(uuidString:)),
+               accessorySession.accessories.contains(where: { $0.bluetoothIdentifier == selected }) {
+                return
+            }
             intentionalDisconnect = true
             if let peripheral { central?.cancelPeripheralConnection(peripheral) }
             clearConnection()
-            status = "Accessory removed in iOS settings"
+            clearRememberedDevice()
+            if let fallback = authorizedIdentifier() {
+                rememberAuthorized(fallback)
+                intentionalDisconnect = false
+                if autoReconnect { startConnection() }
+            } else {
+                status = "Accessory removed in iOS settings"
+            }
         default:
             break
         }
@@ -330,7 +383,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     }
     // Remove authorization through the system UI, not by only deleting UserDefaults.
     func forgetDevice() {
-        guard let accessory = accessorySession.accessories.first(where: { $0.bluetoothIdentifier != nil }) else {
+        guard let id = authorizedIdentifier(),
+              let accessory = accessorySession.accessories.first(where: { $0.bluetoothIdentifier == id }) else {
             clearRememberedDevice()
             status = "No paired accessory"
             return
@@ -643,6 +697,10 @@ extension BluetoothManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect device: CBPeripheral) {
+        guard device.identifier == authorizedIdentifier() else {
+            central.cancelPeripheralConnection(device)
+            return
+        }
         rememberAuthorized(device.identifier)
         status = "Discovering services..."
         discoverOrRestoreServices(on: device)
@@ -657,6 +715,8 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral device: CBPeripheral, error: Error?) {
+        // Ignore a late callback from the previous accessory after switching.
+        guard peripheral?.identifier == device.identifier else { return }
         clearConnection()
         status = error == nil ? "Disconnected" : "Disconnected: \(error!.localizedDescription)"
         if autoReconnect && !intentionalDisconnect { startConnection() }
@@ -812,6 +872,9 @@ extension BluetoothManager: CBPeripheralDelegate {
     }
 
     private func maintainLAN() {
+        // Phase-3 S3 owns WiFi; the old C5 TCP/8848 fallback is disabled.
+        // Never reuse the saved C5 LAN token/IP when switching accessories.
+        return
         if bleReady() {
             if wifiFallbackConnected { stopLANFallback() }
             return

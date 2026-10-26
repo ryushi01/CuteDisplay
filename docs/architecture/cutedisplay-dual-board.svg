@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="850" viewBox="0 0 1280 850" role="img" aria-label="CuteDisplay planned two-board architecture: iPhone connects by BLE to Freenove ESP32-S3 brain, which connects over Wi-Fi to OpenAI or Ollama server and wired UART to LILYGO T-Display C5. INMP441 microphone and MAX98357A amplifier with speaker connect to S3; onboard camera lives on S3.">
 <rect width="1280" height="850" fill="#f8fafc"/>
 <text x="60" y="60" font-family="Arial,sans-serif" font-size="35" font-weight="700" fill="#18314e">CuteDisplay — two-board architecture</text>
-<text x="60" y="97" font-family="Arial,sans-serif" font-size="19" fill="#57718d">Target design • S3 = brain and connectivity • LILYGO C5 = face and animations</text>
+<text x="60" y="97" font-family="Arial,sans-serif" font-size="19" fill="#57718d">Phase 3 prototype • S3 = Bluetooth + Wi-Fi • C5 = display, radios OFF</text>
 <rect x="65" y="145" width="360" height="145" rx="18" fill="#edf4ff" stroke="#7da5de" stroke-width="3"/>
 <text x="94" y="193" font-family="Arial,sans-serif" font-size="29" font-weight="700" fill="#154579">iPhone app</text>
 <text x="94" y="227" font-family="Arial,sans-serif" font-size="18" fill="#315d84">Pairing, settings, manual text</text>
@@ -13,10 +13,10 @@
 <rect x="350" y="355" width="580" height="250" rx="24" fill="#e8fbf2" stroke="#3aab75" stroke-width="4"/>
 <text x="388" y="403" font-family="Arial,sans-serif" font-size="31" font-weight="700" fill="#116744">Freenove ESP32-S3-CAM</text>
 <text x="388" y="435" font-family="Arial,sans-serif" font-size="21" fill="#245e48">BRAIN · 16 MB flash · 8 MB PSRAM</text>
-<text x="388" y="480" font-family="Arial,sans-serif" font-size="20" fill="#17553b">BLE peripheral (iPhone)</text>
-<text x="388" y="512" font-family="Arial,sans-serif" font-size="20" fill="#17553b">Wi-Fi gateway (external AI)</text>
-<text x="388" y="544" font-family="Arial,sans-serif" font-size="20" fill="#17553b">Camera • I²S audio • control routing</text>
-<text x="388" y="578" font-family="Arial,sans-serif" font-size="17" fill="#64796e">Pin assignments and hardware integration pending</text>
+<text x="388" y="480" font-family="Arial,sans-serif" font-size="20" fill="#17553b">BLE pairing + app control</text>
+<text x="388" y="512" font-family="Arial,sans-serif" font-size="20" fill="#17553b">Wi-Fi station (AI planned)</text>
+<text x="388" y="544" font-family="Arial,sans-serif" font-size="20" fill="#17553b">UART relay • audio/camera planned</text>
+<text x="388" y="578" font-family="Arial,sans-serif" font-size="17" fill="#64796e">UART tested; BLE/Wi-Fi proxy unverified</text>
 <path d="M 248 290 V 328 H 440 V 353" stroke="#5289d0" stroke-width="5" fill="none" stroke-linecap="round"/>
 <text x="266" y="323" font-family="Arial,sans-serif" font-size="18" fill="#2869b9" font-weight="700">BLE ↕</text>
 <path d="M 1035 290 V 329 H 835 V 353" stroke="#9671d3" stroke-width="5" fill="none" stroke-linecap="round"/>
@@ -35,6 +35,6 @@
 <text x="658" y="639" font-family="Arial,sans-serif" font-size="19" font-weight="700" fill="#137755">UART ↕</text>
 <rect x="280" y="664" width="720" height="113" rx="18" fill="#fff1f6" stroke="#d877a3" stroke-width="3"/>
 <text x="310" y="709" font-family="Arial,sans-serif" font-size="29" font-weight="700" fill="#8f235b">LILYGO T-Display-C5</text>
-<text x="310" y="740" font-family="Arial,sans-serif" font-size="19" fill="#7d4560">FACE · mascot animations · AI response text · battery telemetry</text>
-<text x="65" y="816" font-family="Arial,sans-serif" font-size="18" fill="#566c80">Electrical UART wiring, BLE cutover, audio and camera activation are NOT yet implemented or verified.</text>
+<text x="310" y="740" font-family="Arial,sans-serif" font-size="19" fill="#7d4560">FACE · LCD + mascot · S3 radio indicators · C5 battery</text>
+<text x="65" y="816" font-family="Arial,sans-serif" font-size="18" fill="#566c80">UART tested; C5 radios disabled in Phase-3 source. S3 app/Wi-Fi cutover UNTESTED.</text>
 </svg>

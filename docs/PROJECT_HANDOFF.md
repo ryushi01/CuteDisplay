@@ -13,6 +13,14 @@ Tell the assistant:
 
 Read the actual repository before making code changes because this document can become stale.
 
+## Latest engineering update — 2026-10-26 Brain owns BLE/Wi-Fi, C5 radios DISABLED (UNTESTED BETA)
+
+Per explicit user request, the new Phase-3 firmware makes the ESP32-S3 the **only wireless controller**: C5 does not initialize Bluetooth, connect to Wi-Fi, or start its old LAN server. UART W: commands sent to the C5 are rejected, and the long-press GPIO0 Wi-Fi toggle no longer enables C5 radio. S3 now manages Wi-Fi credentials, DHCP/static IP, station connection and Wi-Fi telemetry; S3 BLE FFF0/FFF1 is encrypted/Just Works bonded and exposes C5 power/battery over 180F/2A19 and FFF3/FFF4 plus **S3's own** Wi-Fi data over FFF5/FFF6. S3 broadcasts `RADIO` b/w/IP frames to C5 every ~1.8 seconds. C5 top-right Bluetooth/Wi-Fi indicators and physical-button status overlay display **the real S3 BLE-client & S3 Wi-Fi station** state and S3 IP; when S3 status is missing/offline, both icons show disconnected (never fall back to C5). C5 battery is still physically measured on C5. Existing Kitty and all other display behavior intended unchanged.
+
+**CRITICAL MIGRATION CHANGE:** Direct LILYGO BLE recovery is intentionally **disabled** in the new C5 build. To recover from a failed S3 connection, **reflash the earlier working C5 firmware over its own USB-C**, temporarily disconnecting the S3↔C5 5V jumper before plugging in a second USB. The known working Phase-2 baseline is commit `f2e352c3ccb9bf3e4487c41cb3e2de5d6c3fdf5d`. The new S3 USB `proxy on` gate is still temporary (10 minutes); Apple app has an authorized-accessory selector, and legacy C5 LAN fallback is switched off. Just Works does not protect against MITM during pairing. No Xcode project committed, so app compilation is unverified. Newly changed code **has not been compiled or flashed** as of this update.
+
+All new Phase 3 source: S3 `firmware/CuteDisplayBrain/CuteDisplayBrain.ino`, C5 `firmware/CuteDisplay/lcd.ino`, `ios/CuteDisplay/BluetoothManager.swift`, `ios/CuteDisplay/ContentView.swift`. [Staged verification and rollback](architecture/ble-brain-proxy-beta.md). Previous proven UART pins remain S3 TX47→C5 RX1, C5 TX6→S3 RX21, common GND. Shared single S3 USB-C power has been observed to boot both but lacks proven current/backfeed rating. Do not connect C5 USB while power rails are linked.
+
 ## Latest hardware verification — 2026-10-26 UART idle heartbeat works
 
 User explicitly confirmed **"it works"** after flashing the latest S3 and C5 sketches containing the phase-2 idle keepalive fix (commit `f2e352c`). Treat the **3-second S3 HEARTBEAT accepted silently by C5** as user-tested on the running two-board prototype; the preceding repeated HELLO/reconnect symptom is considered resolved by this report. No new Serial Monitor transcript was supplied for the heartbeat verification, and prolonged stress/resets were not measured.
@@ -57,7 +65,7 @@ Build a cute, multilingual (English/Japanese/French), animated, compact AI compa
 
 **LILYGO T-Display-C5 / ESP32-C5 — FACE:**
 - Integrated 320 × 170 LCD; autonomous mascot animations, messages, Japanese glyph handling, battery readings, local GPIO0 controls, display preferences.
-- Existing firmware currently has direct BLE pairing and optional Wi-Fi fallback, retained during migration.
+- **Historical verified Phase-2 firmware** had direct C5 BLE and Wi-Fi; **new Phase-3 build disables both**. UART control from S3 remains.
 - Old INMP441/MAX98357A I²S audio loopback and GPIO28 long-press test have been **removed** from its firmware.
 - Future S3 UART commands should tell C5 *what* to display and animate; do not stream LCD framebuffers over UART.
 

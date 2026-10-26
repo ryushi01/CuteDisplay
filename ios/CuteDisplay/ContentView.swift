@@ -457,6 +457,19 @@ struct ContentView: View {
                     .font(.subheadline)
                 Spacer()
             }
+            if !bluetooth.authorizedDevices.isEmpty {
+                Picker("Active Bluetooth device", selection: Binding(
+                    get: { bluetooth.rememberedDeviceID ?? "" },
+                    set: { bluetooth.selectAuthorizedDevice($0) }
+                )) {
+                    ForEach(bluetooth.authorizedDevices) { device in
+                        Text(device.title).tag(device.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("This firmware uses Brain Bluetooth and Wi-Fi only. LILYGO wireless is disabled; restore C5 firmware by USB if Brain pairing fails.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             Toggle("Automatically reconnect", isOn: Binding(
                 get: { bluetooth.autoReconnect },
                 set: { bluetooth.setAutoReconnect($0) }

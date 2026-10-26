@@ -153,6 +153,20 @@ static unsigned long wifiPowerCheckAt=0;
 bool wifiUseDHCP=true;
 String staticIP="",staticMask="",staticGateway="",staticDNS="";
 BLECharacteristic *networkCharacteristic=nullptr;
+// Shared with C5 UART service, so telemetry functions can mirror readings.
+static bool s3Online=false;
+static uint16_t c5Seq=0;
+// C5 radios are disabled. Only S3 RADIO frames determine on-screen icons.
+// No "fallback to C5 radio" when the brain link drops.
+static bool brainBleClient=false,brainWifiConnected=false;
+static uint32_t brainRadioSeen=0;
+static String brainIP="-";
+static bool brainRadioFresh(){
+ return s3Online && brainRadioSeen &&
+        (uint32_t)(millis()-brainRadioSeen)<5500UL;
+}
+static bool displayBleConnected(){return brainRadioFresh() && brainBleClient;}
+static bool displayWiFiConnected(){return brainRadioFresh() && brainWifiConnected;}
 unsigned long nextNetworkTelemetry=0;
 bool wifiOnline();
 // Opt-in local-only authenticated TCP transport. Wi-Fi is never enabled by
@@ -184,10 +198,15 @@ static void loadLANSecret(){
 }
 // Short notifications fit even BLE connections with a 23-byte MTU.
 void networkReport(const String &entry){
- if(!networkCharacteristic || !bleConnected)return;
- networkCharacteristic->setValue(entry.c_str());
- if(bleConnected)networkCharacteristic->notify();
- delay(12); // Let the BLE controller transmit before replacing the value.
+ // Mirroring to S3 allows the normal app to read the C5 network state.
+ // Never print LAN tokens or passwords to Serial Monitor.
+ if(s3Online && entry.length()<=CuteLink::PAYLOAD)
+  CuteLink::send(Serial1,++c5Seq,"NET",entry);
+ if(networkCharacteristic && bleConnected){
+  networkCharacteristic->setValue(entry.c_str());
+  networkCharacteristic->notify();
+  delay(12); // Keep existing direct-C5 BLE notification behavior.
+ }
 }
 void sendNetworkField(String field){
  bool online=wifiOnline();
@@ -213,7 +232,7 @@ void sendNetworkField(String field){
  }
 }
 void sendNetworkTelemetry(){
- if(!bleConnected)return; // No need to build BLE packets while no phone listens.
+ if(!bleConnected && !s3Online)return; // C5 direct BLE or Brain proxy may be listening.
  // Only link changes are periodic. All other fields are explicitly requested
  // by the iPhone one at a time to avoid overflowing the BLE notify queue.
  sendNetworkField("LINK");
@@ -546,16 +565,16 @@ void drawConnectivityHUD(){
  // with no changes to character geometry or text-area margins.
  const int x=261,y=2;
  rect(x-2,0,61,16,BLACK);
- const uint16_t bt=bleConnected?0x07FF:0x7BEF;
+ const uint16_t bt=displayBleConnected()?0x07FF:0x7BEF;
  line(x+5,y,x+5,y+10,bt);
  line(x+5,y,x+10,y+3,bt);line(x+10,y+3,x+2,y+8,bt);
  line(x+5,y,x+10,y+8,bt);line(x+10,y+8,x+2,y+3,bt);
  const int wx=x+14;
- const uint16_t wc=!wifiOnline()?0x7BEF:(!gatewayProbeKnown||gatewayReachable?0x07E0:0xFFE0);
+ const uint16_t wc=displayWiFiConnected()?0x07E0:0x7BEF;
  line(wx,y+3,wx+5,y,wc);line(wx+5,y,wx+10,y+3,wc);
  line(wx+2,y+6,wx+5,y+4,wc);line(wx+5,y+4,wx+8,y+6,wc);
  oval(wx+5,y+9,1,1,wc);
- if(!wifiOnline())line(wx+1,y+10,wx+10,y+1,0xF800);
+ if(!displayWiFiConnected())line(wx+1,y+10,wx+10,y+1,0xF800);
  // Always show SOC, charging or discharging. Green indicates charging.
  String soc=batteryLevel>=0 ? String(constrain(batteryLevel,0,100))+"%" : "--%";
  textAt(soc,wx+13,y+2,1,batteryCharging?0x07E0:WHITE);
@@ -905,28 +924,13 @@ void drawBatteryOverlay(){
   textAt(label+estimate,42,67,1,WHITE);
   // Network information shown only on physical button press.
   // One-pixel font fits inside 320x170 without resizing the mascot.
-  textAt(String("BT:")+(bleConnected?"ON":"OFF")+" WIFI:"+(wifiOnline()?"ON":"OFF")+
-         " "+(wifiUseDHCP?"DHCP":"STATIC"),42,90,1,WHITE);
-  if(wifiOnline()){
-   textAt("IP: "+WiFi.localIP().toString(),42,101,1,themeColor());
-   textAt("MASK: "+WiFi.subnetMask().toString(),42,112,1,WHITE);
-   // RTT is measured by the periodic on-device ICMP gateway probe.
-   String gatewayLine="GW: "+WiFi.gatewayIP().toString();
-   if(gatewayProbeKnown){
-    gatewayLine += gatewayReachable?
-      (" "+String(gatewayLatencyMs)+"ms"):" TIMEOUT";
-   }else gatewayLine+=" --ms";
-   textAt(gatewayLine,42,123,1,gatewayProbeKnown&&!gatewayReachable?0xFFE0:WHITE);
-   textAt("DNS: "+WiFi.dnsIP().toString(),42,134,1,WHITE);
-   textAt("RSSI:"+String(WiFi.RSSI())+"dBm "+
-       (gatewayProbeKnown?(gatewayReachable?"GW OK":"GW FAIL"):"GW CHECKING"),42,145,1,
-       gatewayProbeKnown&&!gatewayReachable?0xFFE0:WHITE);
-   // SSID is UTF-8 and can be wider than the small overlay; keep byte prefix.
-   textAt("SSID: "+WiFi.SSID().substring(0,25),42,156,1,WHITE);
-  }else{
-   textAt("IP: DISCONNECTED",42,108,1,themeColor());
-   textAt("LAST SSID: "+wifiSSID.substring(0,25),42,120,1,WHITE);
-  }
+  textAt(String("BRAIN BT:")+(displayBleConnected()?"ON":"OFF")+
+         " WIFI:"+(displayWiFiConnected()?"ON":"OFF"),42,90,1,WHITE);
+  textAt("SOURCE: ESP32-S3 BRAIN",42,105,1,themeColor());
+  textAt(String("S3 IP: ")+(displayWiFiConnected()?brainIP:String("-")),42,118,1,WHITE);
+  if(!brainRadioFresh())
+   textAt("BRAIN LINK: UNAVAILABLE",42,131,1,0xF800);
+  else textAt("C5 RADIO: DISABLED",42,131,1,WHITE);
  }
 }
 String cleanText(String s,int limit) {
@@ -2024,11 +2028,10 @@ void readBattery(){
  }
  // Battery telemetry is still sent over BLE every two seconds. No serial spam.
 
- // Do not poll optional power-registers, format Strings, or prepare GATT
- // notifications until the iPhone is actually connected. SOC/current/voltage,
- // charging state, local overlays and battery learning remain sampled at 2 s.
- if(bleConnected){
-  if(powerCharacteristic){
+ // Prepare telemetry only if the iPhone is connected directly OR the Brain
+ // UART link is online. Always retain the existing direct C5 BLE behavior.
+ if(bleConnected || s3Online){
+  if(powerCharacteristic || s3Online){
    const int reportedSOC=constrain((int)lroundf(batteryDisplaySOC),0,100);
    String data;
    data.reserve(90); // Minimize repeated heap reallocations/fragmentation.
@@ -2038,11 +2041,15 @@ void readBattery(){
    data+=String(axp.getSOH());data+=",";
    data+=String(remainingMinutes);data+=",";
    data+=String(fullMinutes);data+=",";
-   data+=(wifiOnline()?"1":"0");
-   powerCharacteristic->setValue(data.c_str());
-   powerCharacteristic->notify();
+   // iPhone FFF4 WiFi flag reflects S3, not disabled C5 local WiFi.
+   data+=(displayWiFiConnected()?"1":"0");
+   if(s3Online)CuteLink::send(Serial1,++c5Seq,"POWER",data);
+   if(bleConnected && powerCharacteristic){
+    powerCharacteristic->setValue(data.c_str());
+    powerCharacteristic->notify();
+   }
   }
-  if(batteryCharacteristic){
+  if(bleConnected && batteryCharacteristic){
    uint8_t b=(uint8_t)constrain((int)lroundf(batteryDisplaySOC),0,100);
    batteryCharacteristic->setValue(&b,1);
    batteryCharacteristic->notify();
@@ -2221,6 +2228,10 @@ static void checkWiFiOffSettled(unsigned long now){
 // Power switch shared by the physical button and iPhone app commands.
 // Wi-Fi OFF tears down the station rather than only disconnecting the AP.
 void setWiFiPower(bool enable,bool showToast){
+ // Keep C5 WiFi off permanently in this S3-only-radio build, even when
+ // the user long-presses GPIO0 or old UI WiFi commands arrive.
+ Serial.println("[C5] Local WiFi disabled; use S3 Brain");
+ return;
  wifiEnabled=enable;
  wifiAttemptActive=false;
  wifiInitFailed=false;
@@ -2251,10 +2262,11 @@ void setWiFiPower(bool enable,bool showToast){
 }
 void processCommand(String cmd){
  cmd.trim();
+ if(cmd.startsWith("W:"))return; // Only Brain may provision/use WiFi.
  if(cmd=="W:INFO"){sendNetworkTelemetry();return;}
  if(cmd=="W:GET:KEY"){
   // Never expose this secret via LAN, logs or display; requested over BLE.
-  if(bleConnected && !lanSecret.isEmpty())networkReport("N:KEY:"+lanSecret);
+  if((bleConnected || s3Online) && !lanSecret.isEmpty())networkReport("N:KEY:"+lanSecret);
   return;
  }
  if(cmd.startsWith("W:GET:")){sendNetworkField(cmd.substring(6));return;}
@@ -2482,15 +2494,77 @@ static void updateLAN(){
 
 // Phase-1 C5 UART: TX GPIO6 -> S3 RX21, RX GPIO1 <- S3 TX47.
 static CuteLink::Reader s3Reader;
-static bool s3Online=false;
-static uint16_t c5Seq=0;
 static uint32_t lastS3=0,lastC5Hello=0,lastC5Status=0;
+// One serialized 96-byte BLE command split into <=38-byte hex UART frames.
+// Cache the last chunk response for idempotent link-layer retransmission.
+static char pendingCommand[97]={};
+static size_t pendingLength=0;
+static int pendingTotal=0,pendingNext=0;
+static uint32_t pendingStarted=0;
+static uint16_t lastAcceptedChunkSeq=0;
+static String lastAcceptedChunkResponse;
+
+static int hexDigit(char c){
+ if(c>='0'&&c<='9')return c-'0';
+ if(c>='A'&&c<='F')return c-'A'+10;
+ if(c>='a'&&c<='f')return c-'a'+10;
+ return -1;
+}
+static void resetCmdParts(){
+ pendingLength=0;pendingTotal=0;pendingNext=0;pendingCommand[0]=0;
+}
+static void receiveCmdChunk(const CuteLink::Frame &f){
+ if(f.seq==lastAcceptedChunkSeq && lastAcceptedChunkResponse.length()){
+  CuteLink::send(Serial1,f.seq,"ACK",lastAcceptedChunkResponse);
+  return;
+ }
+ int slash1=f.payload.indexOf('/'),slash2=f.payload.indexOf('/',slash1+1);
+ if(slash1!=1||slash2!=3 || f.payload.length()<=4){
+  CuteLink::send(Serial1,f.seq,"NACK","FORMAT");return;
+ }
+ char idx=f.payload[0],total=f.payload[2];
+ if(idx<'0'||idx>'2'||total<'1'||total>'3'){
+  CuteLink::send(Serial1,f.seq,"NACK","RANGE");return;
+ }
+ int n=idx-'0', count=total-'0';
+ String encoded=f.payload.substring(4);
+ if(encoded.isEmpty() || encoded.length()>76 || encoded.length()%2){
+  CuteLink::send(Serial1,f.seq,"NACK","LENGTH");return;
+ }
+ if(n==0){resetCmdParts();pendingTotal=count;pendingStarted=millis();}
+ if(pendingTotal!=count||pendingNext!=n ||
+    (uint32_t)(millis()-pendingStarted)>4000UL ||
+    pendingLength+encoded.length()/2>96){
+  resetCmdParts();CuteLink::send(Serial1,f.seq,"NACK","ORDER");return;
+ }
+ for(size_t i=0;i<encoded.length();i+=2){
+  int a=hexDigit(encoded[i]),b=hexDigit(encoded[i+1]);
+  if(a<0||b<0 || (a==0&&b==0)){
+   resetCmdParts();CuteLink::send(Serial1,f.seq,"NACK","ENCODING");return;
+  }
+  pendingCommand[pendingLength++]=(char)((a<<4)|b);
+ }
+ pendingCommand[pendingLength]=0;
+ ++pendingNext;
+ bool complete=pendingNext==pendingTotal;
+ lastAcceptedChunkSeq=f.seq;
+ lastAcceptedChunkResponse=complete?"CMD":"PART";
+ CuteLink::send(Serial1,f.seq,"ACK",lastAcceptedChunkResponse);
+ if(complete){
+  String command(pendingCommand);
+  resetCmdParts();
+  // The existing command dispatcher already implements Japanese glyphs,
+  // Wi-Fi configuration, message rendering, and all legacy iPhone controls.
+  processCommand(command);
+ }
+}
+
 static void toS3(const char *type,const String &value=""){
  CuteLink::send(Serial1,++c5Seq,type,value);
 }
 static void replyStatus(uint16_t seq) {
- String v="lcd="+String(lcdReady?1:0)+";ble="+String(bleConnected?1:0)+
-          ";wifi="+String(wifiOnline()?1:0)+";soc="+String(batteryReady?batteryLevel:-1);
+ String v="lcd="+String(lcdReady?1:0)+";ble="+String(displayBleConnected()?1:0)+
+          ";wifi="+String(displayWiFiConnected()?1:0)+";soc="+String(batteryReady?batteryLevel:-1);
  CuteLink::send(Serial1,seq,"STATUS",v);
 }
 static void replyBattery(uint16_t seq) {
@@ -2498,6 +2572,27 @@ static void replyBattery(uint16_t seq) {
  String v="soc="+String(batteryReady?batteryLevel:-1)+";v="+
           String(lanVolts,3)+";a="+String(lanAmps,3);
  CuteLink::send(Serial1,seq,"BATTERY",v);
+}
+static void handleRadioFrame(const String &s){
+ // S3 sends "b=0;w=1;ip=192.168.1.2" ~ every 1.8 seconds.
+ // Validate instead of accepting arbitrary malformed input.
+ if(!s.startsWith("b="))return;
+ int wifiPos=s.indexOf(";w="),ipPos=s.indexOf(";ip=");
+ if(wifiPos!=3||ipPos!=7 || s.length()<11)return;
+ char b=s[2],w=s[6];
+ if((b!='0'&&b!='1')||(w!='0'&&w!='1'))return;
+ String ip=s.substring(ipPos+4);
+ if(ip.length()>40)return;
+ bool previousBle=displayBleConnected();
+ bool previousWiFi=displayWiFiConnected();
+ brainBleClient=b=='1';
+ brainWifiConnected=w=='1';
+ brainIP=ip;
+ brainRadioSeen=millis();
+ if(lcdReady&&(displayBleConnected()!=previousBle ||
+               displayWiFiConnected()!=previousWiFi)){
+  redrawCurrent();
+ }
 }
 static void serviceBrain() {
  CuteLink::Frame f;
@@ -2508,6 +2603,9 @@ static void serviceBrain() {
    toS3("LOG","C5 connected");
   }
   if(f.type=="HELLO"){
+   // An S3 reboot starts its sequence numbers over; discard old cached ACK.
+   resetCmdParts();
+   lastAcceptedChunkSeq=0;lastAcceptedChunkResponse="";
    CuteLink::send(Serial1,f.seq,"ACK","HELLO");replyStatus(f.seq);
   }else if(f.type=="ACK"&&f.payload=="HELLO")replyStatus(f.seq);
   else if(f.type=="PING")CuteLink::send(Serial1,f.seq,"ACK","PING");
@@ -2515,6 +2613,8 @@ static void serviceBrain() {
    // Silent liveness signal; lastS3 updated on every valid inbound frame.
    // No ACK needed: C5 already sends independent STATUS every 5 seconds.
   }
+  else if(f.type=="RADIO")handleRadioFrame(f.payload);
+  else if(f.type=="CMDHEX")receiveCmdChunk(f);
   else if(f.type=="GET_STATUS")replyStatus(f.seq);
   else if(f.type=="GET_BATTERY")replyBattery(f.seq);
   else if(f.type=="TEXT"){
@@ -2563,26 +2663,22 @@ void setup(){
  userButtonStable=userButtonLastRaw;
  loadDisplayState();
  installStartupGlyphs();loadPersistedGlyphs();loadSmoothGlyphs();initBattery();
- // Start BLE before allocating the 108,800-byte DMA LCD frame buffer.
- // The last device log stopped immediately after LCD Ready, before BLE Ready.
- // Reserving BLE controller memory first avoids a fragmented/low internal heap
- // during radio initialization. Wi-Fi is still manual-start only.
- Serial.println("[BOOT] Initializing Bluetooth before LCD...");
- loadLANSecret();
- initBLE();
+ // This build delegates *all* BLE, WiFi and WiFi provisioning to S3.
+ // No BLEDevice::init(), WiFi.begin() or LAN listener runs on C5.
+ Serial.println("[C5] Local BLE/WiFi disabled; radios owned by S3");
+ bleConnected=false;
+ wifiEnabled=false;
+ WiFi.mode(WIFI_OFF);
  Serial.println("[BOOT] Initializing LCD...");
  initLCD();
  setBrightness(brightness);
  stateDirty=false; // startup redraw is not a preference change
- loadWifiConfig();
- // Resume the saved network after the display and Bluetooth have settled.
- // Do not try to start the radio during framebuffer allocation.
- wifiInitFailed=false;
+ // Saved C5 WiFi settings are retained in NVS only for rollback.
+ // They are never loaded or used in S3-only-radio mode.
+ wifiEnabled=false;
  wifiAttemptActive=false;
- wifiBootReadyAt=millis()+8000UL;
- nextWiFiAttempt=wifiBootReadyAt;
- Serial.printf("[WIFI] Saved=%s; deferred automatic connection\n",
-   (wifiEnabled&&!wifiSSID.isEmpty())?"yes":"no");
+ wifiInitFailed=false;
+ nextWiFiAttempt=0;
 }
 void loop(){
  serviceBrain();
@@ -2613,11 +2709,11 @@ void loop(){
  if(bleConnected && networkCharacteristic && (int32_t)(now-nextNetworkTelemetry)>=0){
   nextNetworkTelemetry=now+20000UL;sendNetworkTelemetry();
  }
- bool statusChanged=(bleConnected!=lastDisplayedBle || wifiOnline()!=wifiLastConnected);
+ bool statusChanged=(displayBleConnected()!=lastDisplayedBle ||
+                     displayWiFiConnected()!=wifiLastConnected);
  if(statusChanged){
-  // Refresh the iPhone's fallback destination when DHCP assigns a new IP.
-  if(bleConnected && wifiOnline())sendNetworkField("IP");
-  lastDisplayedBle=bleConnected;wifiLastConnected=wifiOnline();
+  lastDisplayedBle=displayBleConnected();
+  wifiLastConnected=displayWiFiConnected();
   if(lcdReady && now-lastStatusRedraw>=250){lastStatusRedraw=now;redrawCurrent();}
  }
  updatePersonalityPose(now);
