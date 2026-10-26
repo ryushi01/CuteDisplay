@@ -1,51 +1,65 @@
-# S3 brain + LILYGO face — breadboard integration plan
+# CuteDisplay: ESP32-S3 brain + LILYGO C5 face — proposed pinout
 
-**Status: planned, not yet electrically assembled, compiled or tested.** This document describes the *new* ELEGOO 830-point breadboard concept. It supersedes the old LILYGO I²S wiring reference. Camera connectivity is intentionally **out of scope for this phase**.
+> **Status: conflict-reviewed, NOT bench-validated.** The diagram shows electrical net connectivity on a spacious conceptual breadboard, not exact row placement or physical header order. Before plugging wires in, inspect the printed labels and the *exact* Freenove FNK0085B breakout pin diagram. Neither the UART bridge nor I²S audio is active in today's firmware.
 
-![Two-board breadboard concept](cutedisplay-s3-c5-breadboard.svg)
+![Proposed S3 + C5 breadboard wiring](cutedisplay-s3-c5-breadboard.svg)
 
-## Current responsibilities
+## Connectivity decision
 
-| Component | Responsibility now | Intended next stage |
-| --- | --- | --- |
-| LILYGO T-Display-C5 | Existing mascot/display, messages, battery, BLE and Wi-Fi continue unchanged | UART display/text renderer; battery telemetry back to S3 |
-| Freenove ESP32-S3-CAM N16R8 | New independent BLE diagnostic sketch: `firmware/CuteDisplayBrain/CuteDisplayBrain.ino` | iPhone BLE endpoint, UART bridge, Wi-Fi gateway, I²S mic/amp |
-| INMP441 | Not yet assigned S3 pins | I²S digital microphone at 3.3 V |
-| MAX98357A and 8 Ω speaker | Not yet assigned S3 pins | I²S speaker output, power budget to be measured |
-| iPhone app | Still connects to LILYGO C5 | S3 BLE pairing only after full bridge and telemetry support |
-| External AI backend | Separate server | OpenAI or Ollama with speech recognition and synthesis |
+- **Bluetooth Low Energy remains enabled permanently as an intended feature on the S3** for first-time iPhone provisioning and local settings/control. Do not redesign as Wi-Fi-only merely because Wi-Fi audio and BLE may coexist.
+- **Wi-Fi on S3** serves the separate AI backend (OpenAI or self-hosted Ollama/Open WebUI, STT and TTS). Audio capture/playback are on the S3; heavy AI processing stays on the server.
+- **Wired UART** carries text, mood, animation commands and battery telemetry between S3 and C5. The C5 stays autonomous for LCD rendering. **Camera use is deferred, but its pins are reserved.**
+- **Transition:** the current iPhone app still talks to C5; the S3 BLE diagnostic service `FFF0`/`FFF1` is *not yet* a functional replacement. Do not cut off C5 BLE until UART relay, telemetry and iOS migration pass end-to-end tests.
 
-## Electrical connection matrix — signals, not final GPIO numbers
+## Proposed exact signal assignments
 
-| Source | Destination | Requirements |
-| --- | --- | --- |
-| S3 **TX** (available UART GPIO TBD) | LILYGO **RX** (available UART GPIO TBD) | 3.3 V logic, cross-connected |
-| LILYGO **TX** (available UART GPIO TBD) | S3 **RX** (available UART GPIO TBD) | 3.3 V logic, cross-connected |
-| S3 **GND** | LILYGO **GND** | Mandatory common reference, even with independent USB power |
-| S3 **I²S BCLK** GPIO TBD | INMP441 **SCK** and MAX98357A **BCLK** | Shared clock |
-| S3 **I²S WS** GPIO TBD | INMP441 **WS** and MAX98357A **LRC** | Shared word select |
-| INMP441 **SD/DOUT** | S3 **I²S RX** GPIO TBD | Microphone-only input |
-| S3 **I²S TX** GPIO TBD | MAX98357A **DIN** | Amplifier-only output |
-| Regulated **3.3 V** | INMP441 **VDD** | Never feed 5 V to mic |
-| Verified amplifier supply | MAX98357A **VIN** | Check module rating, regulator and total USB current budget |
-| Common **GND** | Mic and amplifier **GND**; mic **L/R** | L/R grounded selects left channel |
-| MAX98357A **SPK+**, **SPK−** | Speaker terminals | Neither terminal to GND |
+These are the **candidate GPIO assignments to use for implementation and first bench tests**. They avoid the commonly documented Freenove camera, SD and octal-PSRAM pins. GPIO41/42 overlap the ESP32-S3's optional external JTAG functions; do not enable external JTAG on these pins. The S3 package's USB-JTAG through GPIO19/20 is left untouched. Check breakout availability on the *specific* FNK0085B and any on-board peripherals before declaring the wiring final.
 
-### Before connecting
+| Net | Freenove ESP32-S3 | Module or LILYGO T-Display-C5 | Direction |
+| --- | --- | --- | --- |
+| I²S BCLK | **GPIO41** | INMP441 **SCK** + MAX98357A **BCLK** | S3 → both |
+| I²S WS/LRCLK | **GPIO42** | INMP441 **WS** + MAX98357A **LRC** | S3 → both |
+| I²S microphone data | **GPIO1** | INMP441 **SD/DOUT** | Mic → S3 |
+| I²S speaker data | **GPIO2** | MAX98357A **DIN** | S3 → amplifier |
+| UART control to face | **GPIO47 TX** | LILYGO **GPIO5 RX** | S3 → C5 |
+| UART telemetry from face | **GPIO21 RX** | LILYGO **GPIO4 TX** | C5 → S3 |
+| UART reference | **GND** | LILYGO **GND** | Shared ground |
+| Microphone supply | Regulated **3V3** | INMP441 **VDD** | 3.3 V only |
+| Microphone channel | **GND** | INMP441 **L/R** | Left channel |
+| Amplifier supply | Rated **5V/VIN** if verified on actual board | MAX98357A **VIN** | Never via S3 GPIO |
+| Audio ground | **GND** | INMP441 **GND**, MAX98357A **GND** | Shared ground |
+| Speaker | MAX98357A **SPK+ / SPK−** | 8 Ω speaker pair | Direct output; never ground SPK− |
 
-1. Confirm **exact board** is Freenove FNK0085B / ESP32-S3 N16R8 and identify its exposed GPIO header orientation from the manufacturer's pin diagram.
-2. Reserve all camera-connected GPIOs now, even though camera firmware is deferred; avoid flash/PSRAM/USB/boot-strapping pins and assign UART and I²S from free breakout pins.
-3. Confirm LILYGO accessible TX/RX pin locations, and ensure those contacts are **not in use by LCD, AXP2602, buttons or other board hardware**.
-4. Power both boards from their **own USB-C connectors** for first tests; join **GND only** between boards and cross TX/RX. **Do not bridge 5 V outputs or different 3.3 V regulators.**
-5. First test UART packets and display behavior. Then add mic and amp with their own verified power and pin mapping.
-6. Treat diagram as **topology/concept**, not a hole-by-hole placement or completed pin assignment. The final pin map belongs in this document once checked.
+**Physical wiring:** For bring-up, power S3 and C5 separately over their USB inputs and connect the **two UART signal wires and common GND** between boards. Never connect both positive rails together. The S3 and LILYGO GPIOs use 3.3 V logic; don't feed 5 V into a GPIO. Connect the amplifier only after confirming the available 5 V header output and power distribution. The ELEGOO breadboard supply rails may be split or disconnected from one another—continuity-test before relying on them.
 
-## Implementation and compatibility
+## Conflict review — preserved for future camera support
 
-The LILYGO firmware remains the last working **BLE/iPhone-controlled** animation and battery system, with its earlier I²S loopback removed. The S3 diagnostic sketch advertises `CuteDisplay-Brain-DEV` with BLE service `FFF0` and characteristic `FFF1`, but **does not forward commands**. The iPhone app is **not** switched to the S3 yet: it still needs UART bridge firmware plus compatible battery/telemetry and pairing migration.
+| Reserved hardware | ESP32-S3 GPIOs to avoid |
+| --- | --- |
+| Camera | **4–13, 15–18** (GPIO14 not included in this camera mapping) |
+| Onboard microSD | **38, 39, 40** |
+| Octal PSRAM / flash routing | **33–37** and other flash-connected pins **26–32** |
+| USB Serial/JTAG | **19, 20** |
+| Strapping / boot-sensitive | **0, 3, 45, 46** |
+| UART0 debugging | **43, 44** (not used here) |
+| External JTAG alternatives | **39–42**, hence 41/42 are only valid when not using that JTAG mode |
 
-UART protocol proposal: framed messages with version, sequence number, type, bounded length, UTF-8 payload, acknowledgement/timeout for settings, and bidirectional telemetry. Candidate message types are `DISPLAY_TEXT`, `SET_MASCOT`, `SET_MOOD`, `AI_STATE`, `BATTERY_STATUS`, and `DEVICE_READY`; **none of these are implemented yet**. For Japanese text, preserve/extend the existing glyph transport rather than assuming arbitrary UTF-8 fonts are available on the C5.
+Manufacturer pin mappings and board variants can differ. Confirm against the Freenove `FNK0085` documentation and the board's printed labels. For C5, the built-in LCD already uses GPIO26/7/9/8/23/25, AXP2602 uses 2/3 and interrupt 10, button uses GPIO0; candidate UART GPIO4/5 avoid those known firmware reservations.
 
-**Future:** assess the optional external Waveshare SPI LCD and camera on the S3 only after stable voice and UART operation, with measured heap/PSRAM and CPU headroom.
+Sources:
+- [Freenove FNK0085 manufacturer documentation](https://docs.freenove.com/projects/fnk0085/en/latest/)
+- [ESP32-S3 datasheet — GPIO matrix and reserved-function constraints](https://documentation.espressif.com/esp32_s3_datasheet_en.pdf)
+- [Freenove-compatible camera and SD map cross-check](https://github.com/jaysys/esp32s3-with-camera-ov2640-and-sdcard/blob/main/pinmap.md)
+- [LILYGO T-Display-C5 quick start and display pins](https://wiki.lilygo.cc/products/t-display-series/t-display-c5/quick-start)
 
-[Project README](../../README.md) · [Historical, retired C5 audio plan](lilygo-c5-audio-breadboard.md)
+## Implementation stages and safety gates
+
+1. Compare exact header pin labeling to the table, verify power, and run a standalone **UART TX/RX cross-link** at **115200 8N1**. Implement framing, command checksums/length limits, ACK and a `HELLO` handshake before routing live app commands.
+2. Verify battery telemetry and saved display settings through S3; keep C5's BLE recovery path until successful.
+3. Wire the INMP441/MAX98357A on the S3 pins above and verify microphone capture and speaker playback **without** network traffic.
+4. Add Wi-Fi speech streaming and measure audio under simultaneous BLE configuration traffic. Prefer fixing buffering, task scheduling and traffic load **before** considering Wi-Fi-only operation; BLE is needed for initial provisioning.
+5. Integrate the independent AI backend. Defer onboard camera and optional Waveshare display migration until measurements support them.
+
+The firmware pin constants are documented in [`firmware/CuteDisplayBrain/BrainPinPlan.h`](../../firmware/CuteDisplayBrain/BrainPinPlan.h). These constants by themselves do **not** enable UART or I²S.
+
+[README](../../README.md) · [Historical retired LILYGO C5 audio guide](lilygo-c5-audio-breadboard.md)
