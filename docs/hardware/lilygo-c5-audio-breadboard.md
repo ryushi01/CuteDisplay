@@ -1,6 +1,8 @@
-# CuteDisplay audio breadboard — LILYGO T-Display-C5 (current build)
+> **SUPERSEDED — HISTORICAL DOCUMENT ONLY (2026-10-26).** The INMP441/MAX98357A I²S loopback implementation and GPIO28 voice-button handler have been removed from the current LILYGO C5 firmware. **Do not connect these audio modules to the LILYGO for the new build.** Audio, camera and future BLE pairing are being moved to the Freenove ESP32-S3-CAM brain; its audio/UART GPIO pinout has not yet been designed or tested. The information below is preserved for historical reference and does **not** describe the current firmware.
 
-**Status:** documented wiring and firmware GPIO assignments; **physical operation has not been verified by this repository**. Keep the last working firmware backup. This is the **current, single-board** setup; the Freenove ESP32-S3 camera board and external Waveshare LCD are reserved for later migration.
+# Historical CuteDisplay C5 audio breadboard experiment (retired)
+
+**Historical status:** this documents an earlier experimental C5 audio pin assignment only; the code no longer exists in the current firmware. Keep these notes only for archival comparison.
 
 ## Components
 
@@ -37,9 +39,9 @@ When the board is rotated/turned, **count from the corresponding end shown on th
 | MAX98357A **SPK+** | Speaker **+** |
 | MAX98357A **SPK−** | Speaker **−** — **never connect SPK− to GND** |
 
-**Important:** microphone SD (GPIO5) and amplifier DIN (GPIO6) are **different data lines**. Multiple earlier illustrative images mistakenly joined them; **do not follow those mistaken connections**. The ESP32-C5 firmware already declares `VOICE_BCLK=GPIO_NUM_1`, `VOICE_WS=GPIO_NUM_4`, `VOICE_MIC_DIN=GPIO_NUM_5`, and `VOICE_AMP_DOUT=GPIO_NUM_6`.
+**Important:** microphone SD (GPIO5) and amplifier DIN (GPIO6) are **different data lines**. Multiple earlier illustrative images mistakenly joined them; **do not follow those mistaken connections**. An earlier ESP32-C5 firmware revision declared `VOICE_BCLK=GPIO_NUM_1`, `VOICE_WS=GPIO_NUM_4`, `VOICE_MIC_DIN=GPIO_NUM_5`, and `VOICE_AMP_DOUT=GPIO_NUM_6`; **the declarations have now been removed**.
 
-## Simplest breadboard assembly
+## Historical breadboard assembly (do not build on current C5 firmware)
 
 1. Leave the LILYGO's built-in LCD attached; **no display jumper wires are required**.
 2. Put the LILYGO across the breadboard's center trench, **with USB-C to the left**; install properly sized male header pins if the board has only through-holes. Do not rely on a diagram's decorative wire placement.
@@ -64,11 +66,11 @@ The ELEGOO 830 has **63 columns**, two five-hole strips separated by the center 
 
 Do not reuse these pins for the external audio modules.
 
-## Current software behavior and validation
+## Historical software behavior and validation
 
-- Active sketch: [`firmware/CuteDisplay/lcd.ino`](../../firmware/CuteDisplay/lcd.ino), currently labelled **4.2**.
-- Hold **GPIO28** for **1.4 seconds** to trigger **two seconds** of microphone recording then local speaker playback. This is **sequential loopback**, not full-duplex voice chat.
-- GPIO28 short press has no action; GPIO0 retains its existing app/status/Wi-Fi behavior.
+- Current sketch: [`firmware/CuteDisplay/lcd.ino`](../../firmware/CuteDisplay/lcd.ino), **without** the former audio-loopback code.
+- **Historical behavior only:** GPIO28 long-press formerly triggered a two-second microphone-to-speaker test. **This behavior has been removed.**
+- GPIO28 has no current voice-test handler; GPIO0 retains its app/status/Wi-Fi behavior.
 - The real-time AI server/STT/Ollama/TTS pipeline **has not yet been implemented in the committed firmware**.
 - The iPhone app is still the primary BLE controller. Wi-Fi support in firmware is separate from a completed voice AI workflow.
 - Not verified here: bench fit, USB-current budget, Arduino firmware compilation, real microphone/speaker function, or echo cancellation.
@@ -81,7 +83,7 @@ Do not reuse these pins for the external audio modules.
 4. Inspect serial logs for I²S errors and watch for resets or power droop.
 5. Only after a successful local loopback, develop STT → Ollama → TTS streaming and talking animations.
 
-## Future (not wired in this phase)
+## Successor hardware plan (not yet wired)
 
 - Freenove ESP32-S3 camera board (FNK0085B N16R8) and Waveshare 1.9-inch ST7789V2 display (SKU 23822) are future candidates.
 - Do not infer that they are integrated with the current sketch. A firmware port and a new conflict-checked GPIO map will be required before migration.
