@@ -1,5 +1,14 @@
 # CuteDisplay — Project Handoff / Resume Here
 
+## Current implementation — Phase 6 C5 firmware OTA over existing UART + updating popup
+
+**User selected no-extra-wires application-level C5 OTA. User also requested on-screen pop-up while firmware is uploaded/installed.** We have added beta source to the existing `firmware/CuteDisplay/lcd.ino`: `C5UARTOTA.h`, `C5FirmwareVersion.h` (v1 bootstrap), and a last-layer **FIRMWARE UPDATE / RECEIVING FROM BRAIN** popup with progress bar, **INSTALLING UPDATE / VERIFYING / RESTARTING** state, and **UPDATE FAILED** error state. C5 writes inactive OTA app slot via `Update.begin/write/setSHA256/end(false)`, and calls `ESP.restart()` only after verification; no reboot on failed/incomplete images.
+
+S3 now includes `BrainC5OTA.h` and `C5FirmwareImage.h`. It queries C5 firmware version and inactive slot size, sends newer separately-compiled C5 binary over the existing CRC8/CuteLink UART in 40-byte chunks with ACK/retries, and waits for **C5 post-reboot version** before reporting success. Updates wait for an idle command relay; ordinary iPhone display commands are rejected during flashing. No BLE, Wi-Fi, iPhone Swift or working GPIO/921600 UART settings were changed. The checked-in `C5FirmwareImage.h` is **empty** to prevent accidental OTA until packaged.
+
+**First stage requires one final direct C5 USB flash** with OTA-capable 16MB dual-app partition layout and version 1. Later bump C5 version to 2+, compile C5 .bin for chip ID 23, then run `python3 tools/package_c5_firmware.py --bin path/to/C5-app.bin --version 2` to generate S3 `C5FirmwareImage.h`, then upload **only S3**. Verify build/flash sizes, run a controlled update, confirm display progress/reboot and S3 success log. If failed, old app normally stays, but broken post-boot apps require C5 USB recovery; bootloader rollback support is **not proven**. **No firmware compilation/device transfer executed here.** Detailed [bootstrap, tests and rollback](hardware/s3-c5-uart-firmware-update.md). Preserve the known-good prior source commit `ca00878a702a3717294c5ecdcd449ff1eb80a1f1` until hardware validation.
+
+
 ## Requested next feature — S3-initiated C5 display firmware OTA (design only)
 
 The user wants to **flash only the S3 USB-C** and have S3 automatically upgrade the LILYGO C5 if its firmware differs. The confirmed working stack is S3 BLE/Wi-Fi/LAN and C5 UART at 921600; do not destabilize it. Research confirms C5 ROM download needs **BOOT GPIO28 held low**, **GPIO27 high**, reset **EN**, plus **UART0 GPIO11 TX/12 RX**—*not* the existing C5 app UART GPIO6 TX/1 RX. C5 GPIO0 is its left **user button**, not BOOT. A permanent S3 hardware flasher would require four more connections and physical header/pad validation.

@@ -26,6 +26,8 @@
 #include "board_config.h"
 #include "axp2602.h"
 #include "CuteLink.h"
+#include "C5FirmwareVersion.h"
+#include "C5UARTOTA.h"
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -576,7 +578,7 @@ int asciiMessageScale() { return max(1, min(6, messageSize + 1)); }
 void drawBatteryOverlay();
 void textAt(const String &s,int x,int y,int scale,uint16_t color);
 void drawBrainLinkOverlay(){
- if(brainLinkConnected())return;
+ if(brainLinkConnected()||C5UARTOTA::active())return;
  // Persistent, opaque foreground warning. Covers any animated content
  // underneath but does not destroy message, animation or user preferences.
  const int x=32,y=43,w=256,h=86;
@@ -1961,6 +1963,26 @@ void drawMessage() {
  // Must be LAST so the warning cannot be covered by any other overlay,
  // including battery/charging popups or mascot animations.
  drawBrainLinkOverlay();
+ // Firmware update screen always covers the mascot and Brain link warning.
+ if(C5UARTOTA::phase!=C5UARTOTA::IDLE){
+  const int x=24,y=38,w=272,h=98;
+  rect(x,y,w,h,0xFFE0);
+  rect(x+3,y+3,w-6,h-6,0x1082);
+  if(C5UARTOTA::phase==C5UARTOTA::RECEIVING){
+   textAt("FIRMWARE UPDATE",68,47,2,0xFFFF);
+   textAt("RECEIVING FROM BRAIN",90,79,1,0xFFE0);
+   int pct=C5UARTOTA::percent();
+   rect(44,102,232,12,0x39E7);
+   rect(44,102,(232*pct)/100,12,0x07E0);
+   textAt(String(pct)+"%",142,119,1,0xFFFF);
+  }else if(C5UARTOTA::phase==C5UARTOTA::INSTALLING){
+   textAt("INSTALLING UPDATE",51,53,2,0xFFFF);
+   textAt("VERIFYING / RESTARTING",85,91,1,0xFFE0);
+  }else{
+   textAt("UPDATE FAILED",77,55,2,0xF800);
+   textAt(C5UARTOTA::error(),74,94,1,0xFFFF);
+  }
+ }
  finishDrawing();
 }
 void showMessage(String s) {
@@ -2632,6 +2654,9 @@ static void handleRadioFrame(const String &s){
   redrawCurrent();
  }
 }
+void c5OTARedraw(){
+ if(lcdReady)redrawCurrent();
+}
 static void serviceBrain() {
  CuteLink::Frame f;
  for(int n=0;n<12&&s3Reader.poll(Serial1,f);++n){
@@ -2639,6 +2664,15 @@ static void serviceBrain() {
   if(!s3Online){
    s3Online=true;Serial.println("[UART] S3 Brain link established");
    toS3("LOG","C5 connected");
+  }
+  if(f.type.startsWith("OTA_")){
+   C5UARTOTA::onFrame(Serial1,f);
+   continue;
+  }
+  if(C5UARTOTA::active()){
+   if(f.type=="CMDHEX"||f.type=="TEXT"||f.type=="MOOD"||f.type=="MASCOT")
+    CuteLink::send(Serial1,f.seq,"NACK","UPDATING");
+   continue;
   }
   if(f.type=="HELLO"){
    // Remote reboot: require a NEW successful round trip.
@@ -2745,6 +2779,8 @@ void setup(){
 }
 void loop(){
  serviceBrain();
+ C5UARTOTA::tick();
+ if(C5UARTOTA::active())return;
  char input[MAX_CMD+1]={0};
  for(int q=0;q<8&&commandQueue&&xQueueReceive(commandQueue,input,0)==pdTRUE;q++){
   processCommand(String(input));

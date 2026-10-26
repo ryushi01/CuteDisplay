@@ -1,3 +1,5 @@
+> **Update (2026-10-27):** The application-level C5 OTA receiver, Brain UART sender, image packager and progress popups are now present in beta source. They have **not been compiled or tested on hardware**. Follow the new [Phase-6 implementation and bootstrap guide](../hardware/s3-c5-uart-firmware-update.md) before flashing; this earlier document describes the design alternatives.
+
 # Phase 6 proposal — S3-delivered firmware updates for the LILYGO ESP32-C5
 
 **Status: researched engineering design only. NOT IMPLEMENTED or tested.** Do not interpret these notes as OTA support in the existing firmware. The user has confirmed that the S3↔C5 UART at **921600 baud**, iPhone↔S3 Bluetooth and S3 Wi-Fi/LAN fallback work. Preserve those working features.

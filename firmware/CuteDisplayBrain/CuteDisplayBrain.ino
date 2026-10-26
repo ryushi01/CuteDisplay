@@ -27,9 +27,10 @@
 // Do not include the ESP-IDF-internal esp_gatt_defs.h directly.
 #include "BrainPinPlan.h"
 #include "CuteLink.h"
+#include "BrainC5OTA.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
-static constexpr char S3_FW_VERSION[]="Phase5-BRAIN-LAN-20261027";
+static constexpr char S3_FW_VERSION[]="Phase6-UART-C5-OTA-20261027";
 static constexpr size_t MAX_CMD=96;
 // Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
 // UART frame payload (one-digit chunk index, total, delimiters).
@@ -218,14 +219,28 @@ static void sendRadioStatus(bool immediate);
 static void toggleBrainWiFiByButton();
 static void processFace(const CuteLink::Frame &f){
  lastFace=millis();
- if(!faceOnline)Serial.println("[S3] C5 UART connected");
+ if(!faceOnline){
+  Serial.println("[S3] C5 UART connected");
+  BrainC5OTA::onConnected(Serial1);
+ }
  faceOnline=true;
+ if(f.type.startsWith("OTA_")){
+  BrainC5OTA::onFrame(Serial1,f);
+  return;
+ }
  if(f.type=="PROBE"){
   // Exact sequence echo verifies the C5 transmitted and the S3 received it.
   // The C5's warning clears only after it also receives this matching ACK.
   CuteLink::send(Serial1,f.seq,"ACK","PROBE");
  } else if(f.type=="HELLO"){
   if(activeSeq)cancelCommand("FACE_RESTART");
+  // Recovery: C5 rebooted while OTA_END ACK was in flight.
+  if(BrainC5OTA::stage==BrainC5OTA::END){
+   BrainC5OTA::stage=BrainC5OTA::WAIT_BOOT;
+   BrainC5OTA::pending=0;
+   BrainC5OTA::waitSince=millis();
+   BrainC5OTA::lastSent=millis()-3001UL;
+  }
   sendRadioStatus(true);
   CuteLink::send(Serial1,f.seq,"ACK","HELLO");
   Serial.println("[C5] HELLO");
@@ -573,6 +588,9 @@ static void pollBLECommands(){
  char item[MAX_CMD+1]={};
  if(xQueueReceive(incomingCommands,item,0)!=pdTRUE)return;
  if(!faceOnline){proxyResult("ERR:FACE_OFFLINE");return;}
+ if(BrainC5OTA::updating()){
+  proxyResult("ERR:DISPLAY_UPDATING");return;
+ }
  String incoming(item);
  if(controlBrainWiFi(incoming)){
   proxyResult(wifiCommandReply);
@@ -755,7 +773,7 @@ static void handleBrainLANLine(const String &line){
  if(command.isEmpty()||command.length()>MAX_CMD){
   lanClient.println("NACK:INVALID_SIZE");return;
  }
- if(lanAwaitingCommand||activeSeq||
+ if(BrainC5OTA::updating()||lanAwaitingCommand||activeSeq||
     (incomingCommands&&uxQueueMessagesWaiting(incomingCommands))){
   lanClient.println("NACK:BUSY");return;
  }
@@ -906,7 +924,10 @@ void setup(){
  else WiFi.mode(WIFI_OFF);
 }
 void loop(){
+ BrainC5OTA::permitUpdate=!activeSeq && !lanAwaitingCommand &&
+    incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
+ BrainC5OTA::tick(Serial1,faceOnline);
  pollUSB();
  updateBrainWiFi();
  pollBrainLAN();

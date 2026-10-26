@@ -1,6 +1,14 @@
 # CuteDisplay 🎀
 
-## Phase 6 design — one S3 upload updates C5 automatically (PLANNED, NOT IMPLEMENTED)
+## Phase 6 beta — C5 firmware upgraded by S3 over existing UART (SOURCE ADDED, NOT HARDWARE-TESTED)
+
+The C5 sketch now includes `C5UARTOTA.h` and `C5FirmwareVersion.h`, an **inactive-partition OTA receiver** with SHA-256 validation. The display shows a persistent **FIRMWARE UPDATE** overlay with a progress bar during upload, **INSTALLING UPDATE** during verification/reboot, or **UPDATE FAILED** when aborted. The C5 calls `ESP.restart()` **only after** the entire new image is verified. The S3 `BrainC5OTA.h` queries C5 version/slot size and transfers the separately compiled, bundled C5 image only if newer, then checks the **post-reboot running version** before declaring success. Existing 921600 baud UART pins are unchanged; C5 Bluetooth/Wi-Fi remain OFF; iPhone app source is unchanged.
+
+**IMPORTANT:** Initial use requires **one C5 USB flash** with a verified dual OTA app partition layout (initial release ID 1) and S3 firmware with placeholder C5 image. Future C5 releases must be compiled for **ESP32-C5**, bump `C5FirmwareVersion.h`, and package the C5 application binary using `python3 tools/package_c5_firmware.py --bin /path/to/firmware.bin --version 2`, which generates `C5FirmwareImage.h` embedded in the S3 firmware. Then only **S3 USB-C** is used to flash and deliver C5 upgrades. The checked-in generated image is **empty by default and intentionally causes no update**. A too-large S3 app may require a suitable partition selection; do not assume any separate C5 image automatically appears during an S3 upload.
+
+**Status:** source implementation + structural review; Arduino compilation, flash partition compatibility, successful C5 update/automatic reset and recovery **still require hardware testing**. Preserve direct C5 USB recovery access. [One-time bootstrap, update and test guide](docs/hardware/s3-c5-uart-firmware-update.md).
+
+## Phase 6 original architecture notes (implemented in beta; hardware verification pending)
 
 The next project objective is **C5 firmware upgrades carried by the Brain**, with one USB firmware upload **only to S3** for future releases. Recommended approach: one-time C5 USB bootstrap with an OTA-capable sketch, then use the existing working 921600-baud S3 GPIO47/21 ↔ C5 GPIO1/6 UART for versioned, SHA-256-verified updates into an inactive C5 OTA partition. The C5 binary must be built for **ESP32-C5** and bundled into the S3 firmware through a repeatable packaging step: uploading an S3 sketch by itself cannot build or flash another MCU's firmware. **Do not assume OTA is supported by the presently running C5 code.** The 16MB C5 must use an OTA-capable partition table. A broken C5 bootloader/firmware still needs USB recovery, unless we add a hardware ROM-programmer path.
 
