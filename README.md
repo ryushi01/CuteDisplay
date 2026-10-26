@@ -1,5 +1,16 @@
 # CuteDisplay 🎀
 
+> **Resuming this project from another ChatGPT chat?** Start with **[PROJECT HANDOFF / RESUME HERE](docs/PROJECT_HANDOFF.md)**. It contains the current implementation status, architecture, pin assignments, source locations, pending tasks and the safety conditions for the one-USB-C experiment. Read it together with the latest main branch source before making changes.
+
+## Upcoming first hardware experiment — single USB-C power (Option 1)
+
+![Proposed LILYGO 5V/GND power-only connection to Freenove ESP32-S3; NOT approved until current capacity verified](docs/hardware/option1-lilygo-powers-s3.svg)
+
+**Desired setup:** One USB-C cable into **LILYGO T-Display-C5**. For the initial test only, the proposed two jumper wires are **LILYGO 5V → Freenove S3 5V/VIN** and **LILYGO GND → S3 GND**. Leave UART, microphone, amplifier, speaker and camera disconnected.
+
+**Safety stop:** We have **not verified** that the LILYGO 5V header/USB power path can safely supply the S3's peak current; observing 5V with a meter alone is insufficient. **Do not connect S3 5V until the power-path current rating is confirmed by schematic/manufacturer information or suitable electrical testing.** If capacity cannot be confirmed, use independent USB supplies for initial development or a properly rated parallel distribution circuit. Verify exact printed board pin labels and guard against USB backfeed during separate programming. This drawing is a signal/power concept, not authoritative physical connector orientation.
+
+
 ## About CuteDisplay
 
 **CuteDisplay** is a customizable, battery-powered miniature companion display built around the **LILYGO T-Display C5 (ESP32-C5)** and controlled from a companion **iPhone app**. The idea is to turn a small LCD into a playful, expressive accessory: it can show a cute animated character and a personal message, while the phone acts as the convenient place to configure and manage it.
