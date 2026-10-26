@@ -1,5 +1,12 @@
 # CuteDisplay — Project Handoff / Resume Here
 
+## Current patch 2 — 2026-10-26: persistent NimBLE 0x0508 and two-way UART (untested)
+
+User confirmed pairing still fails with `host_status=1288 (0x0508)`, a **peer-unspecified** error, even after prior bond recovery. In commit `7c062c3`, S3 removes the duplicate manual security-start in onConnect because the Arduino-ESP32 BLE stack starts security itself. The matching iPhone BluetoothManager starts with a protected FFF1 read, deferring other characteristic subscriptions/reads until `PROXY_READY`. **Neither fix is verified on physical hardware and pairing root cause remains open.** The new S3 startup banner is `Phase4-BLEPAIR-FIX2-20261026`; encryption/bonding remain mandatory.
+
+The C5's persistent BRAIN DISCONNECTED popup is now two-way: C5 sends numbered `PROBE` approximately every 1.6s; S3 echoes `ACK PROBE` with matching sequence. A valid inbound S3 frame AND a recent exact response to a C5-originated probe are both required to dismiss the warning; if either direction fails for ~6s it stays. C5 Bluetooth/Wi-Fi are still OFF, UART still 921600, wiring remains S3 TX47→C5 RX1, C5 TX6→S3 RX21, common ground. **Both Arduino sketches plus updated iPhone Swift manager are required.** See [paired field test](hardware/ble-1288-two-way-test.md). The old working Phase 2 code is still available for USB rollback.
+
+
 **Last updated:** 2026-10-26  
 **Repository:** https://github.com/ryushi01/CuteDisplay  
 **Default branch:** `main`  
