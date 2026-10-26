@@ -1,16 +1,12 @@
 /*
  CuteDisplay 4.2 voice hardware loopback / no RSS - T-Display C5 / ESP32-C5
- Message mode, 24 drink entries / four per page, rotating mascot,
+ Message display with animated mascot,
  brightness, live AXP2602 battery level (BLE 180F / 2A19).
 
  Commands on FFF0/FFF1:
   Text               = message mode
   B:75               = brightness
   C:0 / C:1 / C:2   = bunny / kitty / chiikawa
-  D:RESET            = clear staged drink list, does not change current LCD
-  D:ADD:TEQUILA,9    = append one staged drink
-  D:SHOW             = commit staged list and display rotating drinks pages
-  D:TEQUILA,9;WINE,2 = legacy short-list format
 
  Preserve board_config.h, and install LILYGO's axp2602.h library.
 */
@@ -64,9 +60,6 @@ bool parseEntry(String entry, Drink &result);
 #define LCD_H 170
 #define MAX_CMD 96
 #define MAX_GLYPHS 128
-#define MAX_DRINKS 24
-#define PAGE_SIZE 4
-#define PAGE_MS 3500UL
 #define BLACK 0x0000
 #define WHITE 0xFFFF
 #define PINK 0xF81F
@@ -463,19 +456,9 @@ unsigned long wifiToastUntil = 0;
 bool wifiToastEnabled = false;
 
 unsigned long lastScroll = 0;
-unsigned long lastPage = 0;
-
-struct Drink { String name; int count; };
-Drink staged[MAX_DRINKS];
-Drink drinks[MAX_DRINKS];
-int stagedCount = 0;
-int drinkCount = 0;
-int currentPage = 0;
 int mascot = 1;
 int theme = 0;
 int brightness = 75;
-enum DisplayMode { MESSAGE_MODE, DRINKS_MODE };
-DisplayMode mode = MESSAGE_MODE;
 String message = "こんにちわ";
 bool bubbleEnabled = false; // Normal scrolling remains the default.
 bool bubbleTypewriter = true;
@@ -610,9 +593,8 @@ void drawConnectivityHUD(){
  textAt(soc,wx+13,y+2,1,batteryCharging?0x07E0:WHITE);
 }
 
-void drawDrinks();
 void drawMessage();
-void redrawCurrent() { if(mode==DRINKS_MODE)drawDrinks();else drawMessage(); }
+void redrawCurrent() { drawMessage(); }
 
 // 25 accent themes. Outside the bubble stays pure black; the bubble is light.
 // RGB565 values matched to the iPhone themeColors array (same 0..24 index).
@@ -629,21 +611,6 @@ uint16_t themeColor() {
 // Only the accent color changes with the chosen theme.
 uint16_t themeBackground() { return BLACK; }
 uint16_t themeMascotBackground() { return BLACK; }
-// Drinks mode only: contrasting, alternating tinted row panels.
-// Keep the outside black and preserve the light speech-bubble treatment.
-uint16_t themeRow(int index) {
- uint16_t c = themeColor();
- int r = (c >> 11) & 31;
- int g = (c >> 5) & 63;
- int b = c & 31;
- // Alternate two clearly visible dark charcoal + theme-accent blends.
- // The upper bound prevents light rows from competing with white quantities.
- int base = (index % 2) ? 2 : 4;
- r = min(31, base + (r * ((index % 2) ? 4 : 6)) / 31);
- g = min(63, base * 2 + (g * ((index % 2) ? 8 : 12)) / 63);
- b = min(31, base + (b * ((index % 2) ? 4 : 6)) / 31);
- return (uint16_t)((r << 11) | (g << 5) | b);
-}
 // Make a softly tinted, bright speech-bubble fill from the active accent.
 // Keep the outside black and use dark lettering inside the light bubble.
 uint16_t themeBubbleFill() {
@@ -723,7 +690,6 @@ void saveDisplayState(){
  // The news bubble temporarily swaps the active message/mode. Never persist
  // this transient preview in place of the user's own display settings.
  const String &persistentMessage = message;
- const DisplayMode persistentMode = mode;
  const bool persistentBubble = bubbleEnabled;
  displayPrefs.begin("cute-display",false);
  displayPrefs.putUChar("v",1);
@@ -752,12 +718,6 @@ void saveDisplayState(){
  displayPrefs.putUChar("glyphnum",(uint8_t)glyphCount);
  if(glyphCount>0)
   displayPrefs.putBytes("glyphs",glyphCache,(size_t)glyphCount*sizeof(CJKGlyph));
- displayPrefs.putUChar("mode",persistentMode==DRINKS_MODE?1:0);
- displayPrefs.putUChar("drinknum",drinkCount);
- for(int i=0;i<MAX_DRINKS;i++){
-  if(i<drinkCount){displayPrefs.putString(("n"+String(i)).c_str(),drinks[i].name);
-   displayPrefs.putUShort(("q"+String(i)).c_str(),drinks[i].count);}
- }
  displayPrefs.end();stateDirty=false;
  Serial.println("[STATE] Saved to NVS");
 }
@@ -787,12 +747,6 @@ void loadDisplayState(){
  if(message.isEmpty())message="こんにちわ";
  Serial.printf("[STATE] Restored message: %u bytes, bubble=%d\n",
                (unsigned)message.length(),bubbleEnabled?1:0);
- mode=displayPrefs.getUChar("mode",0)?DRINKS_MODE:MESSAGE_MODE;
- drinkCount=min(MAX_DRINKS,(int)displayPrefs.getUChar("drinknum",0));
- for(int i=0;i<drinkCount;i++){
-  drinks[i].name=displayPrefs.getString(("n"+String(i)).c_str(),"");
-  drinks[i].count=displayPrefs.getUShort(("q"+String(i)).c_str(),0);
- }
  displayPrefs.end();
  Serial.println("[STATE] Restored from NVS");
 }
@@ -925,7 +879,7 @@ void textAt(const String &s,int x,int y,int scale,uint16_t color) {
  }
 }
 // Overlay is composited into the active framebuffer; no mode switch,
-// no re-upload of drinks, and no reset of scroll or typewriter progress.
+// Do not reset scroll or typewriter progress.
 void drawBatteryOverlay(){
  unsigned long now=millis();
  if(wifiToastUntil && (int32_t)(wifiToastUntil-now)>0){
@@ -1667,7 +1621,7 @@ size_t bubbleCharacterCount(const String &s);
 static bool mascotIsSpeaking() {
   // Keep eyes continuously open during the entire news bubble,
   // including page-transition pauses; never fall back to sleepy blink mid-speech.
-  return mode == MESSAGE_MODE && bubbleEnabled && bubbleTypewriter
+  return bubbleEnabled && bubbleTypewriter
       && revealedCharacters < bubbleCharacterCount(message);
 }
 
@@ -2010,7 +1964,7 @@ void drawMessage() {
 void showMessage(String s) {
  noteStateChanged();
  s.trim(); if(s.isEmpty())return;
- message=s;mode=MESSAGE_MODE;
+ message=s;
  revealedCharacters=0;lastBubbleReveal=millis();
  int width=richWidth(s,asciiMessageScale(),jpMessageScale());
  int right=contentRight();
@@ -2018,71 +1972,6 @@ void showMessage(String s) {
  scrollX=scrolling?right:(right-width)/2;
  drawMessage();lastScroll=millis();
  Serial.println("[MODE] Message");
-}
-int pageCount(){return max(1,(drinkCount+PAGE_SIZE-1)/PAGE_SIZE);}
-void drawDrinks(){
- if(!beginDrawing())return;
- rect(0,0,4,LCD_H,themeColor());
- drawMascot();
- int start=currentPage*PAGE_SIZE;
- for(int row=0;row<PAGE_SIZE && start+row<drinkCount;row++){
-  int y=12+row*39;
-  // Contrasting dark-tinted rows only in Drinks Mode; outside stays black.
-  rect(9,y-5,contentRight()-9,35,themeRow(row));
-  rect(9,y-3,2,30,themeColor());
-  String name=drinks[start+row].name;
-  String qty="X"+String(drinks[start+row].count);
-  int qtyX=(contentRight()-5)-qty.length()*12;
-  // Keep a consistent 16-pixel Japanese glyph height in the compact rows.
-  // English scales to 2x only when it fits before the quantity column.
-  bool hasJapanese = false;
-  for (int k=0; k<(int)name.length(); k++) {
-   if ((unsigned char)name[k] >= 0x80) { hasJapanese=true; break; }
-  }
-  int nameScale = (!hasJapanese && 14+richWidth(name,2,1)<qtyX-6) ? 2 : 1;
-  richText(name,14,y+8,nameScale,1,themeColor(),qtyX-5);
-  textAt(qty,qtyX,y+4,2,WHITE);
- }
- // Small dots at the bottom-right of the character panel indicate pages.
- if(pageCount()>1 && mascotVisible){
-  int pages=pageCount();
-  int left=270-(pages*8)/2;
-  for(int i=0;i<pages;i++)oval(left+i*8,161,2,2,i==currentPage?themeColor():WHITE);
- }
- drawBatteryOverlay();
- drawConnectivityHUD();
- finishDrawing();
-}
-void activateDrinks(){
- noteStateChanged();
- drinkCount=stagedCount;
- for(int i=0;i<drinkCount;i++)drinks[i]=staged[i];
- currentPage=0;lastPage=millis();
- mode=DRINKS_MODE;scrolling=false;
- drawDrinks();
- Serial.printf("[DRINKS] Showing %d drinks, %d pages\n",drinkCount,pageCount());
-}
-bool parseEntry(String entry,Drink &result){
- int comma=entry.indexOf(',');if(comma<=0)return false;
- String name=entry.substring(0,comma);
- String value=entry.substring(comma+1);
- int second=value.indexOf(',');if(second>=0)value=value.substring(0,second);
- name.trim();value.trim();
- if(name.isEmpty()||value.isEmpty())return false;
- for(int i=0;i<(int)value.length();i++)if(value[i]<'0'||value[i]>'9')return false;
- result.name=name;
- result.count=constrain(value.toInt(),0,9999);
- return !result.name.isEmpty();
-}
-void legacyDrinks(String payload){
- stagedCount=0;int start=0;
- while(start<(int)payload.length()&&stagedCount<MAX_DRINKS){
-  int end=payload.indexOf(';',start);if(end<0)end=payload.length();
-  Drink item;
-  if(parseEntry(payload.substring(start,end),item))staged[stagedCount++]=item;
-  start=end+1;
- }
- activateDrinks();
 }
 void setBrightness(int percent){
  brightness=constrain(percent,0,100);
@@ -2449,7 +2338,7 @@ void processCommand(String cmd){
     cmd.startsWith("B:")||cmd.startsWith("C:"))noteStateChanged();
  if(cmd.startsWith("T:")){noteStateChanged();
   int n=cmd.substring(2).toInt();
-  if(n>=0&&n<=24){theme=n;if(mode==DRINKS_MODE)drawDrinks();else drawMessage();}
+  if(n>=0&&n<=24){theme=n;drawMessage();}
   return;
  }
  if(cmd=="P:OFF"){
@@ -2465,12 +2354,12 @@ void processCommand(String cmd){
  }
  if(cmd.startsWith("Q:")) {
   int n=cmd.substring(2).toInt();
-  if(n==0||n==1){bubbleEnabled=n==1;if(mode==MESSAGE_MODE)showMessage(message);}
+  if(n==0||n==1){bubbleEnabled=n==1;showMessage(message);}
   return;
  }
  if(cmd.startsWith("Y:")) {
   int n=cmd.substring(2).toInt();
-  if(n==0||n==1){bubbleTypewriter=n==1;if(mode==MESSAGE_MODE && bubbleEnabled)showMessage(message);}
+  if(n==0||n==1){bubbleTypewriter=n==1;if(bubbleEnabled)showMessage(message);}
   return;
  }
  if(cmd.startsWith("A:")){int n=cmd.substring(2).toInt();if(n>=0&&n<=7){accessoryStyle=n;redrawCurrent();}return;}
@@ -2517,28 +2406,15 @@ void processCommand(String cmd){
  }
  if(cmd.startsWith("F:")) {
   int n=cmd.substring(2).toInt();
-  if(n>=1&&n<=5){messageSize=n;if(mode==MESSAGE_MODE)showMessage(message);}
+  if(n>=1&&n<=5){messageSize=n;showMessage(message);}
   return;
  }
  if(cmd.startsWith("B:")){setBrightness(cmd.substring(2).toInt());return;}
  if(cmd.startsWith("C:")){
   int n=cmd.substring(2).toInt();
-  if(n>=0&&n<=5){mascot=n;if(mode==DRINKS_MODE)drawDrinks();else drawMessage();}
+  if(n>=0&&n<=5){mascot=n;drawMessage();}
   return;
  }
- if(cmd=="D:RESET"){
-  stagedCount=0;Serial.println("[DRINKS] Upload started");return;
- }
- if(cmd.startsWith("D:ADD:")){
-  Drink item;
-  if(stagedCount<MAX_DRINKS && parseEntry(cmd.substring(6),item)){
-   staged[stagedCount++]=item;
-   Serial.printf("[DRINKS] Added %d/%d: %s\n",stagedCount,MAX_DRINKS,item.name.c_str());
-  }else Serial.println("[DRINKS] Rejected item");
-  return;
- }
- if(cmd=="D:SHOW"){activateDrinks();return;}
- if(cmd.startsWith("D:")){legacyDrinks(cmd.substring(2));return;}
  showMessage(cmd);
 }
 
@@ -2719,7 +2595,6 @@ void setup(){
  userButtonLastRaw=digitalRead(PIN_USER_BUTTON);
  userButtonStable=userButtonLastRaw;
  loadDisplayState();
- bool savedDrinksMode=(mode==DRINKS_MODE && drinkCount>0);
  installStartupGlyphs();loadPersistedGlyphs();loadSmoothGlyphs();initBattery();
  // Start BLE before allocating the 108,800-byte DMA LCD frame buffer.
  // The last device log stopped immediately after LCD Ready, before BLE Ready.
@@ -2730,7 +2605,6 @@ void setup(){
  initBLE();
  Serial.println("[BOOT] Initializing LCD...");
  initLCD();
- if(savedDrinksMode){mode=DRINKS_MODE;drawDrinks();}
  setBrightness(brightness);
  stateDirty=false; // startup redraw is not a preference change
  loadWifiConfig();
@@ -2842,27 +2716,24 @@ void loop(){
   lastBatteryOverlayFrame=now;
   if(!batteryOverlayUntil)redrawCurrent();
  }
- if(mode==DRINKS_MODE&&pageCount()>1&&millis()-lastPage>=PAGE_MS){
-  lastPage=millis();currentPage=(currentPage+1)%pageCount();drawDrinks();
- }
  // Surprise actions start at randomized intervals and automatically end.
  // They never alter the user's chosen mood or mascot.
  if(!nextSurpriseAt)scheduleNextSurprise(millis());
  if(surpriseAction && millis()-surpriseStart>=SURPRISE_DURATION_MS){
   surpriseAction=0;
   scheduleNextSurprise(millis());
-  if(mascotVisible && !(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
+  if(mascotVisible && !scrolling)redrawCurrent();
  }else if(surprisesEnabled && mascotVisible && !surpriseAction
           && (int32_t)(millis()-nextSurpriseAt)>=0){
   surpriseAction=choosePerformance((esp_random()%3)==0);
   surpriseStart=millis();
-  if(!(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
+  if(!scrolling)redrawCurrent();
  }
  if(mascotVisible && millis()-lastMascotAnimation>=MASCOT_ANIMATION_MS){
   lastMascotAnimation=millis();animPhase=(animPhase+1)%32;
   updateExpressiveEyes(lastMascotAnimation);
   // The scrolling message already redraws frequently; avoid unnecessary transfers.
-  if(!(mode==MESSAGE_MODE&&scrolling))redrawCurrent();
+  if(!scrolling)redrawCurrent();
  }
  // Animate mouth independently from the letters in ordinary Message Mode.
  // News already redraws up to ~28 fps while its typewriter is active.
@@ -2872,12 +2743,12 @@ void loop(){
    lastSpeakingFrame=millis();
    drawMessage();
  }
- if(mode==MESSAGE_MODE && bubbleEnabled && bubbleTypewriter
+ if(bubbleEnabled && bubbleTypewriter
     && revealedCharacters<bubbleCharacterCount(message)
     && millis()-lastBubbleReveal>=BUBBLE_LETTER_MS){
   lastBubbleReveal=millis();revealedCharacters++;drawMessage();
  }
- if(mode==MESSAGE_MODE&&scrolling&&millis()-lastScroll>=55UL){
+ if(scrolling&&millis()-lastScroll>=55UL){
   lastScroll=millis();scrollX-=3;
   if(scrollX+richWidth(message,asciiMessageScale(),jpMessageScale())<0)scrollX=contentRight();
   drawMessage();
@@ -2892,8 +2763,8 @@ void loop(){
   if((uint32_t)remaining<sleepMs)sleepMs=(uint32_t)remaining;
  };
  if(mascotVisible)untilDue(lastMascotAnimation+MASCOT_ANIMATION_MS);
- if(mode==MESSAGE_MODE && scrolling)untilDue(lastScroll+55UL);
- if(mode==MESSAGE_MODE && bubbleEnabled && bubbleTypewriter &&
+ if(scrolling)untilDue(lastScroll+55UL);
+ if(bubbleEnabled && bubbleTypewriter &&
     revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+BUBBLE_LETTER_MS);
  if(mascotVisible && mascotIsSpeaking())untilDue(lastSpeakingFrame+105UL);
  if(chargeNoticeUntil)untilDue(lastBatteryOverlayFrame+220UL);
