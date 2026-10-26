@@ -2664,6 +2664,15 @@ static void serviceBrain() {
   if(!s3Online){
    s3Online=true;Serial.println("[UART] S3 Brain link established");
    toS3("LOG","C5 connected");
+   // If bootloader app rollback is enabled, accept the new image only
+   // after LCD initialization and successful S3 UART communication.
+   const esp_partition_t *running=esp_ota_get_running_partition();
+   esp_ota_img_states_t bootState=ESP_OTA_IMG_UNDEFINED;
+   if(running && esp_ota_get_state_partition(running,&bootState)==ESP_OK &&
+      bootState==ESP_OTA_IMG_PENDING_VERIFY){
+    esp_err_t result=esp_ota_mark_app_valid_cancel_rollback();
+    Serial.printf("[C5 OTA] Post-boot app health confirmed: %d\n",(int)result);
+   }
   }
   if(f.type.startsWith("OTA_")){
    C5UARTOTA::onFrame(Serial1,f);
