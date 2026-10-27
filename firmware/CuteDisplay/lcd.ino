@@ -483,13 +483,13 @@ bool userButtonLastRaw = HIGH;
 bool userButtonStable = HIGH;
 unsigned long userButtonChangedAt = 0;
 unsigned long userButtonPressedAt = 0;
-bool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false;
+bool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false,voiceButtonHoldStarted=false;
 unsigned long voiceButtonChangedAt=0,voiceButtonHeldAt=0;
 bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
 unsigned long wifiToastUntil = 0;
 bool wifiToastEnabled = false;
-static String brainWifiToastLabel; // GUI feedback from S3, never from local C5 Wi-Fi.
+static String kittyActivity; // short S3-reported status at bottom-left\nstatic String brainWifiToastLabel; // GUI feedback from S3, never from local C5 Wi-Fi.
 
 unsigned long lastScroll = 0;
 int mascot = 1;
@@ -2005,6 +2005,11 @@ void drawMessage() {
  else {drawMascot();richText(message,scrollX,max(0,(LCD_H-multilineHeight)/2),a,j,themeColor(),contentRight());}
  drawBatteryOverlay();
  drawConnectivityHUD();
+ // Bottom-left unobtrusive activity label at HUD font scale.
+ if(!kittyActivity.isEmpty()){
+  rect(0,LCD_H-13,104,13,BLACK);
+  textAt(kittyActivity,3,LCD_H-11,1,0x07FF);
+ }
  // Must be LAST so the warning cannot be covered by any other overlay,
  // including battery/charging popups or mascot animations.
  drawBrainLinkOverlay();
@@ -2777,6 +2782,10 @@ static void serviceBrain() {
    wifiToastUntil=millis()+2500UL;
    if(lcdReady)redrawCurrent();
   }
+  else if(f.type=="ACTIVITY"){
+   String next=f.payload.substring(0,18);
+   if(next!=kittyActivity){kittyActivity=next;if(lcdReady)redrawCurrent();}
+  }
   else if(f.type=="AI_BEGIN"){
    if(!lcdReady){CuteLink::send(Serial1,f.seq,"NACK","DISPLAY");}
    else{
@@ -2981,31 +2990,30 @@ void loop(){
   }
   if(lcdReady)redrawCurrent();
  }
- // Dedicated C5 BOOT button (GPIO28): hold to record, release to send.
+ // Dedicated BOOT GPIO28: press interrupts speech; short tap stops,
+ // hold 320ms starts recording; release sends captured speech.
  bool voiceRaw=digitalRead(PIN_VOICE_BUTTON);
  if(voiceRaw!=voiceButtonLastRaw){voiceButtonChangedAt=now;voiceButtonLastRaw=voiceRaw;}
  if(now-voiceButtonChangedAt>=35 && voiceRaw!=voiceButtonStable){
   voiceButtonStable=voiceRaw;
   if(voiceRaw==LOW){
    voiceButtonHeldAt=now;
+   voiceButtonHoldStarted=false;
    voiceButtonSession=s3Online;
-   if(voiceButtonSession){
-    toS3("VOICE_START");
-    brainWifiToastLabel="KITTY LISTENING";
-   }else brainWifiToastLabel="BRAIN OFFLINE";
-   wifiToastUntil=now+1600;
-   if(lcdReady)redrawCurrent();
+   if(s3Online)toS3("VOICE_INTERRUPT");
   }else{
-   if(voiceButtonSession && s3Online)toS3("VOICE_STOP");
-   voiceButtonSession=false;voiceButtonHeldAt=0;
-   brainWifiToastLabel="VOICE SENDING";
-   wifiToastUntil=now+1600;
-   if(lcdReady)redrawCurrent();
+   if(voiceButtonHoldStarted && voiceButtonSession && s3Online)toS3("VOICE_STOP");
+   else if(voiceButtonSession && s3Online)toS3("VOICE_CANCEL");
+   voiceButtonSession=false;
+   voiceButtonHoldStarted=false;
+   voiceButtonHeldAt=0;
   }
  }
- // On 30-second cutoff S3 submits automatically; do not start another capture.
- if(voiceButtonHeldAt && (uint32_t)(now-voiceButtonHeldAt)>=30000UL)
-  voiceButtonSession=false;
+ if(voiceButtonStable==LOW && voiceButtonSession && !voiceButtonHoldStarted &&
+    (uint32_t)(now-voiceButtonHeldAt)>=320UL){
+  voiceButtonHoldStarted=true;
+  if(s3Online)toS3("VOICE_START");
+ }
  if(now-lastBatteryRead>=BATTERY_SAMPLE_MS){
   lastBatteryRead=now;
   readBattery();
