@@ -17,6 +17,12 @@
 <key>NSBluetoothAlwaysUsageDescription</key>
 <string>CuteDisplay communicates with your paired drink display over Bluetooth.</string>
 
+<!-- Add to the ACTUAL app target (Target > Signing & Capabilities >
+     Background Modes > Uses Bluetooth LE accessories). This is a fragment:
+     merge the bluetooth-central string with existing UIBackgroundModes values. -->
+<key>UIBackgroundModes</key>
+<array><string>bluetooth-central</string></array>
+
 <!-- Required by iOS when connecting to CuteDisplay over the local Wi-Fi network. -->
 <key>NSLocalNetworkUsageDescription</key>
 <string>Find and control the paired ESP32-S3 Brain over local Wi-Fi when Bluetooth is unavailable.</string>

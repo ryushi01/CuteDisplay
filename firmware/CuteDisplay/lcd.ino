@@ -725,7 +725,14 @@ void saveDisplayState(){
  displayPrefs.putUChar("intense",animationIntensity);
  displayPrefs.putBool("person",personalityEnabled);
  displayPrefs.putUChar("low",deviceLowBatteryThreshold);
- displayPrefs.putString("message",persistentMessage.substring(0,96));
+ // NVS message budget is 96 UTF-8 BYTES, not 96 Unicode characters.
+ // Never truncate inside a multibyte code point (e.g. Japanese or emoji).
+ size_t boundary=min((size_t)persistentMessage.length(),(size_t)96);
+ if(boundary<(size_t)persistentMessage.length()){
+  while(boundary>0 && (((uint8_t)persistentMessage[boundary]&0xC0)==0x80))
+   --boundary;
+ }
+ displayPrefs.putString("message",persistentMessage.substring(0,(unsigned int)boundary));
  // Preserve dynamic 16x16 Japanese glyphs. Previously the text survived a
  // restart but its bitmap glyphs disappeared, leaving an empty message.
  displayPrefs.putUChar("smoothnum",smoothCount);

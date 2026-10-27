@@ -6,6 +6,9 @@ The user **successfully flashed the C5 OTA receiver by USB, then updated C5 v1 â
 
 # CuteDisplay ðŸŽ€
 
+**Background BLE + stored message (2026-10-27):** iOS BLE background restoration needs the actual app target's `bluetooth-central` Background Mode and an active/pending CoreBluetooth task; force-quitting prevents automatic relaunch. A C5 UTF-8 message save fix is committed for the next bundled OTA version; details in [handoff](docs/PROJECT_HANDOFF.md). Never manually edit the checked-in empty C5 image header.
+
+
 **Active BLE reconnect investigation (2026-10-27; second fix untested):** First pairing works, but app reopen can stall after BLE transport connect before encrypted FFF1 readiness. An app-side watchdog fix is committed for testing; hardware firmware is unchanged. Brain Wi-Fi fallback requires phone reachability on the same local subnet and will fail across the user's separate networks. [Current notes](docs/PROJECT_HANDOFF.md).
 
 
