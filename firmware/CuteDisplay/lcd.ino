@@ -489,7 +489,8 @@ bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
 unsigned long wifiToastUntil = 0;
 bool wifiToastEnabled = false;
-static String kittyActivity; // short S3-reported status at bottom-left\nstatic String brainWifiToastLabel; // GUI feedback from S3, never from local C5 Wi-Fi.
+static String kittyActivity; // short S3-reported status at bottom-left
+static String brainWifiToastLabel; // GUI feedback from S3, never from local C5 Wi-Fi.
 
 unsigned long lastScroll = 0;
 int mascot = 1;
