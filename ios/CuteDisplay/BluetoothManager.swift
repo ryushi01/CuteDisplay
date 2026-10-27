@@ -1087,8 +1087,7 @@ extension BluetoothManager: CBPeripheralDelegate {
                 // For Brain, sendNext waits until FFF1 notification is active.
                 // Legacy C5 FFF1 has no notifications and uses WriteResponse.
                 sendNext()
-            } else if awaitingBrainAck,
-                      let data = characteristic.value,
+            } else if let data = characteristic.value,
                       let response = String(data: data, encoding: .utf8) {
                 if response.hasPrefix("AI:STATUS:") {
                     let state = String(response.dropFirst("AI:STATUS:".count))
@@ -1111,9 +1110,9 @@ extension BluetoothManager: CBPeripheralDelegate {
                     }
                     return
                 }
-                if response.hasPrefix("ACK:") ||
+                if awaitingBrainAck && (response.hasPrefix("ACK:") ||
                    response.hasPrefix("ERR:") ||
-                   response.hasPrefix("NACK:") {
+                   response.hasPrefix("NACK:")) {
                     brainResponse = response
                     finishBrainCommandIfReady()
                 }
