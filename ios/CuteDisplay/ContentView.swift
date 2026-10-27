@@ -836,6 +836,7 @@ struct ContentView: View {
                 Button {
                     bluetooth.sendControlCommand("AI:NEW")
                     aiQuestion = ""
+                    lastSubmittedAIQuestion = ""
                     aiResponse = ""
                     aiStatus = "New conversation requested; previous context will be cleared on S3."
                 } label: {
