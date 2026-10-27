@@ -275,6 +275,7 @@ inline void run(void*){
   cfg.event_handler=event;
   cfg.timeout_ms=60000;
   cfg.buffer_size=4096;
+  cfg.buffer_size_tx=8192;
   esp_http_client_handle_t http=esp_http_client_init(&cfg);
   if(http){
    String auth="Bearer "+key;
