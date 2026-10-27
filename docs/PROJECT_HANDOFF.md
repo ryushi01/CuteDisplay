@@ -1,3 +1,15 @@
+## 2026-10-27 — AI integration phase 1: Open WebUI text chat (pending iPhone test)
+
+Topology confirmed by user: **Open WebUI runs on AI-SERVER**; **Ollama and real-time voice services run on the MacBook**; voice conversations already work via Open WebUI. Preserve the existing server setup and avoid assuming Ollama lives on AI-SERVER. S3 Brain and Kitty communicate over encrypted BLE/UART.
+
+Phase 1 committed in `ios/CuteDisplay/ContentView.swift`: an optional **KITTY AI — OPEN WEBUI** section in the iPhone app with HTTPS server URL, model ID, API key, user prompt, Ask button, text response and optional 96-byte UTF-8-safe display message to Kitty. Uses Open WebUI's documented `POST /api/chat/completions` with Bearer API key. API key is saved in iOS Keychain (ThisDeviceOnly after first unlock), not the Git repo or plain UserDefaults; model/URL saved in UserDefaults. The phone is the HTTPS API client; no API token is sent to the S3/C5. No microphone/audio streaming yet, no server-side changes, no firmware changes, no assumed credentials/hostname. HTTPS is required by this first implementation (local plain HTTP is refused, rather than exposing a bearer token). User must specify a reachable HTTPS Open WebUI address/model/key and update `ContentView.swift` in Xcode; confirm real device compilation and HTTP response. The repository contains Swift sources, not an actual Xcode .xcodeproj, so automated iPhone build not performed.
+
+Next phases AFTER text path works: map MacBook's existing STT/TTS/real-time voice transport, decide whether iPhone or Brain controls audio streaming, design authenticated streaming service with explicit device authorization, chunked audio over Wi-Fi rather than 96-byte BLE commands, latency/jitter management, and Kitty talking/listening animation. Do not equate Open WebUI's browser voice feature with a ready-to-use public real-time audio API.
+
+Bluetooth reconnect and background behavior confirmed resolved by the user after S3 protected-read readiness fix `edafc7997e82e292ebdb475a7ac78bf1bc79d448`; stable audio branch is untouched.
+
+---
+
 ## 2026-10-27 — iPhone BLE background reconnect priority (before AI)
 
 The user confirmed that the **earlier LILYGO-only setup maintained background Bluetooth connectivity and successfully delivered low-battery notifications**. Preserve that as a verified target behavior; do not characterize the problem as iOS universally prohibiting background BLE.
