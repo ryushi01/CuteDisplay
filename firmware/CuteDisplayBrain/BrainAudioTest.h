@@ -49,6 +49,9 @@ static void task(void *) {
   i2s_chan_handle_t tx=nullptr,rx=nullptr;
   int32_t *recorded=nullptr;
   const char *failure=nullptr;
+  uint32_t speechPeak=0;
+  const uint64_t targetPeak=0x48000000ULL;
+  uint32_t autoGainQ10=1024;
   recorded=(int32_t*)heap_caps_malloc(FRAMES*sizeof(int32_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!recorded){failure="PSRAM allocation failed";goto done;}
   {
@@ -120,13 +123,12 @@ static void task(void *) {
   }
   // INMP441 speech is naturally quiet in 32-bit I2S slots. Auto-scale
   // the recorded voice to a safe peak, bounded to 24x to avoid noise blow-up.
-  uint32_t speechPeak=0;
+  speechPeak=0;
   for(size_t i=0;i<FRAMES;i++){
     int64_t m=recorded[i]<0?-(int64_t)recorded[i]:(int64_t)recorded[i];
     if(m>speechPeak)speechPeak=(uint32_t)m;
   }
-  const uint64_t targetPeak=0x48000000ULL;
-  uint32_t autoGainQ10=(uint32_t)min(81920ULL,
+  autoGainQ10=(uint32_t)min(81920ULL,
     (targetPeak*1024ULL)/max((uint32_t)1,speechPeak));
   // Never attenuate during normalization; speakerVolume remains attenuation.
   if(autoGainQ10<1024)autoGainQ10=1024;
