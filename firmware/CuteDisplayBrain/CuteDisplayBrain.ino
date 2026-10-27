@@ -1036,7 +1036,7 @@ void loop(){
    if(!BrainAI::startWithPrompt(String(voiceResult.text)))
     proxyResult("AI:STATUS:VOICE_BUSY");
   }else{
-   Serial.printf("[VOICE] Error: %s\\n",voiceResult.error);
+   Serial.printf("[VOICE] Error: %s\n",voiceResult.error);
    proxyResult("AI:STATUS:VOICE_ERROR");
   }
  }
