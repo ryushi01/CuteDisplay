@@ -8,6 +8,7 @@ on:
       - ".github/workflows/build-s3-with-c5-update.yml"
       - "tools/build_s3_with_c5_update.sh"
       - "tools/package_c5_firmware.py"
+      - "tools/generate_c5_japanese_font.py"
       - "firmware/CuteDisplay/**"
       - "firmware/CuteDisplayBrain/**"
       - "README.md"
