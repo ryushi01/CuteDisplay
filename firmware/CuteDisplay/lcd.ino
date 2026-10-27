@@ -494,6 +494,7 @@ String message = "こんにちわ";
 bool bubbleEnabled = false; // Normal scrolling remains the default.
 bool bubbleTypewriter = true;
 bool aiScrollMode=false;
+bool aiStreamFinished=true;
 unsigned long aiScrollStarted=0;
 unsigned long aiLastScrollStep=0;
 int aiFirstVisibleLine=0;
@@ -2745,6 +2746,38 @@ static void serviceBrain() {
    else brainWifiToastLabel="S3 WIFI UNKNOWN";
    wifiToastUntil=millis()+2500UL;
    if(lcdReady)redrawCurrent();
+  }
+  else if(f.type=="AI_BEGIN"){
+   if(!lcdReady){CuteLink::send(Serial1,f.seq,"NACK","DISPLAY");}
+   else{
+    aiScrollMode=true;aiStreamFinished=false;aiFirstVisibleLine=0;
+    message="";revealedCharacters=0;lastBubbleReveal=millis();
+    aiScrollStarted=millis();aiLastScrollStep=millis();
+    drawMessage();
+    CuteLink::send(Serial1,f.seq,"ACK","AI");
+   }
+  }
+  else if(f.type=="AI_DATA"){
+   if(!aiScrollMode||!lcdReady||f.payload.isEmpty()||f.payload.length()>80){
+    CuteLink::send(Serial1,f.seq,"NACK","AI_STATE");
+   }else{
+    // Sliding display buffer: keep UTF-8 boundaries and enough lines to scroll.
+    if(message.length()+f.payload.length()>1800){
+     size_t drop=message.length()+f.payload.length()-1500;
+     while(drop<message.length() && (((uint8_t)message[drop]&0xC0)==0x80))drop++;
+     size_t lostChars=bubbleCharacterCount(message.substring(0,drop));
+     message.remove(0,drop);
+     revealedCharacters=revealedCharacters>lostChars?revealedCharacters-lostChars:0;
+     aiFirstVisibleLine=0;
+    }
+    message+=f.payload;
+    drawMessage();
+    CuteLink::send(Serial1,f.seq,"ACK","AI");
+   }
+  }
+  else if(f.type=="AI_END"){
+   aiStreamFinished=true;
+   CuteLink::send(Serial1,f.seq,"ACK","AI");
   }
   else if(f.type=="CMDHEX")receiveCmdChunk(f);
   else if(f.type=="GET_STATUS")replyStatus(f.seq);
