@@ -207,7 +207,7 @@ static void task(void*){
    esp_http_client_set_header(client,"Authorization",auth.c_str());
    esp_http_client_set_header(client,"Content-Type",type.c_str());
    esp_http_client_set_post_field(client,(const char*)body,bodySize);
-   Serial.printf("[VOICE] Opus compiled=%d requestHeaderBuffer=8192 authBytes=%u\\n",CUTE_HAS_OPUS,(unsigned)auth.length());
+   Serial.printf("[VOICE] Opus compiled=%d requestHeaderBuffer=8192 authBytes=%u\n",CUTE_HAS_OPUS,(unsigned)auth.length());
    Serial.printf("[VOICE] Sending %s: %lu bytes\n",opus?"Ogg Opus":compact?"8-bit WAV":"16-bit WAV",(unsigned long)audioBytes);
    esp_err_t rc=esp_http_client_perform(client);
    int code=esp_http_client_get_status_code(client);
