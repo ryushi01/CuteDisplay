@@ -217,8 +217,8 @@ inline void run(void*){
   key=prefs.getString("key","");
   prompt=prefs.getString("prompt","");
   prefs.end();
- if(voicePromptPending){prompt=voicePrompt;voicePrompt="";voicePromptPending=false;}
  }
+ if(voicePromptPending){prompt=voicePrompt;voicePrompt="";voicePromptPending=false;}
  if(WiFi.status()!=WL_CONNECTED || !url.startsWith("https://") ||
     url.indexOf('@')>=0 || url.indexOf('#')>=0 ||
     model.isEmpty() || key.isEmpty() ||
