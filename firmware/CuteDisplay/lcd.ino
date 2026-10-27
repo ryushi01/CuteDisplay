@@ -482,7 +482,8 @@ uint16_t fullMinutes = 0xFFFF;
 bool userButtonLastRaw = HIGH;
 bool userButtonStable = HIGH;
 unsigned long userButtonChangedAt = 0;
-unsigned long userButtonPressedAt = 0;\nbool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false;
+unsigned long userButtonPressedAt = 0;
+bool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false;
 unsigned long voiceButtonChangedAt=0,voiceButtonHeldAt=0;
 bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
@@ -2859,7 +2860,9 @@ void setup(){
  }
  commandQueue=xQueueCreate(32,MAX_CMD+1);
  if(!commandQueue)Serial.println("[BLE] Queue creation failed");
- pinMode(PIN_USER_BUTTON,INPUT_PULLUP);\n pinMode(PIN_VOICE_BUTTON,INPUT_PULLUP);\n voiceButtonLastRaw=digitalRead(PIN_VOICE_BUTTON);voiceButtonStable=voiceButtonLastRaw;
+ pinMode(PIN_USER_BUTTON,INPUT_PULLUP);
+ pinMode(PIN_VOICE_BUTTON,INPUT_PULLUP);
+ voiceButtonLastRaw=digitalRead(PIN_VOICE_BUTTON);voiceButtonStable=voiceButtonLastRaw;
 
  userButtonLastRaw=digitalRead(PIN_USER_BUTTON);
  userButtonStable=userButtonLastRaw;
