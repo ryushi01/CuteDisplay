@@ -116,3 +116,9 @@ This is a **user-confirmed hardware acceptance checkpoint**, not an independentl
 - iPhone Home > AI has **Stop AI** (active request) and **Retry** (last submitted prompt). Retry occurs in the existing conversation and is unavailable during active generation; New conversation clears the previous retry target.
 - BluetoothManager displays Stopping and Stopped states. The C5 app and wiring remain unchanged; C5 v11 OTA is not required again.
 - GitHub CI and physical validation remain pending. Keep `stable/2026-10-27-c5-v11-conversation-24h-hardware-tested` untouched. Proceed to Step 4 only after verifying Stop, Retry, and normal completion.
+
+## Step 3 acceptance and Step 4 streaming / flash-write hardening
+- User explicitly reported **6/6 PASS** on physical hardware: regular AI completion, long response stopped, iPhone showed Stopped, Retry succeeded, New Conversation cleared context, and Japanese rendering / 2-minute return continued working.
+- **Step 4 development changes:** `BrainAI.h` now avoids rewriting conversation NVS keys whose values have not changed, while preserving each completed-turn persistence and deletion. It also processes unusually large valid streaming text deltas in smaller UTF-8-boundary-aligned pieces, instead of marking a response failed solely because an SSE delta exceeded the 512-byte staging threshold.
+- C5 v11 sketch and wiring are unchanged. The last hardware-tested checkpoint (`stable/2026-10-27-c5-v11-conversation-24h-hardware-tested`) remains unmodified.
+- **Outstanding verification:** compile combined firmware, flash S3, test long Japanese replies and multi-turn conversation after S3 reboot, verify 24-hour expiry with real elapsed time; do not claim these Step 4 changes have passed hardware tests.
