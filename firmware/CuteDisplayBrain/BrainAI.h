@@ -27,12 +27,68 @@ static constexpr size_t HISTORY_RESPONSE_LIMIT=1600;
 static ConversationTurn history[HISTORY_TURNS];
 static size_t historyCount=0;
 static String currentAnswer;
+static constexpr uint64_t CONVERSATION_LIFETIME_SECONDS=86400ULL;
+static uint64_t conversationStarted=0;
+static bool historyLoaded=false;
+static void saveHistory(){
+ Preferences p;
+ if(!p.begin("brain-chat",false))return;
+ p.putULong64("started",conversationStarted);
+ p.putUChar("count",(uint8_t)historyCount);
+ for(size_t i=0;i<HISTORY_TURNS;i++){
+  String uk="u"+String(i),ak="a"+String(i);
+  p.putString(uk.c_str(),i<historyCount?history[i].user:String(""));
+  p.putString(ak.c_str(),i<historyCount?history[i].assistant:String(""));
+ }
+ p.end();
+}
+static bool historyExpired(uint64_t now){
+ return conversationStarted && (now<conversationStarted ||
+         now-conversationStarted>=CONVERSATION_LIFETIME_SECONDS);
+}
+static void loadHistory(){
+ if(historyLoaded || time(nullptr)<1700000000)return;
+ historyLoaded=true;
+ Preferences p;
+ if(!p.begin("brain-chat",true))return;
+ conversationStarted=p.getULong64("started",0);
+ size_t count=min((size_t)p.getUChar("count",0),HISTORY_TURNS);
+ uint64_t now=(uint64_t)time(nullptr);
+ if(conversationStarted && !historyExpired(now)){
+  for(size_t i=0;i<count;i++){
+   String uk="u"+String(i),ak="a"+String(i);
+   String user=p.getString(uk.c_str(),"");
+   String answer=p.getString(ak.c_str(),"");
+   if(!user.isEmpty()&&!answer.isEmpty()){
+    history[historyCount].user=user;
+    history[historyCount].assistant=answer;
+    historyCount++;
+   }
+  }
+ }
+ p.end();
+ if(conversationStarted && historyExpired(now)){
+  conversationStarted=0;
+  saveHistory();
+ }
+}
+static void expireHistory(){
+ if(!historyLoaded)return;
+ uint64_t now=(uint64_t)time(nullptr);
+ if(now>=1700000000 && historyExpired(now)){
+  for(size_t i=0;i<HISTORY_TURNS;i++){history[i].user="";history[i].assistant="";}
+  historyCount=0;conversationStarted=0;
+  saveHistory();
+ }
+}
 inline void clearHistory(){
  for(size_t i=0;i<HISTORY_TURNS;i++){history[i].user="";history[i].assistant="";}
- historyCount=0;
+ historyCount=0;conversationStarted=0;
+ saveHistory();
 }
 inline void rememberTurn(const String &prompt,const String &answer){
  if(prompt.isEmpty()||answer.isEmpty())return;
+ if(!conversationStarted)conversationStarted=(uint64_t)time(nullptr);
  if(historyCount==HISTORY_TURNS){
   for(size_t i=1;i<HISTORY_TURNS;i++)history[i-1]=history[i];
   historyCount--;
@@ -40,6 +96,7 @@ inline void rememberTurn(const String &prompt,const String &answer){
  history[historyCount].user=prompt;
  history[historyCount].assistant=answer;
  historyCount++;
+ saveHistory();
 }
 
 static bool failed=false;
@@ -151,6 +208,8 @@ inline void run(void*){
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
  init();
+ loadHistory();
+ expireHistory();
  sendPacket("AI_BEGIN","");
  failed=false;doneSeen=false;sseBuffer="";staged="";currentAnswer="";
  requestStarted=millis();firstTokenAt=0;lastTextFlush=millis();
@@ -224,6 +283,7 @@ inline bool provision(const String &cmd,String &reply){
  if(cmd=="AI:PING"){reply="ACK:AI_PONG";return true;}
  if(cmd=="AI:NEW"){
   if(busy){reply="ERR:AI_BUSY";return true;}
+  loadHistory();
   clearHistory();
   reply="ACK:AI_NEW";return true;
  }
@@ -289,6 +349,11 @@ inline void onAck(uint16_t seq,const String &type,const String &payload){
  pending=0;failed=true;
 }
 inline void tick(Stream &uart,bool allow){
+ static uint32_t lastExpiryCheck=0;
+ if((uint32_t)(millis()-lastExpiryCheck)>=60000UL){
+  lastExpiryCheck=millis();
+  if(!busy){loadHistory();expireHistory();}
+ }
  if(!out || !allow)return;
  if(pending){
   if(millis()-pendingAt<1800)return;
