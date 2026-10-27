@@ -1,3 +1,24 @@
+## 2026-10-27 — CONFIRMED STABLE AUDIO AND RECOVERY CHECKPOINT
+
+Git ref: [stable/2026-10-27-audio-tested](https://github.com/ryushi01/CuteDisplay/tree/stable/2026-10-27-audio-tested), pinned at commit `baf2b0b98dfa12b2d732c4618c060ea55e92d804`. Successful GitHub Actions combined build: [40449317276](https://github.com/ryushi01/CuteDisplay/actions/runs/40449317276). Artifact: `CuteDisplay-CombinedFirmware`. The stable branch holds the hardware-tested firmware and iOS implementation; documentation can continue to evolve separately on main.
+
+Confirmed physical behavior: S3 successfully boots, plays its short beep, reconnects to C5; INMP441 records speech; MAX98357A plays it at low audible volume; iPhone audio-test button triggers the S3 local 2-second record-and-play command and the app displays "Please talk"/"Playing"; mic gain and speaker volume controls have been implemented. C5 remained operational. The speaker output is still quieter than desired—do not mark loudness solved.
+
+Actual USB serial output for tests with iPhone gain mic=300%, speaker=100%:
+- Left test A: peak=1675188224, mean_abs=302337914, nonzero=31937, saturated=0, all_ones=0.
+- Right test A: peak=1, mean_abs=0, nonzero=24972, saturated=0, all_ones=0.
+- Left test B: peak=2146351616, mean_abs=333385275, nonzero=31991, saturated=0, all_ones=0.
+- Right test B: peak=1, mean_abs=0, nonzero=26336, saturated=0, all_ones=0.
+- Both: Playback raw_peak equals left peak; auto_gain=1.00x; COMPLETE.
+
+Interpretation: correct left-slot mic data with large peak and no flagged saturation, expected quiet right slot. The audio DSP's 300% gain is not a useful next fix; clipping is possible. On a later revision analyze sample format/scaling, I2S output slot handling, MAX98357A GAIN and speaker rating/impedance and physical assembly. Be cautious about abrupt loud tones and start from moderate output levels.
+
+Recovery incident: `lcd/lcd.ino` (C5-only sketch) was accidentally flashed to ESP32-S3 instead of `CuteDisplayBrain/CuteDisplayBrain.ino` from the combined artifact. S3 crashed when LCD code tried GPIO23 reset (`esp_lcd_new_panel_st7789`), followed by esptool 'No serial data received'. Recovery succeeded by ROM BOOT+RESET manual download mode and flashing the correct S3 sketch. Never swap the two sketches. Disable erase-all-flash to retain BLE/Wi-Fi settings. Wrong sketch did not mean the board was bricked.
+
+Next work: preserve the known-working firmware unless deliberately testing a new change. iPhone UI timing is approximate; no real audio phase status notifications yet. Audio output volume remains a deferred investigation. Initial firmware source uses `CombinedFirmwareImage.h` generated only by the combined workflow. The artifact `.bin` is a compiled **application**, not a complete factory-flash image.
+
+---
+
 ## 2026-10-27 — UTF-8 NVS and background BLE behavior
 
 C5 `saveDisplayState` truncated `message` using `substring(0,96)`, which could split a UTF-8 character, producing garbled/truncated stored message after reboot. Now backs off from the 96-byte limit to the previous complete UTF-8 code-point boundary. This keeps the existing message cap, app settings, glyph cache and UART/OTA intact. A *previously damaged* saved string is not automatically reconstructed: resend the original message once through the app and allow the normal delayed save. Firmware fix requires the next C5 v3 app build bundled into S3, rather than another direct C5 USB flash. Needs hardware confirmation.
