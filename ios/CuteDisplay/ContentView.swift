@@ -119,6 +119,8 @@ struct ContentView: View {
     @State private var aiStatus = "Not configured"
     @State private var aiBusy = false
     @State private var aiDisplayTask: Task<Void, Never>?
+    @State private var aiPendingPages: [String] = []
+    @State private var aiStreamComplete = false
     @State private var aiSendToKitty = true
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
     @State private var wifiPassword = ""
@@ -850,28 +852,51 @@ struct ContentView: View {
         return pages
     }
 
-    @MainActor private func showKittyAIPages(_ answer: String) {
+    @MainActor private func beginKittyAIStream() {
         aiDisplayTask?.cancel()
-        let pages = kittyPages(answer)
-        guard !pages.isEmpty else { return }
+        aiPendingPages = []
+        aiStreamComplete = false
+        guard aiSendToKitty && bluetooth.isConnected else { return }
         aiDisplayTask = Task { @MainActor in
             bluetooth.sendControlCommand("AI:ON")
-            for (index, page) in pages.enumerated() {
-                guard !Task.isCancelled else { return }
-                guard bluetooth.isConnected else {
-                    aiStatus = "Kitty disconnected; AI answer remains on iPhone"
+            var sentCount = 0
+            while !Task.isCancelled {
+                if sentCount < aiPendingPages.count {
+                    guard bluetooth.isConnected else {
+                        aiStatus = "Kitty disconnected; complete answer stays on iPhone"
+                        return
+                    }
+                    let page = aiPendingPages[sentCount]
+                    sentCount += 1
+                    bluetooth.sendMessage(page)
+                    aiStatus = "Kitty typing page \(sentCount)"
+                    // Allow the C5 ~65ms per character and BLE glyph caching.
+                    // The queued transport is not yet ACKed at render-completion.
+                    let delay = max(3.0, Double(page.unicodeScalars.count) * 0.075 + 1.5)
+                    try? await Task.sleep(for: .seconds(delay))
+                } else if aiStreamComplete {
+                    aiStatus = "AI response complete; Kitty finishing typewriter"
                     return
-                }
-                bluetooth.sendMessage(page)
-                aiStatus = "Showing AI answer on Kitty: page \(index + 1)/\(pages.count)"
-                if index + 1 < pages.count {
-                    // Allow BLE glyph transfers and enough reading time.
-                    try? await Task.sleep(for: .seconds(14))
+                } else {
+                    try? await Task.sleep(for: .milliseconds(200))
                 }
             }
-            if !Task.isCancelled {
-                aiStatus = "AI answer displayed on Kitty (\(pages.count) pages)"
-            }
+        }
+    }
+
+    @MainActor private func appendKittyAIPages(_ text: String, final: Bool) {
+        // Commit new pages as the model emits tokens. Never split Unicode
+        // characters or exceed the existing 96 UTF-8 byte BLE limit.
+        let delivered = aiPendingPages.joined()
+        let remainder = String(text.dropFirst(delivered.count))
+        let split = kittyPages(remainder)
+        if final {
+            aiPendingPages.append(contentsOf: split)
+            aiStreamComplete = true
+        } else if split.count > 1 {
+            aiPendingPages.append(contentsOf: split.dropLast())
+        } else if remainder.utf8.count >= 48 {
+            aiPendingPages.append(remainder)
         }
     }
 
@@ -906,94 +931,85 @@ struct ContentView: View {
                     ["role": "user", "content": prompt]
                 ]
             ])
-            let (data, response) = try await URLSession.shared.data(for: request)
+            // Receive model tokens immediately instead of buffering the whole
+            // response. Some Open WebUI pipelines stream even with stream=false.
+            request.setValue("text/event-stream, application/json", forHTTPHeaderField: "Accept")
+            request.timeoutInterval = 120
+            beginKittyAIStream()
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
             let http = response as? HTTPURLResponse
             let statusCode = http?.statusCode ?? 0
             let mime = http?.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
-            // Restrict diagnostics to a small body excerpt. Never include the
-            // bearer token or request headers in diagnostics.
-            let bodyExcerpt = String(decoding: data.prefix(480), as: UTF8.self)
-                .replacingOccurrences(of: "\n", with: " ")
-                .replacingOccurrences(of: "\r", with: " ")
             guard (200...299).contains(statusCode) else {
-                let detail = bodyExcerpt.isEmpty ? "(empty response)" : bodyExcerpt
+                var errorText = ""
+                for try await line in bytes.lines {
+                    errorText += line
+                    if errorText.count > 360 { break }
+                }
                 throw NSError(domain: "CuteDisplayAI", code: statusCode,
                               userInfo: [NSLocalizedDescriptionKey:
-                                "Open WebUI HTTP \(statusCode): \(detail)"])
+                                "Open WebUI HTTP \(statusCode): \(errorText.prefix(360))"])
             }
-            // Some Open WebUI pipelines return SSE despite stream=false.
-            // Decode both standard OpenAI JSON and completed SSE chunks.
             var answer = ""
-            if mime.lowercased().contains("text/event-stream") ||
-               String(decoding: data.prefix(6), as: UTF8.self).hasPrefix("data:") {
-                let rawStream = String(decoding: data, as: UTF8.self)
-                // SSE events are separated by blank lines; a data field can
-                // contain multiple lines. This also handles CRLF.
-                let events = rawStream.replacingOccurrences(of: "\r\n", with: "\n")
-                    .components(separatedBy: "\n\n")
-                for event in events {
-                    let payload = event.split(separator: "\n", omittingEmptySubsequences: false)
-                        .filter { $0.hasPrefix("data:") }
-                        .map { String($0.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
-                        .joined(separator: "\n")
-                    if payload.isEmpty || payload == "[DONE]" { continue }
-                    guard let bytes = payload.data(using: .utf8),
-                          let chunk = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+            if mime.lowercased().contains("text/event-stream") {
+                for try await line in bytes.lines {
+                    guard !Task.isCancelled else { return }
+                    guard line.hasPrefix("data:") else { continue }
+                    let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                    if payload == "[DONE]" { break }
+                    guard let data = payload.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                     else { continue }
-                    if let error = chunk["error"] {
-                        throw NSError(domain: "CuteDisplayAI", code: 6,
+                    if let error = obj["error"] {
+                        throw NSError(domain: "CuteDisplayAI", code: 3,
                                       userInfo: [NSLocalizedDescriptionKey:
-                                        "Open WebUI stream error: \(String(describing: error).prefix(240))"])
+                                        "Open WebUI: \(String(describing: error).prefix(240))"])
                     }
-                    if let choices = chunk["choices"] as? [[String: Any]],
-                       let choice = choices.first {
-                        if let delta = choice["delta"] as? [String: Any] {
-                            if let token = delta["content"] as? String { answer += token }
-                        } else if let message = choice["message"] as? [String: Any],
-                                  let text = message["content"] as? String {
-                            answer = text
+                    if let choice = (obj["choices"] as? [[String: Any]])?.first {
+                        if let delta = choice["delta"] as? [String: Any],
+                           let part = delta["content"] as? String {
+                            answer += part
+                            aiResponse = answer
+                            appendKittyAIPages(answer, final: false)
+                        } else if let msg = choice["message"] as? [String: Any],
+                                  let full = msg["content"] as? String {
+                            answer = full
+                            aiResponse = answer
+                            appendKittyAIPages(answer, final: false)
                         }
                     }
                 }
             } else {
-                guard let object = try? JSONSerialization.jsonObject(with: data),
-                      let result = object as? [String: Any] else {
+                var body = Data()
+                for try await byte in bytes {
+                    body.append(byte)
+                    if body.count > 262144 {
+                        throw NSError(domain: "CuteDisplayAI", code: 8,
+                                      userInfo: [NSLocalizedDescriptionKey: "AI reply too large"])
+                    }
+                }
+                guard let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                      let choice = (obj["choices"] as? [[String: Any]])?.first,
+                      let msg = choice["message"] as? [String: Any],
+                      let full = msg["content"] as? String else {
                     throw NSError(domain: "CuteDisplayAI", code: 2,
                                   userInfo: [NSLocalizedDescriptionKey:
-                                    "Unexpected response (\(mime)): \(bodyExcerpt). Check Open WebUI base URL."])
+                                    "Unexpected Open WebUI response: \(mime)"])
                 }
-                if let error = result["error"] {
-                    throw NSError(domain: "CuteDisplayAI", code: 3,
-                                  userInfo: [NSLocalizedDescriptionKey:
-                                    "Open WebUI error: \(String(describing: error).prefix(240))"])
-                }
-                guard let choices = result["choices"] as? [[String: Any]],
-                      let message = choices.first?["message"] as? [String: Any] else {
-                    throw NSError(domain: "CuteDisplayAI", code: 4,
-                                  userInfo: [NSLocalizedDescriptionKey:
-                                    "No chat choices in response: \(bodyExcerpt)"])
-                }
-                if let text = message["content"] as? String {
-                    answer = text
-                } else if let parts = message["content"] as? [[String: Any]] {
-                    answer = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
-                }
+                answer = full
             }
+            appendKittyAIPages(answer, final: true)
             guard !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw NSError(domain: "CuteDisplayAI", code: 5,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                "Open WebUI returned no visible answer (\(mime))."])
+                              userInfo: [NSLocalizedDescriptionKey: "Model returned no visible text"])
             }
             aiResponse = answer
             aiStatus = "AI response received"
-            if aiSendToKitty {
-                if bluetooth.isConnected {
-                    showKittyAIPages(answer)
-                } else {
-                    aiStatus = "AI response received; connect Kitty to display it"
-                }
+            if aiSendToKitty && !bluetooth.isConnected {
+                aiStatus = "AI response received; connect Kitty to display it"
             }
         } catch {
+            aiStreamComplete = true
             aiStatus = "AI request failed: " + error.localizedDescription
         }
     }
