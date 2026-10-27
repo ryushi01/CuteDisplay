@@ -1,3 +1,5 @@
+> **Latest user-tested AI milestone (2026-10-27):** [Stable S3 AI + Japanese C5 v10 checkpoint](https://github.com/ryushi01/CuteDisplay/tree/stable/2026-10-27-s3-ai-japanese-working) · [Complete handoff for new chats](docs/handoff/2026-10-27-ai-working.md) · [Successful combined firmware build](https://github.com/ryushi01/CuteDisplay/actions/runs/40476408769). Develop on `feature/s3-ai-streaming`; keep checkpoint unchanged.
+
 ## Known-working hardware baseline — 2026-10-27
 
 **Stable Git branch:** [stable/2026-10-27-audio-tested](https://github.com/ryushi01/CuteDisplay/tree/stable/2026-10-27-audio-tested) at firmware commit [baf2b0b](https://github.com/ryushi01/CuteDisplay/commit/baf2b0b98dfa12b2d732c4618c060ea55e92d804). **Successful combined S3 + C5 build:** [run 40449317276](https://github.com/ryushi01/CuteDisplay/actions/runs/40449317276), artifact **CuteDisplay-CombinedFirmware**. This reference branch pins the firmware and iPhone app sources *before subsequent documentation edits*; do not overwrite it with experimental work.
