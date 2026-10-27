@@ -883,7 +883,7 @@ struct ContentView: View {
                 Text("AI status: " + bluetooth.aiLiveStatus)
                     .font(.subheadline)
             }
-            .foregroundStyle(bluetooth.aiLiveStatus.hasPrefix("Failed:") ? .orange : .primary)
+            .foregroundStyle(bluetooth.aiLiveStatus.hasPrefix("Failed:") ? Color.orange : Color.primary)
             Text("Bluetooth transport: " + bluetooth.status)
                 .font(.caption2).foregroundStyle(.secondary)
             Text(aiStatus).font(.caption2).foregroundStyle(.secondary)
