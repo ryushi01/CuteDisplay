@@ -27,6 +27,15 @@ jobs:
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
+      # Reuse the expensive ESP32 core/toolchain downloads between workflow runs.
+      - name: Cache ESP32 Arduino packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15/packages
+            ~/.arduino15/staging
+          key: esp32-arduino-3.3.12-ubuntu24-v1
+
       - name: Install Espressif ESP32 core 3.3.12
         shell: bash
         run: |
