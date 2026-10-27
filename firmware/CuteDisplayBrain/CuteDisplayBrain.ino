@@ -1021,6 +1021,12 @@ void loop(){
  pollFace();
  BrainC5OTA::tick(Serial1,faceOnline);
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
+ // Status notifications are separate from command acknowledgements.
+ String aiEvent;
+ for(int i=0;i<4 && BrainAI::takeStatus(aiEvent);i++){
+  if(clientConnected && bleAuthenticated)proxyResult(aiEvent);
+ }
+
  pollUSB();
  updateBrainWiFi();
  BrainClock::tick(brainWiFiOnline());
