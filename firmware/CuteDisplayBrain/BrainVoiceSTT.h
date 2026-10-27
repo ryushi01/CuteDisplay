@@ -98,43 +98,69 @@ static void task(void*){
   u32(wav+4,(uint32_t)actualWavBytes-8);
   u32(wav+40,(uint32_t)captured*2);
   Serial.printf("[VOICE] Captured %lu ms of speech\n",(unsigned long)(captured*1000/RATE));
-  const char *boundary="CuteDisplayAudioBoundary";
-  String prefix=String("--")+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"kitty.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
-  String suffix=String("\r\n--")+boundary+"--\r\n";
-  bodySize=prefix.length()+actualWavBytes+suffix.length();
-  body=(uint8_t*)heap_caps_malloc(bodySize,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  responseBuffer=(uint8_t*)heap_caps_malloc(4096,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  responseLength=0;
-  if(!body||!responseBuffer){strcpy(result.error,"NO_PSRAM");break;}
-  responseBuffer[0]=0;
-  memcpy(body,prefix.c_str(),prefix.length());
-  memcpy(body+prefix.length(),wav,actualWavBytes);
-  memcpy(body+prefix.length()+actualWavBytes,suffix.c_str(),suffix.length());
+
   if(url.endsWith("/"))url.remove(url.length()-1);
   url+="/api/v1/audio/transcriptions";
-  esp_http_client_config_t hc={};
-  hc.url=url.c_str();hc.crt_bundle_attach=esp_crt_bundle_attach;
-  hc.event_handler=onHTTP;hc.timeout_ms=90000;hc.buffer_size=2048;
-  esp_http_client_handle_t client=esp_http_client_init(&hc);
-  if(!client){strcpy(result.error,"HTTP_INIT");break;}
+  responseBuffer=(uint8_t*)heap_caps_malloc(4096,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!responseBuffer){strcpy(result.error,"NO_PSRAM");break;}
+  const char *boundary="CuteDisplayAudioBoundary";
+  String prefix=String("--")+boundary+"\\r\\nContent-Disposition: form-data; name=\\\"file\\\"; filename=\\\"kitty.wav\\\"\\r\\nContent-Type: audio/wav\\r\\n\\r\\n";
+  String suffix=String("\\r\\n--")+boundary+"--\\r\\n";
+  const size_t pcm8Bytes=44+captured;
+  const size_t largest=prefix.length()+actualWavBytes+suffix.length();
+  body=(uint8_t*)heap_caps_malloc(largest,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!body){strcpy(result.error,"NO_PSRAM");break;}
   String auth="Bearer "+key;
   String type=String("multipart/form-data; boundary=")+boundary;
-  esp_http_client_set_method(client,HTTP_METHOD_POST);
-  esp_http_client_set_header(client,"Authorization",auth.c_str());
-  esp_http_client_set_header(client,"Content-Type",type.c_str());
-  esp_http_client_set_post_field(client,(const char*)body,bodySize);
-  esp_err_t rc=esp_http_client_perform(client);
-  int code=esp_http_client_get_status_code(client);
-  esp_http_client_cleanup(client);
-  if(rc!=ESP_OK||code!=200){snprintf(result.error,sizeof(result.error),"STT_HTTP_%d",code);break;}
-  cJSON *json=cJSON_Parse((const char*)responseBuffer);
-  if(!json){strcpy(result.error,"BAD_STT_JSON");break;}
-  cJSON *field=cJSON_GetObjectItem(json,"text");
-  if(cJSON_IsString(field)&&field->valuestring && strlen(field->valuestring)<sizeof(result.text)){
-   strlcpy(result.text,field->valuestring,sizeof(result.text));
-   result.ok=result.text[0]!=0;
-  }else strcpy(result.error,"NO_TRANSCRIPT");
-  cJSON_Delete(json);
+  // Try 8-bit uncompressed WAV (half the network payload); fall back to the
+  // original 16-bit WAV if the configured STT backend rejects or cannot decode it.
+  for(int attempt=0;attempt<2 && !result.ok;attempt++){
+   const bool compact=(attempt==0);
+   const size_t audioBytes=compact?pcm8Bytes:actualWavBytes;
+   memcpy(body,prefix.c_str(),prefix.length());
+   uint8_t *audio=body+prefix.length();
+   if(compact){
+    memcpy(audio,wav,44);
+    u32(audio+4,(uint32_t)pcm8Bytes-8);
+    u16(audio+32,1);u16(audio+34,8);u32(audio+28,RATE);
+    u32(audio+40,(uint32_t)captured);
+    for(size_t i=0;i<captured;i++){
+     int16_t sample=(int16_t)((uint16_t)wav[44+2*i] | ((uint16_t)wav[45+2*i]<<8));
+     audio[44+i]=(uint8_t)((((int32_t)sample+32768)>>8)&255);
+    }
+   }else memcpy(audio,wav,actualWavBytes);
+   memcpy(body+prefix.length()+audioBytes,suffix.c_str(),suffix.length());
+   bodySize=prefix.length()+audioBytes+suffix.length();
+   responseLength=0;responseBuffer[0]=0;
+   esp_http_client_config_t hc={};
+   hc.url=url.c_str();hc.crt_bundle_attach=esp_crt_bundle_attach;
+   hc.event_handler=onHTTP;hc.timeout_ms=90000;hc.buffer_size=2048;
+   esp_http_client_handle_t client=esp_http_client_init(&hc);
+   if(!client){strcpy(result.error,"HTTP_INIT");break;}
+   esp_http_client_set_method(client,HTTP_METHOD_POST);
+   esp_http_client_set_header(client,"Authorization",auth.c_str());
+   esp_http_client_set_header(client,"Content-Type",type.c_str());
+   esp_http_client_set_post_field(client,(const char*)body,bodySize);
+   Serial.printf("[VOICE] Sending %s: %lu bytes\\n",compact?"8-bit WAV":"16-bit WAV",(unsigned long)audioBytes);
+   esp_err_t rc=esp_http_client_perform(client);
+   int code=esp_http_client_get_status_code(client);
+   esp_http_client_cleanup(client);
+   if(rc!=ESP_OK||code!=200){
+    snprintf(result.error,sizeof(result.error),"STT_HTTP_%d",code);
+    // Do not retry authorization/configuration errors with the same key.
+    if(code==401||code==403||code==404||code==429)break;
+    continue;
+   }
+   cJSON *json=cJSON_Parse((const char*)responseBuffer);
+   if(!json){strcpy(result.error,"BAD_STT_JSON");continue;}
+   cJSON *field=cJSON_GetObjectItem(json,"text");
+   if(cJSON_IsString(field)&&field->valuestring&&strlen(field->valuestring)<sizeof(result.text)){
+    strlcpy(result.text,field->valuestring,sizeof(result.text));
+    result.ok=result.text[0]!=0;
+   }
+   cJSON_Delete(json);
+   if(!result.ok)strcpy(result.error,"NO_TRANSCRIPT");
+  }
  }while(false);
  if(rx){i2s_channel_disable(rx);i2s_del_channel(rx);}
  if(wav)heap_caps_free(wav);
