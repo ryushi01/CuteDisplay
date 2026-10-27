@@ -593,6 +593,11 @@ static void pollBLECommands(){
   proxyResult("ERR:DISPLAY_UPDATING");return;
  }
  String incoming(item);
+ if(incoming.startsWith("A:MIC:")||incoming.startsWith("A:SPK:")){
+  bool ok=BrainAudioTest::setLevel(incoming);
+  proxyResult(ok?"ACK:AUDIO":"ERR:AUDIO");
+  return;
+ }
  if(controlBrainWiFi(incoming)){
   proxyResult(wifiCommandReply);
   return;
@@ -605,6 +610,9 @@ static void consoleCommand(String cmd){
   Serial.println("[S3] audio beep / audio diagnose / audio test");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
   return;
+ }
+ if(cmd.startsWith("A:MIC:")||cmd.startsWith("A:SPK:")){
+  BrainAudioTest::setLevel(cmd);return;
  }
  if(cmd=="audio diagnose"){BrainAudioTest::diagnose();return;}
  if(cmd=="audio beep"){BrainAudioTest::beep();return;}
@@ -857,6 +865,7 @@ void setup(){
  Serial1.setRxBufferSize(2048);
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
+ BrainAudioTest::loadLevels();
  Serial.printf("[S3] UART TX=%d RX=%d baud=%d\n",
     BrainPinPlan::UART_TX,BrainPinPlan::UART_RX,BrainPinPlan::UART_BAUD);
  incomingCommands=xQueueCreate(16,MAX_CMD+1);

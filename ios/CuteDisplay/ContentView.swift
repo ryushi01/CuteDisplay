@@ -83,6 +83,8 @@ struct ContentView: View {
     @StateObject private var bluetooth = BluetoothManager()
     @State private var message = UserDefaults.standard.string(forKey: "savedMessage") ?? "こんにちわ"
     @State private var brightness = 75.0
+    @State private var micGain = UserDefaults.standard.object(forKey: "cuteMicGain") as? Double ?? 150
+    @State private var speakerVolume = UserDefaults.standard.object(forKey: "cuteSpeakerVolume") as? Double ?? 65
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
     @State private var wifiPassword = ""
     @State private var showingIPSettings = false
@@ -493,6 +495,44 @@ struct ContentView: View {
                 }
                 .pickerStyle(.menu)
                 Text("All Bluetooth, Wi-Fi, gateway, DNS and IP settings belong to the S3 Brain. The LILYGO's radios remain off.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Divider()
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Audio", systemImage: "waveform").font(.headline)
+                Text("Microphone gain")
+                    .font(.subheadline.bold())
+                HStack {
+                    Slider(value: $micGain, in: 0...300, step: 10) { editing in
+                        if !editing {
+                            let level = Int(micGain)
+                            UserDefaults.standard.set(micGain, forKey: "cuteMicGain")
+                            bluetooth.sendControlCommand("A:MIC:\(level)")
+                        }
+                    }
+                    Text("\(Int(micGain))%").monospacedDigit().frame(width: 52)
+                }
+                Text("Speaker volume")
+                    .font(.subheadline.bold())
+                HStack {
+                    Slider(value: $speakerVolume, in: 0...100, step: 5) { editing in
+                        if !editing {
+                            let level = Int(speakerVolume)
+                            UserDefaults.standard.set(speakerVolume, forKey: "cuteSpeakerVolume")
+                            bluetooth.sendControlCommand("A:SPK:\(level)")
+                        }
+                    }
+                    Text("\(Int(speakerVolume))%").monospacedDigit().frame(width: 52)
+                }
+                Button("Apply audio levels") {
+                    UserDefaults.standard.set(micGain, forKey: "cuteMicGain")
+                    UserDefaults.standard.set(speakerVolume, forKey: "cuteSpeakerVolume")
+                    bluetooth.sendControlCommand("A:MIC:\(Int(micGain))")
+                    bluetooth.sendControlCommand("A:SPK:\(Int(speakerVolume))")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!bluetooth.bluetoothBrainConnected)
+                Text("Levels are saved on the S3 and affect local microphone playback tests. Microphone gain does not change the physical microphone hardware. Test at low speaker volume first.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             Toggle("Auto-reconnect Brain Bluetooth", isOn: Binding(

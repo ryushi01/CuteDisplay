@@ -5,9 +5,43 @@
 #include <Arduino.h>
 #include <driver/i2s_std.h>
 #include <esp_heap_caps.h>
+#include <Preferences.h>
 #include "BrainPinPlan.h"
 namespace BrainAudioTest {
 static volatile bool running=false;
+static uint16_t micGain=150; // percent, 0-300
+static uint8_t speakerVolume=65; // percent, 0-100
+inline void loadLevels(){
+ Preferences prefs;
+ if(prefs.begin("brain-audio",true)){
+  micGain=constrain((int)prefs.getUShort("mic",150),0,300);
+  speakerVolume=constrain((int)prefs.getUChar("speaker",65),0,100);
+  prefs.end();
+ }
+ Serial.printf("[AUDIO] Settings mic_gain=%u%% speaker_volume=%u%%\n",micGain,speakerVolume);
+}
+inline bool setLevel(const String &cmd){
+ bool mic=cmd.startsWith("A:MIC:");
+ bool spk=cmd.startsWith("A:SPK:");
+ if(!mic&&!spk)return false;
+ String value=cmd.substring(mic?6:6);
+ if(value.isEmpty()||value.length()>3){Serial.println("[AUDIO] Bad audio setting");return true;}
+ for(size_t i=0;i<value.length();i++)if(!isDigit(value[i])){
+  Serial.println("[AUDIO] Bad audio setting");return true;
+ }
+ int level=value.toInt();
+ if(level>(mic?300:100)){Serial.println("[AUDIO] Audio setting outside range");return true;}
+ if(mic)micGain=(uint16_t)level;
+ else speakerVolume=(uint8_t)level;
+ Preferences prefs;
+ if(prefs.begin("brain-audio",false)){
+  if(mic)prefs.putUShort("mic",micGain);else prefs.putUChar("speaker",speakerVolume);
+  prefs.end();
+ }
+ Serial.printf("[AUDIO] Settings mic_gain=%u%% speaker_volume=%u%%\n",micGain,speakerVolume);
+ return true;
+}
+
 static constexpr uint32_t RATE=16000, SECONDS=2;
 static constexpr size_t FRAMES=RATE*SECONDS;
 static constexpr size_t BLOCK=128;
@@ -84,7 +118,7 @@ static void task(void *) {
       goto done;
     }
   }
-  Serial.println("[AUDIO] Playing validated recording at reduced level.");
+  Serial.printf("[AUDIO] Playing recording mic_gain=%u%% speaker_volume=%u%%\n",micGain,speakerVolume);
   {
     int32_t stereo[BLOCK*2];
     for(size_t start=0;start<FRAMES;start+=BLOCK){
@@ -93,8 +127,12 @@ static void task(void *) {
         int32_t sample=recorded[start+i];
         if(sample>0x18000000)sample=0x18000000;
         if(sample<-(int32_t)0x18000000)sample=-(int32_t)0x18000000;
-        int32_t quiet=sample>>3;
-        stereo[2*i]=quiet;stereo[2*i+1]=quiet;
+        // Fixed-point gain adjustment with wide intermediate, no overflow.
+        int64_t scaled=((int64_t)sample*micGain*speakerVolume)/10000LL;
+        const int64_t ceiling=0x30000000LL;
+        if(scaled>ceiling)scaled=ceiling;
+        if(scaled<-ceiling)scaled=-ceiling;
+        stereo[2*i]=(int32_t)scaled;stereo[2*i+1]=(int32_t)scaled;
       }
       size_t written=0;
       if(i2s_channel_write(tx,stereo,sizeof(stereo),&written,1500)!=ESP_OK ||
