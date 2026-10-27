@@ -1,3 +1,15 @@
+## 2026-10-27 — iPhone BLE background reconnect priority (before AI)
+
+The user confirmed that the **earlier LILYGO-only setup maintained background Bluetooth connectivity and successfully delivered low-battery notifications**. Preserve that as a verified target behavior; do not characterize the problem as iOS universally prohibiting background BLE.
+
+The current S3 Brain architecture adds an encrypted FFF1 command relay readiness gate, separate battery/power GATT telemetry and S3↔C5 UART. The current iOS reconnect code was cancelling a CoreBluetooth pending `.connecting` connection after ~35 seconds and depending on a 4-second foreground Timer to retry. That can break long-lived background reconnection. Updated `ios/CuteDisplay/BluetoothManager.swift` to keep pending connections alive until CoreBluetooth completes/fails, and request system connection/disconnection notifications. Existing encrypted FFF1 handshake, battery/power notifications, low-battery alert logic and Wi-Fi fallback were not deliberately changed.
+
+**Manual Xcode requirement (repository does not store an Xcode project/Info.plist):** In the actual CuteDisplay app target, Signing & Capabilities → Background Modes → enable **Uses Bluetooth LE accessories** (`UIBackgroundModes` = `bluetooth-central`). The central manager already has `CBCentralManagerOptionRestoreIdentifierKey` and restoration delegate. The app must be installed as a real iPhone build, granted Bluetooth permission, and low-battery notification permission enabled. Background BLE is OS-managed and not a guarantee of permanent execution; do not test by force-quitting the app, which can prevent background relaunch. Confirm encrypted BLE connection after app reopen and verify low-battery notifications while the app is merely backgrounded, with all settings retained.
+
+**Next test:** Rebuild Xcode from latest `BluetoothManager.swift` (no S3 flash), connect once, move app to background, temporarily switch S3 off/out of range and back on, wait for OS reconnect, then check connection and actual battery telemetry. Collect app Console logs and S3 serial `BLE connected/pairing/relay READY` events if failures persist. Continue to investigate S3 pairing handshake only if this change is insufficient. Do not alter the hardware-tested `stable/2026-10-27-audio-tested` branch.
+
+---
+
 ## 2026-10-27 — Speaker identification and startup chirp observation
 
 The user's actual speaker is the Amazon Japan item **ASIN B0D4LHNLJ4**: https://www.amazon.co.jp/dp/B0D4LHNLJ4 . The Amazon listing could not be retrieved reliably in this session, so **impedance, rated power and model remain unverified**. Do not assume 4 Ω, 8 Ω or a particular wattage until reading its label/listing.
