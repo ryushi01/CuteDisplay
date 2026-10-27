@@ -20,6 +20,7 @@ inline bool takeStatus(String &value){char entry[36]={};if(!statusOut||xQueueRec
 
 static TaskHandle_t worker=nullptr;
 static volatile bool busy=false;
+static volatile bool cancelRequested=false;
 static uint16_t uartSeq=52000,pending=0;
 static Packet outstanding={};
 static uint32_t pendingAt=0;
@@ -173,9 +174,10 @@ inline void processSSELine(String line){
 }
 static String sseBuffer;
 static esp_err_t event(esp_http_client_event_t *e){
+ if(cancelRequested)return ESP_FAIL;
  if(e->event_id==HTTP_EVENT_ON_DATA && e->data && e->data_len>0){
   const char *bytes=(const char*)e->data;
-  for(int i=0;i<e->data_len && !failed;i++){
+  for(int i=0;i<e->data_len && !failed && !cancelRequested;i++){
    char ch=bytes[i];
    if(ch=='\n'){
     processSSELine(sseBuffer);sseBuffer="";
@@ -183,6 +185,7 @@ static esp_err_t event(esp_http_client_event_t *e){
     if(sseBuffer.length()<8192)sseBuffer+=ch;else failed=true;
    }
   }
+  if(cancelRequested)return ESP_FAIL;
   // Flush partial phrases after a pause in token generation.
   if(staged.length()>=12 && millis()-lastTextFlush>280)releaseText(true);
  }
@@ -263,7 +266,8 @@ inline void run(void*){
    esp_err_t rc=esp_http_client_perform(http);
    int code=esp_http_client_get_status_code(http);
    Serial.printf("[AI] Request finished: HTTP=%d transport=%d\n",code,(int)rc);
-   if(rc!=ESP_OK)report("NETWORK_ERROR");
+   if(cancelRequested){} // Intentional abort; CANCELLED reported during cleanup.
+   else if(rc!=ESP_OK)report("NETWORK_ERROR");
    else if(code==401||code==403)report("AUTH_ERROR");
    else if(code==404)report("MODEL_OR_URL_ERROR");
    else if(code==429)report("RATE_LIMIT");
@@ -274,8 +278,14 @@ inline void run(void*){
   }else failed=true;
   free(json);
  }else failed=true;
- releaseText(true);
- if(!failed && doneSeen)rememberTurn(prompt,currentAnswer);
+ if(cancelRequested){
+  failed=true;
+  staged="";
+  if(out)xQueueReset(out);
+  pending=0;
+  report("CANCELLED");
+ }else releaseText(true);
+ if(!failed && doneSeen && !cancelRequested)rememberTurn(prompt,currentAnswer);
  currentAnswer="";
  sendPacket("AI_END","");
  Serial.printf("[AI PERF] Generated UART bytes=%lu acked=%lu packets=%lu total=%lums\n",
@@ -283,13 +293,14 @@ inline void run(void*){
   (unsigned long)(millis()-requestStarted));
  Serial.println(failed?"[AI] Stream ended with an error":"[AI] Stream complete");
  if(!failed)report("COMPLETE");
- else report("FAILED");
+ else if(!cancelRequested)report("FAILED");
+ cancelRequested=false;
  busy=false;worker=nullptr;vTaskDelete(nullptr);
 }
 inline bool start(){
  init();
  if(busy || !out)return false;
- busy=true;failed=false;
+ busy=true;failed=false;cancelRequested=false;
  report("QUEUED");
  if(xTaskCreatePinnedToCore(run,"brain_ai",16384,nullptr,1,&worker,0)!=pdPASS){
   busy=false;worker=nullptr;return false;
@@ -298,6 +309,11 @@ inline bool start(){
 }
 inline bool provision(const String &cmd,String &reply){
  if(cmd=="AI:PING"){reply="ACK:AI_PONG";return true;}
+ if(cmd=="AI:STOP"){
+  if(!busy){reply="ACK:AI_IDLE";return true;}
+  cancelRequested=true;
+  reply="ACK:AI_STOPPING";return true;
+ }
  if(cmd=="AI:NEW"){
   if(busy){reply="ERR:AI_BUSY";return true;}
   loadHistory();
