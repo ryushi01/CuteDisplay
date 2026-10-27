@@ -138,7 +138,8 @@ static void task(void *){
   if(!audio){free(body);failure="NO_PSRAM";break;}
   esp_http_client_config_t cfg={};
   cfg.url=url.c_str();cfg.crt_bundle_attach=esp_crt_bundle_attach;
-  cfg.event_handler=onData;cfg.timeout_ms=60000;cfg.buffer_size=2048;
+  cfg.event_handler=onData;cfg.timeout_ms=60000;
+  cfg.buffer_size=4096;cfg.buffer_size_tx=8192;
   esp_http_client_handle_t http=esp_http_client_init(&cfg);
   if(!http){free(body);failure="HTTP_INIT";break;}
   String authorization="Bearer "+key;
