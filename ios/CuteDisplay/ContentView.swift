@@ -843,7 +843,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .disabled(!bluetooth.bluetoothBrainConnected)
             }
-            Text("Follow-up prompts remember the last 4 exchanges on the S3. The display returns to your regular message after 2 minutes, but conversation context remains until New conversation or an S3 reboot.")
+            Text("Kitty remembers up to 4 recent exchanges for 24 hours from the first completed reply, even after an S3 reboot. New conversation clears them immediately. The display returns to your normal message 2 minutes after an AI reply.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             TextField("Ask Kitty something...", text: $aiQuestion, axis: .vertical)
