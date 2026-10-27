@@ -1,5 +1,29 @@
 import SwiftUI
 import Foundation
+import Security
+
+private enum CuteAISecret {
+    static let service = "CuteDisplay.OpenWebUI"
+    static func load() -> String {
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service, kSecAttrAccount as String: "api-key",
+            kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+    static func save(_ value: String) {
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service, kSecAttrAccount as String: "api-key"]
+        SecItemDelete(q as CFDictionary)
+        guard !value.isEmpty else { return }
+        var insert = q
+        insert[kSecValueData as String] = Data(value.utf8)
+        insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(insert as CFDictionary, nil)
+    }
+}
 
 enum CuteMood: Int, CaseIterable, Identifiable {
     case neutral = 0, happy, sad, angry, hungry, sleepy, excited, shy
@@ -87,6 +111,14 @@ struct ContentView: View {
     @State private var audioTestRunning = false
     @State private var micGain = UserDefaults.standard.object(forKey: "cuteMicGain") as? Double ?? 150
     @State private var speakerVolume = UserDefaults.standard.object(forKey: "cuteSpeakerVolume") as? Double ?? 65
+    @State private var aiServer = UserDefaults.standard.string(forKey: "cuteAIServer") ?? ""
+    @State private var aiModel = UserDefaults.standard.string(forKey: "cuteAIModel") ?? ""
+    @State private var aiAPIKey = CuteAISecret.load()
+    @State private var aiQuestion = ""
+    @State private var aiResponse = ""
+    @State private var aiStatus = "Not configured"
+    @State private var aiBusy = false
+    @State private var aiSendToKitty = true
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
     @State private var wifiPassword = ""
     @State private var showingIPSettings = false
@@ -196,6 +228,7 @@ struct ContentView: View {
                         .disabled(!bluetooth.isConnected)
                     }
                     messageSection
+                    aiSection
                     characterSection
                     moodSection
                     mascotCustomizationSection
@@ -743,6 +776,126 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+
+    // MARK: - Open WebUI (AI-SERVER) text integration
+    // Intentionally phone -> Open WebUI over HTTPS. The S3 never receives API
+    // credentials; the MacBook-hosted Ollama/voice stack stays unchanged.
+    private var aiSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("KITTY AI — OPEN WEBUI")
+            TextField("https://AI-SERVER.example", text: $aiServer)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            TextField("Open WebUI model ID", text: $aiModel)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            SecureField("Open WebUI API key", text: $aiAPIKey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            Button("Save AI connection") {
+                UserDefaults.standard.set(aiServer, forKey: "cuteAIServer")
+                UserDefaults.standard.set(aiModel, forKey: "cuteAIModel")
+                CuteAISecret.save(aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
+                aiStatus = "Connection settings saved on iPhone"
+            }
+            .buttonStyle(.bordered)
+            TextField("Ask Kitty something...", text: $aiQuestion, axis: .vertical)
+                .lineLimit(2...4)
+                .textFieldStyle(.roundedBorder)
+            Toggle("Show AI answer on Kitty", isOn: $aiSendToKitty)
+                .tint(.pink)
+            Button {
+                Task { await askKittyAI() }
+            } label: {
+                Label(aiBusy ? "Asking AI..." : "Ask Kitty AI", systemImage: "bubble.left.and.text.bubble.right")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(aiBusy || aiQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if !aiResponse.isEmpty {
+                Text(aiResponse).font(.subheadline).textSelection(.enabled)
+            }
+            Text(aiStatus).font(.caption2).foregroundStyle(.secondary)
+            Text("Phase 1: text via Open WebUI on AI-SERVER. Ollama and voice services stay on your MacBook. Use HTTPS to protect the API key; voice streaming is not enabled yet.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(.white.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func kittySnippet(_ text: String) -> String {
+        // C5 message limit is 96 UTF-8 bytes, not 96 characters.
+        var result = ""
+        for char in text {
+            let next = result + String(char)
+            if next.utf8.count > 96 { break }
+            result = next
+        }
+        return result
+    }
+
+    @MainActor private func askKittyAI() async {
+        let prompt = aiQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secret = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: aiServer.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.scheme?.lowercased() == "https", url.host != nil,
+              url.user == nil, url.password == nil,
+              !model.isEmpty, !secret.isEmpty else {
+            aiStatus = "Enter HTTPS Open WebUI URL, model ID and API key"
+            return
+        }
+        aiBusy = true
+        aiStatus = "Contacting AI-SERVER..."
+        defer { aiBusy = false }
+        do {
+            var endpoint = url
+            endpoint.append(path: "api/chat/completions")
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 45
+            request.setValue("Bearer " + secret, forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "model": model,
+                "stream": false,
+                "messages": [
+                    ["role": "system", "content": "You are CuteDisplay, a friendly tiny companion. Reply naturally in the user's language (Japanese, English or French). Be concise: one or two sentences. Avoid markdown."],
+                    ["role": "user", "content": prompt]
+                ]
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode) else {
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                throw NSError(domain: "CuteDisplayAI", code: code,
+                              userInfo: [NSLocalizedDescriptionKey: "Open WebUI HTTP \(code). Check URL, key and model."])
+            }
+            guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = result["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any],
+                  let answer = message["content"] as? String, !answer.isEmpty else {
+                throw NSError(domain: "CuteDisplayAI", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Open WebUI returned no text answer"])
+            }
+            aiResponse = answer
+            aiStatus = "AI response received"
+            if aiSendToKitty {
+                if bluetooth.isConnected {
+                    bluetooth.sendMessage(kittySnippet(answer))
+                    aiStatus = "AI response received; sending short text to Kitty"
+                } else {
+                    aiStatus = "AI response received; connect Kitty to display it"
+                }
+            }
+        } catch {
+            aiStatus = "AI request failed: " + error.localizedDescription
         }
     }
 
