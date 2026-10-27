@@ -95,6 +95,7 @@ static void task(void*){
   responseBuffer=(uint8_t*)heap_caps_malloc(4096,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   responseLength=0;
   if(!body||!responseBuffer){strcpy(result.error,"NO_PSRAM");break;}
+  responseBuffer[0]=0;
   memcpy(body,prefix.c_str(),prefix.length());
   memcpy(body+prefix.length(),wav,wavBytes);
   memcpy(body+prefix.length()+wavBytes,suffix.c_str(),suffix.length());
