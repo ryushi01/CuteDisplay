@@ -941,6 +941,7 @@ void setup(){
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
  BrainAI::init();
+ BrainVoiceSTT::init();
  BrainClock::init();
  BrainAudioTest::loadLevels();
  Serial.printf("[S3] UART TX=%d RX=%d baud=%d\n",
@@ -1028,7 +1029,17 @@ void loop(){
     incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
  BrainC5OTA::tick(Serial1,faceOnline);
- BrainVoiceSTT::tick();
+ BrainVoiceSTT::Result voiceResult={};
+ if(BrainVoiceSTT::take(voiceResult)){
+  if(voiceResult.ok){
+   proxyResult("AI:STATUS:TRANSCRIBED");
+   if(!BrainAI::startWithPrompt(String(voiceResult.text)))
+    proxyResult("AI:STATUS:VOICE_BUSY");
+  }else{
+   Serial.printf("[VOICE] Error: %s\\n",voiceResult.error);
+   proxyResult("AI:STATUS:VOICE_ERROR");
+  }
+ }
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
  // Status notifications are separate from command acknowledgements.
  String aiEvent;
