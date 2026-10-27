@@ -109,3 +109,10 @@ This is a **user-confirmed hardware acceptance checkpoint**, not an independentl
 - Existing encrypted BLE control notifications carry these asynchronously; this does not change C5 UART text frames. iOS BluetoothManager handles statuses separately from ACK processing, and ContentView shows user-friendly status/error text.
 - **S3-only firmware change:** C5 firmware version stays v11; no pin or electrical changes. No new stable branch until physical regression test confirms working behavior.
 - GitHub Actions and iOS/Xcode builds must be validated; connector commit-status endpoint does not expose all push-triggered workflow runs.
+
+## Step 3 — Stop / Retry AI (development, untested)
+- S3 `BrainAI.h` supports `AI:STOP`. Stop sets a cooperative cancellation flag, and the ESP HTTP event callback aborts when invoked, discarding staged/queued AI text and emitting `AI:STATUS:CANCELLED`. C5 receives `AI_END`; cancelled content does not enter conversation history.
+- If the HTTP library is waiting without receiving callbacks, Stop may take until the request times out; do not claim it is guaranteed instantaneous.
+- iPhone Home > AI has **Stop AI** (active request) and **Retry** (last submitted prompt). Retry occurs in the existing conversation and is unavailable during active generation; New conversation clears the previous retry target.
+- BluetoothManager displays Stopping and Stopped states. The C5 app and wiring remain unchanged; C5 v11 OTA is not required again.
+- GitHub CI and physical validation remain pending. Keep `stable/2026-10-27-c5-v11-conversation-24h-hardware-tested` untouched. Proceed to Step 4 only after verifying Stop, Retry, and normal completion.
