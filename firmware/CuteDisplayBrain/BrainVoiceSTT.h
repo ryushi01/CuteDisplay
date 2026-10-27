@@ -97,7 +97,7 @@ static void task(void*){
   const size_t actualWavBytes=44+captured*2;
   u32(wav+4,(uint32_t)actualWavBytes-8);
   u32(wav+40,(uint32_t)captured*2);
-  Serial.printf("[VOICE] Captured %lu ms of speech\\n",(unsigned long)(captured*1000/RATE));
+  Serial.printf("[VOICE] Captured %lu ms of speech\n",(unsigned long)(captured*1000/RATE));
   const char *boundary="CuteDisplayAudioBoundary";
   String prefix=String("--")+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"kitty.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
   String suffix=String("\r\n--")+boundary+"--\r\n";
