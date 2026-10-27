@@ -29,6 +29,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     private var brainServiceEndpoint: NWEndpoint?
     private var lanLastReply = Date.distantPast
     private var nextBLEAttempt = Date.distantPast
+    private var bleConnectStarted = Date.distantPast
+    private var bleRecoveryAttempts = 0
     private var brainBLEReady = false
     @Published var isScanning = false
     @Published var status = "Starting Bluetooth..."
@@ -280,6 +282,8 @@ final class BluetoothManager: NSObject, ObservableObject {
 
     private func adoptPeripheral(_ device: CBPeripheral) {
         peripheral = device
+        bleConnectStarted = Date()
+        bleRecoveryAttempts = 0
         device.delegate = self
         if device.state == .connected {
             status = "Restoring connected CuteDisplay..."
@@ -492,11 +496,47 @@ final class BluetoothManager: NSObject, ObservableObject {
     private func maintainBluetoothReconnect() {
         guard autoReconnect, !intentionalDisconnect, accessorySessionReady,
               authorizedIdentifier() != nil, !bleReady(),
-              Date().timeIntervalSince(nextBLEAttempt) > 6 else { return }
-        nextBLEAttempt = Date()
-        // A pending CoreBluetooth connect normally waits for the device
-        // to return to range. Don't cancel it just because LAN is active.
-        guard peripheral == nil && !isScanning else { return }
+              let central, central.state == .poweredOn else { return }
+        let now = Date()
+        // A previous CoreBluetooth scan can survive a long time without a
+        // callback. Restart it periodically, retaining ASK authorization.
+        if isScanning {
+            guard now.timeIntervalSince(bleConnectStarted) >= 15 else { return }
+            central.stopScan()
+            isScanning = false
+            status = "Retrying search for paired Brain..."
+        }
+        if let current = peripheral {
+            if current.state == .connected {
+                // CoreBluetooth transport alone is not an encrypted/ready GATT
+                // session. Re-discover once, then recreate a stuck connection.
+                let elapsed = now.timeIntervalSince(bleConnectStarted)
+                if elapsed >= 30 {
+                    status = "Bluetooth handshake stalled; reconnecting..."
+                    central.cancelPeripheralConnection(current)
+                    // Keep reference until didDisconnect (avoids concurrent
+                    // duplicate connections to the same peripheral).
+                    bleConnectStarted = now
+                } else if elapsed >= 12 && bleRecoveryAttempts == 0 {
+                    bleRecoveryAttempts = 1
+                    status = "Retrying Brain encrypted service discovery..."
+                    discoverOrRestoreServices(on: current)
+                }
+                return
+            }
+            if current.state == .connecting {
+                // iOS may legitimately hold a pending connect for an out-of-
+                // range device; give it a generous window before rescan.
+                if now.timeIntervalSince(bleConnectStarted) < 35 { return }
+                status = "Bluetooth connection timed out; searching again..."
+                central.cancelPeripheralConnection(current)
+                clearConnection()
+            } else {
+                clearConnection()
+            }
+        }
+        guard now.timeIntervalSince(nextBLEAttempt) >= 6 else { return }
+        nextBLEAttempt = now
         startConnection()
     }
     private func startConnection() {
@@ -515,6 +555,8 @@ final class BluetoothManager: NSObject, ObservableObject {
             return
         }
         rememberAuthorized(id)
+        bleConnectStarted = Date()
+        bleRecoveryAttempts = 0
         if let known = central.retrievePeripherals(withIdentifiers: [id]).first {
             adoptPeripheral(known)
         } else {
@@ -851,6 +893,8 @@ extension BluetoothManager: CBCentralManagerDelegate {
         central.stopScan()
         isScanning = false
         peripheral = found
+        bleConnectStarted = Date()
+        bleRecoveryAttempts = 0
         found.delegate = self
         status = "Connecting..."
         central.connect(found, options: nil)
@@ -862,6 +906,8 @@ extension BluetoothManager: CBCentralManagerDelegate {
             return
         }
         rememberAuthorized(device.identifier)
+        bleConnectStarted = Date()
+        bleRecoveryAttempts = 0
         status = "Discovering services..."
         discoverOrRestoreServices(on: device)
     }

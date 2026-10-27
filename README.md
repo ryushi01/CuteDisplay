@@ -6,6 +6,9 @@ The user **successfully flashed the C5 OTA receiver by USB, then updated C5 v1 �
 
 # CuteDisplay 🎀
 
+**Active BLE reconnect investigation (2026-10-27):** First pairing works, but app reopen can stall after BLE transport connect before encrypted FFF1 readiness. An app-side watchdog fix is committed for testing; hardware firmware is unchanged. Brain Wi-Fi fallback requires phone reachability on the same local subnet and will fail across the user's separate networks. [Current notes](docs/PROJECT_HANDOFF.md).
+
+
 ## Current wiring: S3 Brain + C5 Kitty + I²S microphone + amplifier + speaker
 
 ![CuteDisplay complete dual-board UART and proposed microphone/amplifier/speaker wiring](docs/hardware/cutedisplay-s3-c5-breadboard.svg)
