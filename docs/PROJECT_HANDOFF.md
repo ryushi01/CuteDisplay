@@ -1,3 +1,13 @@
+## 2026-10-27 — Speaker identification and startup chirp observation
+
+The user's actual speaker is the Amazon Japan item **ASIN B0D4LHNLJ4**: https://www.amazon.co.jp/dp/B0D4LHNLJ4 . The Amazon listing could not be retrieved reliably in this session, so **impedance, rated power and model remain unverified**. Do not assume 4 Ω, 8 Ω or a particular wattage until reading its label/listing.
+
+Hardware observation: **both recorded voice and the short S3 startup beep are very quiet**, despite the beep being generated locally without microphone capture. This is important evidence that microphone capture level is not the sole explanation. Prior recorded left-channel peak was already large and auto_gain=1.00x, even with mic gain=300% and speaker volume=100%. The startup beep also bypasses the adjustable recorded-voice gain controls in the present firmware. Prioritize checking MAX98357A I²S signal amplitude and sample representation, amplifier SD enable/Gain pin defaults, the actual VIN supply during playback, speaker impedance/power/sensitivity and solder/wiring, before increasing mic digital gain or replacing the speaker.
+
+Keep the hardware-tested `stable/2026-10-27-audio-tested` branch untouched; audio output volume is an open issue.
+
+---
+
 ## 2026-10-27 — Speaker purchase reference
 
 Physical speaker installed for the S3 MAX98357A audio tests: Amazon Japan product [ASIN B0D4LHNLJ4](https://www.amazon.co.jp/dp/B0D4LHNLJ4), as supplied by user. Product page could not be independently fetched, so **impedance, rated wattage, dimensions, and model name are NOT verified**. Do not assume this is a 4Ω or 8Ω speaker. Before changing MAX98357A GAIN or recommending higher amplifier output, inspect markings/retailer specifications (especially Ω and W), and check both speaker leads are connected across SPK+ / SPK− rather than ground. The current speaker is audible on startup beep and quieter on recorded playback; recordings exhibit unusually high 32-bit peak values and 1.00x auto normalization. Keep stable branch unchanged.
