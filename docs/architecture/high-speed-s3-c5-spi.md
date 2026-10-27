@@ -11,6 +11,27 @@ References:
 - LilyGO T-Display-C5: https://github.com/Xinyuan-LilyGO/T-Display-C5
 - ESP-IDF C5 SPI slave: https://docs.espressif.com/projects/esp-idf/en/stable/esp32c5/api-reference/peripherals/spi_slave.html
 
+## Pinout image received: LILYGO T-Display-C5 v1.0
+
+The board diagram supplied by the user labels the left breakout as GPIO2, GPIO3, GPIO0, GPIO1, GPIO7, GPIO8, GPIO9, GPIO25, GPIO27; and the right breakout as GPIO4, GPIO5, GPIO6, GPIO10, GPIO23, with TXD/RXD and power pads. Existing firmware uses LCD GPIO7 SCLK, GPIO9 MOSI, GPIO26 CS (internal), GPIO8 DC, GPIO23 RST, GPIO25 BL. UART GPIO1 RX/GPIO6 TX, I2C GPIO2/3, and boot GPIO0 are already occupied.
+
+**Candidate C5 breakout connections for experimental shared SPI:**
+
+| SPI net | C5 v1.0 header GPIO | Status |
+|---|---|---|
+| SCLK clock | GPIO7, existing LCD clock | electrically shared; breakout shown |
+| MOSI C5 to S3 | GPIO9, existing LCD data | electrically shared; breakout shown |
+| MISO S3 to C5 | GPIO4 | candidate only, not wired |
+| S3 SPI CS (active-low) | GPIO5 | candidate only, not wired |
+| S3 READY (optional) | GPIO10 | candidate only; SDIO-CMD alternate function—verify no SDIO use |
+| Common GND | existing GND | required |
+
+**Important integration blocker:** C5's `spi_bus_initialize(SPI2_HOST)` currently sets `miso_io_num=-1`. Before connecting S3 MISO, the C5 must initialize the *single shared* SPI2 bus with the chosen MISO GPIO and register a second slave-select device using the SAME bus, with arbitration against the LCD DMA. This cannot be fixed with wiring alone.
+
+**S3 SPI slave GPIOs remain unassigned** until the precise Freenove S3 CAM board breakout/schematic is checked against its camera, SD, audio GPIO1/2/41/42, and UART GPIO21/47. Never use the C5's GPIO23 for the proposed CS—it is the LCD reset line. Verify 3.3 V logic, short wires, board grounds and no output-output conflicts before power-on.
+
+---
+
 ## Viable architecture to experiment with
 
 Use the **C5 as SPI master** and share the *existing* SPI2 bus with two separate chip-selects:
