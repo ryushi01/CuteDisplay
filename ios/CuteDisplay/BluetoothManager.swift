@@ -1099,6 +1099,7 @@ extension BluetoothManager: CBPeripheralDelegate {
                     case "CONNECTING": aiLiveStatus = "Connecting to AI server"
                     case "STREAMING": aiLiveStatus = "Kitty is responding"
                     case "COMPLETE": aiLiveStatus = "Complete"
+                    case "VOICE_UPLOADING": aiLiveStatus = "Uploading voice"
                     case "TRANSCRIBED": aiLiveStatus = "Voice recognized; asking Kitty"
                     case "VOICE_BUSY": aiLiveStatus = "Failed: Kitty is busy; retry speaking"
                     case "VOICE_ERROR": aiLiveStatus = "Failed: voice recording or transcription error"
