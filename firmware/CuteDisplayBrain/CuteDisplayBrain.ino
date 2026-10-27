@@ -228,6 +228,7 @@ static void pushNetwork(const String &v){
 }
 static void sendRadioStatus(bool immediate);
 static void toggleBrainWiFiByButton();
+static bool pendingC5VoiceStart=false;
 static uint16_t brainActivitySeq=33000;
 static void processFace(const CuteLink::Frame &f){
  lastFace=millis();
@@ -263,15 +264,20 @@ static void processFace(const CuteLink::Frame &f){
  } else if(f.type=="BATTERY"){
   Serial.printf("[C5] BATTERY %s\n",f.payload.c_str());
  } else if(f.type=="VOICE_INTERRUPT"){
+  pendingC5VoiceStart=false;
   BrainTTS::interrupt();
  } else if(f.type=="VOICE_CANCEL"){
+  pendingC5VoiceStart=false;
   BrainTTS::interrupt();
   if(BrainAI::busy){String ignored;BrainAI::provision("AI:STOP",ignored);}
  } else if(f.type=="VOICE_START"){
+  // Decoder teardown is asynchronous: queue recording until I2S is free.
+  if(BrainTTS::running){BrainTTS::interrupt();pendingC5VoiceStart=true;return;}
   if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy && !BrainTTS::running){
    if(BrainVoiceSTT::start())Serial.println("[VOICE] C5 button started recording");
   }else Serial.println("[VOICE] C5 button rejected: busy");
  } else if(f.type=="VOICE_STOP"){
+  pendingC5VoiceStart=false;
   if(BrainVoiceSTT::stop())Serial.println("[VOICE] C5 button released: send recording");
  } else if(f.type=="WIFI_TOGGLE"){
   // Physical GPIO0 long-press request from the C5, not an untrusted BLE write.
@@ -1064,6 +1070,11 @@ void loop(){
   }
  }
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
+ if(pendingC5VoiceStart && !BrainTTS::running){
+  pendingC5VoiceStart=false;
+  if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy)
+   BrainVoiceSTT::start();
+ }
  BrainTTS::tick(BrainVoiceSTT::running || BrainAudioTest::running || BrainC5OTA::updating() || BrainAI::busy);
  static String priorActivity;
  String activity=BrainVoiceSTT::capturing?"LISTENING":BrainVoiceSTT::running?"UPLOADING":BrainAI::busy?"THINKING":BrainTTS::running?"SPEAKING":"";
