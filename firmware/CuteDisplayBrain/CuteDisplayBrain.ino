@@ -356,7 +356,11 @@ static void startBrainWiFi(){
  }else{
   // Returning from a previous static-IP configuration must explicitly
   // restore DHCP. WiFi.mode(WIFI_OFF) alone may retain static IP state.
-  WiFi.config(INADDR_NONE,INADDR_NONE,INADDR_NONE);
+  // INADDR_NONE can be 0xFFFFFFFF (255.255.255.255) depending on
+  // header inclusion order. Explicit zero IPAddress values select DHCP.
+  const IPAddress dhcp(0,0,0,0);
+  bool dhcpOK=WiFi.config(dhcp,dhcp,dhcp);
+  Serial.printf("[S3 WIFI] DHCP reset %s\n",dhcpOK?"OK":"FAILED");
  }
  wifiDisconnectPending=false;
  wifiConnecting=true;wifiStarted=millis();
