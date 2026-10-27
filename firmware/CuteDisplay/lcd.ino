@@ -2940,41 +2940,29 @@ void loop(){
   showMessage(normalDisplayMessage);
  }
  if(stateDirty && now-stateDirtyAt>=3500UL)saveDisplayState();
+ // GPIO0 user button: hold to record through S3, release to transcribe.
+// GPIO0 previously toggled Brain Wi-Fi on long press; Wi-Fi remains controllable from iPhone.
  bool raw=digitalRead(PIN_USER_BUTTON);
  if(raw!=userButtonLastRaw){userButtonChangedAt=now;userButtonLastRaw=raw;}
  if(now-userButtonChangedAt>=35 && raw!=userButtonStable){
   userButtonStable=raw;
   if(raw==LOW){
    userButtonPressedAt=now;
-   userButtonLongHandled=false;
+   if(s3Online){
+    toS3("VOICE_START");
+    brainWifiToastLabel="KITTY LISTENING";
+   }else brainWifiToastLabel="BRAIN OFFLINE";
+   wifiToastUntil=now+1600;
+   if(lcdReady)redrawCurrent();
   }else{
-   // The long-press action already fired while held; do not toggle again.
-   if(userButtonPressedAt && !userButtonLongHandled){
-    wifiToastUntil=0;
-    batteryOverlayUntil=now+BATTERY_CARD_MS;
-    chargeNoticeUntil=0;
-    redrawCurrent();
+   if(userButtonPressedAt && s3Online){
+    toS3("VOICE_STOP");
+    brainWifiToastLabel="VOICE SENDING";
+    wifiToastUntil=now+1800;
+    if(lcdReady)redrawCurrent();
    }
    userButtonPressedAt=0;
-   userButtonLongHandled=false;
   }
- }
- // Act at 1.4 s while GPIO0 is still LOW, not when the finger releases.
- if(userButtonStable==LOW && userButtonPressedAt && !userButtonLongHandled &&
-    (unsigned long)(now-userButtonPressedAt)>=WIFI_HOLD_MS){
-  userButtonLongHandled=true;  // exactly one toggle per physical hold
-  // LILYGO's own Wi-Fi stays OFF. Toggle only the Brain over UART.
-  if(s3Online){
-   brainWifiToastLabel="S3 WIFI...";
-   wifiToastEnabled=false;
-   wifiToastUntil=millis()+3000UL;
-   toS3("WIFI_TOGGLE");
-  }else{
-   brainWifiToastLabel="BRAIN OFFLINE";
-   wifiToastEnabled=false;
-   wifiToastUntil=millis()+2300UL;
-  }
-  if(lcdReady)redrawCurrent();
  }
  if(now-lastBatteryRead>=BATTERY_SAMPLE_MS){
   lastBatteryRead=now;
