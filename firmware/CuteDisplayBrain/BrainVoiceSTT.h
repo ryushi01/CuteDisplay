@@ -13,10 +13,12 @@
 
 namespace BrainVoiceSTT {
 static volatile bool running=false;
+static volatile bool stopRequested=false;
+static volatile bool capturing=false;
 static QueueHandle_t results=nullptr;
 struct Result { bool ok; char text[1025]; char error[40]; };
 static constexpr uint32_t RATE=16000;
-static constexpr uint32_t SECONDS=3;
+static constexpr uint32_t SECONDS=30;
 static constexpr size_t SAMPLES=RATE*SECONDS;
 static uint8_t *responseBuffer=nullptr;
 static size_t responseLength=0;
@@ -68,10 +70,12 @@ static void task(void*){
   if(i2s_channel_init_std_mode(rx,&cfg)!=ESP_OK || i2s_channel_enable(rx)!=ESP_OK){
    strcpy(result.error,"MIC_INIT");break;
   }
-  Serial.println("[VOICE] Recording 3 seconds at 16 kHz");
+  Serial.println("[VOICE] Recording: stop on request or 30 second maximum");
+  capturing=true;
+  size_t captured=0;
   uint64_t energy=0;
   bool captureOK=true;
-  for(size_t off=0;off<SAMPLES;off+=128){
+  for(size_t off=0;off<SAMPLES && !stopRequested;off+=128){
    int32_t stereo[256];size_t bytes=0;
    if(i2s_channel_read(rx,stereo,sizeof(stereo),&bytes,1500)!=ESP_OK||bytes!=sizeof(stereo)){
     captureOK=false;break;
@@ -83,22 +87,29 @@ static void task(void*){
     u16(wav+44+(off+j)*2,(uint16_t)v);
     energy+=(uint32_t)abs((int)v);
    }
+   captured+=128;
   }
+  capturing=false;
   i2s_channel_disable(rx);i2s_del_channel(rx);rx=nullptr;
   if(!captureOK){strcpy(result.error,"MIC_TIMEOUT");break;}
-  if(energy/SAMPLES<4){strcpy(result.error,"MIC_SILENT");break;}
+  if(captured<RATE/4){strcpy(result.error,"RECORDING_TOO_SHORT");break;}
+  if(energy/captured<4){strcpy(result.error,"MIC_SILENT");break;}
+  const size_t actualWavBytes=44+captured*2;
+  u32(wav+4,(uint32_t)actualWavBytes-8);
+  u32(wav+40,(uint32_t)captured*2);
+  Serial.printf("[VOICE] Captured %lu ms of speech\\n",(unsigned long)(captured*1000/RATE));
   const char *boundary="CuteDisplayAudioBoundary";
   String prefix=String("--")+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"kitty.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
   String suffix=String("\r\n--")+boundary+"--\r\n";
-  bodySize=prefix.length()+wavBytes+suffix.length();
+  bodySize=prefix.length()+actualWavBytes+suffix.length();
   body=(uint8_t*)heap_caps_malloc(bodySize,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   responseBuffer=(uint8_t*)heap_caps_malloc(4096,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   responseLength=0;
   if(!body||!responseBuffer){strcpy(result.error,"NO_PSRAM");break;}
   responseBuffer[0]=0;
   memcpy(body,prefix.c_str(),prefix.length());
-  memcpy(body+prefix.length(),wav,wavBytes);
-  memcpy(body+prefix.length()+wavBytes,suffix.c_str(),suffix.length());
+  memcpy(body+prefix.length(),wav,actualWavBytes);
+  memcpy(body+prefix.length()+actualWavBytes,suffix.c_str(),suffix.length());
   if(url.endsWith("/"))url.remove(url.length()-1);
   url+="/api/v1/audio/transcriptions";
   esp_http_client_config_t hc={};
@@ -132,17 +143,18 @@ static void task(void*){
  responseBuffer=nullptr;responseLength=0;
  if(results)xQueueSend(results,&result,pdMS_TO_TICKS(100));
  Serial.printf("[VOICE] %s\n",result.ok?"TRANSCRIBED":result.error);
- running=false;
+ capturing=false;running=false;stopRequested=false;
  vTaskDelete(nullptr);
 }
 inline bool start(){
  if(running||!results)return false;
- running=true;
+ running=true;stopRequested=false;
  if(xTaskCreatePinnedToCore(task,"voice_stt",16384,nullptr,1,nullptr,0)!=pdPASS){
   running=false;return false;
  }
  return true;
 }
+inline bool stop(){if(!running || !capturing)return false;stopRequested=true;return true;}
 inline void init(){if(!results)results=xQueueCreate(2,sizeof(Result));}
 inline bool take(Result &r){return results&&xQueueReceive(results,&r,0)==pdTRUE;}
 }
