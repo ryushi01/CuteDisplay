@@ -27,6 +27,7 @@
 #include "axp2602.h"
 #include "CuteLink.h"
 #include "C5FirmwareVersion.h"
+#include "C5JapaneseFont.h"
 #include "C5UARTOTA.h"
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
@@ -1007,15 +1008,21 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
    }else if(cp < 128) {
     if(x + width <= clipRight) glyph(x,y,(char)cp,ascScale,color);
    }else {
-    for(int k=0; k<glyphCount; k++) if(glyphCache[k].code == cp) {
-     for(int row=0; row<16; row++) {
-      uint16_t bits = ((uint16_t)glyphCache[k].bits[row*2]<<8) | glyphCache[k].bits[row*2+1];
-      for(int col=0; col<16; col++) if(bits & (0x8000>>col)) {
+    const uint8_t *bitmap=nullptr;
+    for(int k=0;k<glyphCount;k++){
+     if(glyphCache[k].code==cp){bitmap=glyphCache[k].bits;break;}
+    }
+    const C5JPEntry *embedded=bitmap?nullptr:c5JPFind(cp);
+    if(bitmap || embedded) {
+     for(int row=0;row<16;row++){
+      uint8_t hi=bitmap?bitmap[row*2]:pgm_read_byte(&embedded->bitmap[row*2]);
+      uint8_t lo=bitmap?bitmap[row*2+1]:pgm_read_byte(&embedded->bitmap[row*2+1]);
+      uint16_t bits=((uint16_t)hi<<8)|lo;
+      for(int col=0;col<16;col++)if(bits&(0x8000>>col)){
        int xx=x+col*jpScale;
-       if(xx+jpScale <= clipRight) rect(xx,y+row*jpScale,jpScale,jpScale,color);
+       if(xx+jpScale<=clipRight)rect(xx,y+row*jpScale,jpScale,jpScale,color);
       }
      }
-     break;
     }
    }
   }

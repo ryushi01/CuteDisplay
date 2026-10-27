@@ -51,6 +51,9 @@ if [ ! -f "$WORK/lcd/AXP2602.h" ]; then
 fi
 cp "$WORK/vendor/lib/esp_lcd_st7789/esp_lcd_st7789.h" "$WORK/lcd/"
 cp "$WORK/vendor/lib/esp_lcd_st7789/esp_lcd_st7789.c" "$WORK/lcd/"
+# Generate an onboard Japanese bitmap fallback, avoiding BLE glyph requests for AI.
+# The release contains the generated C5JapaneseFont.h for Arduino IDE users.
+python3 "$ROOT/tools/generate_c5_japanese_font.py" --out "$WORK/lcd/C5JapaneseFont.h"
 
 echo "[2/5] Build current C5 v$VERSION application"
 arduino-cli compile --clean --fqbn "$C5_FQBN" \
