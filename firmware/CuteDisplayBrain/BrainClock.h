@@ -86,7 +86,8 @@ inline void configureServers(bool useGateway){
 }
 inline void begin(){
  IPAddress gateway=WiFi.gatewayIP();
- bool hasGateway=gateway!=IPAddress(0,0,0,0);
+ bool hasGateway=gateway!=IPAddress(0,0,0,0) &&
+                 gateway!=IPAddress(255,255,255,255) && gateway[0]<224;
  if(hasGateway){
   String address=gateway.toString();
   strlcpy(gatewayHost,address.c_str(),sizeof(gatewayHost));
