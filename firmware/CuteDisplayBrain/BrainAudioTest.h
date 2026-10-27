@@ -142,6 +142,67 @@ inline void beep(bool onBoot=false){
   running=false;Serial.println("[AUDIO] BEEP ERROR: task start failed");
  }
 }
+
+static void diagnoseTask(void *) {
+ i2s_chan_handle_t tx=nullptr;
+ const char *error=nullptr;
+ {
+  i2s_chan_config_t ch=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1,I2S_ROLE_MASTER);
+  esp_err_t rc=i2s_new_channel(&ch,&tx,nullptr);
+  if(rc!=ESP_OK){Serial.printf("[AUDIO] DIAG channel error=%d\n",(int)rc);error="create";goto diagnosticEnd;}
+  i2s_std_config_t cfg={
+   .clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(16000),
+   .slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,I2S_SLOT_MODE_STEREO),
+   .gpio_cfg={
+    .mclk=I2S_GPIO_UNUSED,
+    .bclk=(gpio_num_t)BrainPinPlan::I2S_BCLK,
+    .ws=(gpio_num_t)BrainPinPlan::I2S_WS,
+    .dout=(gpio_num_t)BrainPinPlan::I2S_DOUT,
+    .din=I2S_GPIO_UNUSED,
+    .invert_flags={.mclk_inv=false,.bclk_inv=false,.ws_inv=false}
+   }
+  };
+  rc=i2s_channel_init_std_mode(tx,&cfg);
+  if(rc!=ESP_OK){Serial.printf("[AUDIO] DIAG init error=%d\n",(int)rc);error="init";goto diagnosticEnd;}
+  rc=i2s_channel_enable(tx);
+  if(rc!=ESP_OK){Serial.printf("[AUDIO] DIAG enable error=%d\n",(int)rc);error="enable";goto diagnosticEnd;}
+ }
+ Serial.printf("[AUDIO] DIAG TX16 rate=16000 BCLK=GPIO%d WS=GPIO%d DIN=GPIO%d\n",
+      BrainPinPlan::I2S_BCLK,BrainPinPlan::I2S_WS,BrainPinPlan::I2S_DOUT);
+ {
+  int16_t frame[BLOCK*2];
+  uint32_t phase=0;
+  uint32_t step=(uint32_t)((1000ULL*4294967296ULL)/16000ULL);
+  for(int k=0;k<250;k++){ // 250*128/16000=2 seconds
+   for(size_t i=0;i<BLOCK;i++){
+    phase+=step;
+    uint32_t p=phase>>16;
+    int32_t tri=p<32768?(int32_t)p:(int32_t)(65535-p);
+    int16_t sample=(int16_t)((tri-16384)/3); // lower volume, ~17% full-scale
+    frame[2*i]=sample;frame[2*i+1]=sample;
+   }
+   size_t written=0;
+   esp_err_t rc=i2s_channel_write(tx,frame,sizeof(frame),&written,1500);
+   if(rc!=ESP_OK||written!=sizeof(frame)){
+    Serial.printf("[AUDIO] DIAG write error=%d bytes=%u\n",(int)rc,(unsigned)written);
+    error="write";break;
+   }
+  }
+ }
+diagnosticEnd:
+ if(tx){i2s_channel_disable(tx);i2s_del_channel(tx);}
+ if(error)Serial.printf("[AUDIO] DIAG FAILED: %s\n",error);
+ else Serial.println("[AUDIO] DIAG COMPLETE: 16-bit tone written; report whether audible");
+ running=false;
+ vTaskDelete(nullptr);
+}
+inline void diagnose(){
+ if(running){Serial.println("[AUDIO] Busy; retry later");return;}
+ running=true;
+ if(xTaskCreatePinnedToCore(diagnoseTask,"audio_diag",8192,nullptr,2,nullptr,0)!=pdPASS){
+  running=false;Serial.println("[AUDIO] DIAG FAILED: could not start task");
+ }
+}
 inline void start() {
   if(running){Serial.println("[AUDIO] Already running");return;}
   running=true;

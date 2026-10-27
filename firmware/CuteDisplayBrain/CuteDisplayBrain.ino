@@ -602,10 +602,11 @@ static void pollBLECommands(){
 static void consoleCommand(String cmd){
  cmd.trim();
  if(cmd=="help"){
-  Serial.println("[S3] audio beep — speaker-only tones; audio test — record and play");
+  Serial.println("[S3] audio beep / audio diagnose / audio test");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
   return;
  }
+ if(cmd=="audio diagnose"){BrainAudioTest::diagnose();return;}
  if(cmd=="audio beep"){BrainAudioTest::beep();return;}
  if(cmd=="audio test"){
   if(BrainC5OTA::updating())Serial.println("[AUDIO] Wait until C5 OTA completes");
