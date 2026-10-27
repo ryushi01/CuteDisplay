@@ -618,6 +618,47 @@ final class BluetoothManager: NSObject, ObservableObject {
         enqueue(glyphPackets(for: [text]) + [text])
     }
     func sendControlCommand(_ payload: String) { enqueue([payload]) }
+    // Provision directly to the S3 over the authenticated/encrypted BLE relay.
+    // Each operation is ACKed before the next one is sent.
+    func sendBrainAIPrompt(url: String, model: String, key: String,
+                           certificate: String, prompt: String) {
+        guard bleReady() else {
+            status = "Brain AI configuration requires encrypted Bluetooth"
+            return
+        }
+        guard url.hasPrefix("https://"), !url.contains("@"),
+              !model.isEmpty, !key.isEmpty,
+              certificate.contains("BEGIN CERTIFICATE"),
+              !prompt.isEmpty else {
+            status = "AI requires HTTPS URL, model, API key and trusted CA PEM"
+            return
+        }
+        let fields: [(String, String)] = [
+            ("U", url), ("M", model), ("K", key),
+            ("C", certificate), ("P", prompt)
+        ]
+        var commands: [String] = []
+        for (name, value) in fields {
+            let bytes = Array(value.utf8)
+            let maxCount = name == "C" ? 4096 : name == "P" ? 1024 : 256
+            guard bytes.count > 0, bytes.count <= maxCount else {
+                status = "AI field \(name) is too large"
+                return
+            }
+            commands.append("AI:BEGIN:\(name):\(bytes.count)")
+            for offset in stride(from: 0, to: bytes.count, by: 40) {
+                let part = bytes[offset..<min(bytes.count, offset + 40)]
+                commands.append("AI:DATA:" + part.map {
+                    String(format: "%02X", $0)
+                }.joined())
+            }
+            commands.append("AI:END")
+        }
+        commands.append("AI:GO")
+        enqueue(commands)
+        status = "Sending AI prompt to S3 Brain (\(commands.count) commands)"
+    }
+
     // Wi-Fi credentials are provisioned over the connected BLE link.
     // Only use a network that you control. Password is never logged.
     func connectWiFi(ssid: String, password: String) {
