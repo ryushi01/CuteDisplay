@@ -41,6 +41,7 @@ static BLECharacteristic *controlChar=nullptr,*batteryChar=nullptr,*powerChar=nu
 static bool clientConnected=false;
 static volatile bool bleAuthenticated=false;
 static volatile bool pairingOK=false,pairingFailed=false;
+static volatile bool encryptedControlReadSeen=false;
 static volatile uint8_t pairingFailureReason=0;
 static volatile uint16_t pairingFailureStatus=0;
 static bool wifiEnabled=false,wifiDHCP=true,wifiConnecting=false;
@@ -112,6 +113,12 @@ class ServerEvents:public BLEServerCallbacks{
  void onDisconnect(BLEServer*)override{disconnectPending=true;}
 };
 class CommandEvents:public BLECharacteristicCallbacks{
+ // FFF1 requires encrypted READ at the GATT attribute level. A successful
+ // callback proves that a bonded iPhone has a usable encrypted session even
+ // if the BLE stack skips a fresh onAuthenticationComplete on bond restore.
+ void onRead(BLECharacteristic *c)override{
+  encryptedControlReadSeen=true;
+ }
  void onWrite(BLECharacteristic *c)override{
   String v=c->getValue();
   if(!incomingCommands||v.isEmpty()||v.length()>MAX_CMD)return;
@@ -964,6 +971,7 @@ void loop(){
  if(connectPending){
   connectPending=false;clientConnected=true;
   bleAuthenticated=false;
+  encryptedControlReadSeen=false;
   if(controlChar)controlChar->setValue("PAIRING_PENDING");
   // Do not clear pairingOK: onConnect() can finish security before loop().
   Serial.println("[S3] BLE connected; awaiting encrypted FFF1 read and bonding");
@@ -973,6 +981,7 @@ void loop(){
  if(disconnectPending){
   disconnectPending=false;clientConnected=false;
   bleAuthenticated=false;pairingOK=false;pairingFailed=false;
+  encryptedControlReadSeen=false;
   stopProxy();
   if(controlChar)controlChar->setValue("PROXY_DISABLED");
   bleDropNotReady=false;bleDropFull=false;
@@ -981,11 +990,13 @@ void loop(){
   sendRadioStatus(true);
   Serial.println("[S3] BLE disconnected; proxy gate closed");
  }
- if(pairingOK){
+ if(pairingOK || (encryptedControlReadSeen && clientConnected)){
+  bool viaRead=encryptedControlReadSeen;
+  encryptedControlReadSeen=false;
   pairingOK=false;
   bleAuthenticated=true;
   proxyEnabled=true;proxyDeadline=0; // Session-scoped, no USB command needed.
-  Serial.println("[S3] BLE encryption/bonding succeeded; app relay READY");
+  Serial.printf("[S3] BLE session authenticated; relay READY (encrypted-read=%d)\n",viaRead?1:0);
   proxyResult("PROXY_READY");
   networkInfo("LINK");
   networkInfo("STATE");
