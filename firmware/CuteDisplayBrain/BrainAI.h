@@ -21,6 +21,27 @@ static Packet outstanding={};
 static uint32_t pendingAt=0;
 static uint8_t retries=0;
 static String fragment,staged;
+struct ConversationTurn { String user; String assistant; };
+static constexpr size_t HISTORY_TURNS=4;
+static constexpr size_t HISTORY_RESPONSE_LIMIT=1600;
+static ConversationTurn history[HISTORY_TURNS];
+static size_t historyCount=0;
+static String currentAnswer;
+inline void clearHistory(){
+ for(size_t i=0;i<HISTORY_TURNS;i++){history[i].user="";history[i].assistant="";}
+ historyCount=0;
+}
+inline void rememberTurn(const String &prompt,const String &answer){
+ if(prompt.isEmpty()||answer.isEmpty())return;
+ if(historyCount==HISTORY_TURNS){
+  for(size_t i=1;i<HISTORY_TURNS;i++)history[i-1]=history[i];
+  historyCount--;
+ }
+ history[historyCount].user=prompt;
+ history[historyCount].assistant=answer;
+ historyCount++;
+}
+
 static bool failed=false;
 static bool doneSeen=false;
 static uint32_t requestStarted=0,firstTokenAt=0,lastTextFlush=0;
@@ -68,6 +89,14 @@ inline void processSSELine(String line){
  if(cJSON_IsString(txt) && txt->valuestring){
   // Single stream delta; never split a multi-byte Unicode scalar on the UART.
   String chunk(txt->valuestring);
+  if(currentAnswer.length()<HISTORY_RESPONSE_LIMIT){
+   size_t available=HISTORY_RESPONSE_LIMIT-currentAnswer.length();
+   size_t n=min(available,chunk.length());
+   if(n<chunk.length()){
+    while(n>0 && (((uint8_t)chunk[n]&0xC0)==0x80))--n;
+   }
+   if(n>0)currentAnswer+=chunk.substring(0,n);
+  }
   if(!firstTokenAt && !chunk.isEmpty()){
    firstTokenAt=millis();
    Serial.printf("[AI PERF] First token in %lums\n",(unsigned long)(firstTokenAt-requestStarted));
@@ -123,7 +152,7 @@ inline void run(void*){
  }
  init();
  sendPacket("AI_BEGIN","");
- failed=false;doneSeen=false;sseBuffer="";staged="";
+ failed=false;doneSeen=false;sseBuffer="";staged="";currentAnswer="";
  requestStarted=millis();firstTokenAt=0;lastTextFlush=millis();
  emittedBytes=0;ackedBytes=0;packetCount=0;
  String address=url;
@@ -133,6 +162,16 @@ inline void run(void*){
  cJSON_AddStringToObject(root,"model",model.c_str());
  cJSON_AddBoolToObject(root,"stream",true);
  cJSON *msgs=cJSON_AddArrayToObject(root,"messages");
+ for(size_t i=0;i<historyCount;i++){
+  cJSON *u=cJSON_CreateObject();
+  cJSON_AddStringToObject(u,"role","user");
+  cJSON_AddStringToObject(u,"content",history[i].user.c_str());
+  cJSON_AddItemToArray(msgs,u);
+  cJSON *a=cJSON_CreateObject();
+  cJSON_AddStringToObject(a,"role","assistant");
+  cJSON_AddStringToObject(a,"content",history[i].assistant.c_str());
+  cJSON_AddItemToArray(msgs,a);
+ }
  cJSON *m=cJSON_CreateObject();
  cJSON_AddStringToObject(m,"role","user");
  cJSON_AddStringToObject(m,"content",prompt.c_str());
@@ -163,6 +202,8 @@ inline void run(void*){
   free(json);
  }else failed=true;
  releaseText(true);
+ if(!failed && doneSeen)rememberTurn(prompt,currentAnswer);
+ currentAnswer="";
  sendPacket("AI_END","");
  Serial.printf("[AI PERF] Generated UART bytes=%lu acked=%lu packets=%lu total=%lums\n",
   (unsigned long)emittedBytes,(unsigned long)ackedBytes,(unsigned long)packetCount,
@@ -181,6 +222,11 @@ inline bool start(){
 }
 inline bool provision(const String &cmd,String &reply){
  if(cmd=="AI:PING"){reply="ACK:AI_PONG";return true;}
+ if(cmd=="AI:NEW"){
+  if(busy){reply="ERR:AI_BUSY";return true;}
+  clearHistory();
+  reply="ACK:AI_NEW";return true;
+ }
  if(cmd.startsWith("AI:BEGIN:")){
   int cut=cmd.indexOf(':',9);
   if(cut<0){reply="ERR:AI_FORMAT";return true;}
