@@ -13,6 +13,8 @@ static uint8_t retry=0,payloadBytes=0;
 static String sentPayload;
 static char sentKind[16]={0};
 static bool triedUpdate=false,permitUpdate=false;
+static uint32_t recoveryAt=0;
+static bool recoveryAttempted=false;
 static uint32_t currentVersion=0;
 static uint32_t slotCapacity=0;
 inline bool updating(){
@@ -26,6 +28,13 @@ inline bool imageAvailable(){
 inline void fail(const char *reason){
  Serial.printf("[S3 OTA] Stopped: %s (no automatic retry in this boot)\n",reason);
  stage=FAILED;pending=0;
+ // A single safe, delayed re-query is permitted only if we never
+ // transferred a DATA block. Never restart an interrupted image midway.
+ if(!recoveryAttempted && position==0 &&
+    (!strcmp(reason,"TRANSFER_TIMEOUT") || !strcmp(reason,"UART_LOST"))){
+  recoveryAt=millis()+65000UL;
+  Serial.println("[S3 OTA] Will re-query C5 once after receiver cleanup");
+ } else recoveryAt=0;
 }
 inline bool send(Stream &uart,const char *type,const String &value){
  if(++seq==0)++seq;
@@ -140,6 +149,13 @@ inline void onFrame(Stream &uart,const CuteLink::Frame &f){
 }
 inline void tick(Stream &uart,bool linked){
  const uint32_t now=millis();
+ if(stage==FAILED && recoveryAt && linked &&
+    (int32_t)(now-recoveryAt)>=0){
+  recoveryAt=0;recoveryAttempted=true;triedUpdate=false;
+  Serial.println("[S3 OTA] One-time recovery: re-querying C5 firmware version");
+  query(uart);
+  return;
+ }
  if(stage==READY){
   if(linked&&permitUpdate)start(uart);
   return;

@@ -14,7 +14,7 @@ void c5OTARedraw(); // implemented by lcd.ino
 namespace C5UARTOTA {
 enum Phase : uint8_t { IDLE, RECEIVING, INSTALLING, ERROR };
 static Phase phase=IDLE;
-static uint32_t imageBytes=0,received=0,startedAt=0,targetVersion=0,errorAt=0;
+static uint32_t imageBytes=0,received=0,startedAt=0,lastDataAt=0,targetVersion=0,errorAt=0;
 static uint32_t previousOffset=UINT32_MAX;
 static uint16_t previousLength=0;
 static uint8_t lastPercent=255;
@@ -89,7 +89,7 @@ inline void onFrame(Stream &uart,const CuteLink::Frame &f){
   if(!Update.setSHA256(sha.c_str())){
    Update.abort();respond(uart,f.seq,false,"SHA_SETUP");return;
   }
-  phase=RECEIVING;imageBytes=nbytes;received=0;startedAt=millis();
+  phase=RECEIVING;imageBytes=nbytes;received=0;startedAt=millis();lastDataAt=startedAt;
   targetVersion=newVersion;expectedHash=sha;previousOffset=UINT32_MAX;
   previousLength=0;lastPercent=255;errorMessage="";
   Serial.printf("[C5 OTA] Receiving target v%lu, %lu bytes\n",
@@ -126,7 +126,7 @@ inline void onFrame(Stream &uart,const CuteLink::Frame &f){
   if(Update.write(buffer,n)!=n){
    fail("FLASH_WRITE");respond(uart,f.seq,false,"WRITE");return;
   }
-  received+=n;previousOffset=offset;previousLength=n;
+  received+=n;lastDataAt=millis();previousOffset=offset;previousLength=n;
   uint8_t progress=uint8_t(percent());
   if(lastPercent==255||progress>=lastPercent+2||progress==100){
    lastPercent=progress;c5OTARedraw();
@@ -152,8 +152,10 @@ inline void onFrame(Stream &uart,const CuteLink::Frame &f){
  }
 }
 inline void tick(){
- if(phase==RECEIVING && (uint32_t)(millis()-startedAt)>900000UL)
-  fail("TIMEOUT");
+ // Recover automatically if the S3 lost OTA_BEGIN ACK or stopped
+ // sending DATA. A stalled inactive OTA slot must not trap the display.
+ if(phase==RECEIVING && (uint32_t)(millis()-lastDataAt)>45000UL)
+  fail(received==0?"START_STALLED":"TRANSFER_STALLED");
  if(phase==ERROR && (uint32_t)(millis()-errorAt)>10000UL)clear();
 }
 } // namespace C5UARTOTA
