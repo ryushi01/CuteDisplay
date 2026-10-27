@@ -1033,6 +1033,12 @@ void loop(){
     incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
  BrainC5OTA::tick(Serial1,faceOnline);
+ static bool voiceWasCapturing=false;
+ if(BrainVoiceSTT::capturing)voiceWasCapturing=true;
+ else if(voiceWasCapturing){
+  voiceWasCapturing=false;
+  if(BrainVoiceSTT::running)proxyResult("AI:STATUS:VOICE_UPLOADING");
+ }
  BrainVoiceSTT::Result voiceResult={};
  if(BrainVoiceSTT::take(voiceResult)){
   if(voiceResult.ok){
