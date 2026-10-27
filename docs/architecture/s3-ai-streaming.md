@@ -1,3 +1,19 @@
+## Experimental prototype in `feature/s3-ai-streaming` (not ready for production)
+
+Implemented on this isolated branch, not main:
+- C5 v8 UART receiver for `AI_BEGIN`, `AI_DATA`, and `AI_END` with ACKs, bounded rolling text buffer, fixed-size text and local reveal/mouth animation.
+- S3 worker submits `stream:true` HTTPS Open WebUI chat requests, parses SSE with cJSON, queues UTF-8-safe chunks and uses one-at-a-time UART ACK/retry.
+- iPhone sends URL/model/key/CA PEM/prompt in up-to-40-byte hex blocks over **encrypted BLE**; S3 persists configuration, then receives `AI:GO`. The iPhone no longer directly calls Open WebUI in this branch.
+- TLS uses a **user-provided certificate authority PEM** and certificate verification. Deliberately no insecure TLS bypass.
+
+**Important prototype security limitations:** The current S3 BLE profile uses Just Works bonding (encrypted but without MITM authentication). The stored API credential is saved in Preferences/NVS, which is **not assumed encrypted at rest**. Until authenticated provisioning plus flash encryption are addressed, use a revocable, least-privilege test API key only, not a high-value credential. Prefer an isolated network and never expose the C5 UART to secrets. Certificate PEM belongs in the iPhone UI; do not commit it to Git. S3 and server require correct wall-clock time for TLS certificate checks.
+
+**Known feature gaps:** This prototype only accepts one prompt at a time, has limited status reporting in the phone UI, and C5 can draw only Japanese glyphs it already knows or has cached (iPhone no longer creates live glyph packets from the streamed response). Continuous multi-turn chat history, token pacing over real display ACK, robust cancellation, special-case Open WebUI stream events, credential rotation, and voice transport are not complete. End-to-end latency and power/radio coexistence are unmeasured.
+
+**Bring-up order:** (1) GitHub Actions build success; (2) validate C5 startup/UART OTA from known-good combined sketch; (3) confirm S3 Wi-Fi reaches AI-SERVER; (4) paste Open WebUI's CA PEM in iPhone UI and send limited-scope test key; (5) observe S3 Serial Monitor `[AI]` lines and Kitty output. Keep stable rollback firmware.
+
+---
+
 # CuteDisplay AI streaming architecture — S3 owns inference transport
 
 **Decision:** The S3 Brain (not the iPhone) makes the Open WebUI request, consumes AI response tokens, and delivers display text to C5. The iPhone is a secure configuration and prompt controller. **This architecture is not yet implemented.** No AI credentials should be committed to Git.
