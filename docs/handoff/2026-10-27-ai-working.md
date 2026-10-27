@@ -91,3 +91,15 @@
 - `AI:NEW` clears conversation history and its persisted slots; failed requests are not saved. Normal C5 message timeout remains 2 minutes after `AI_END`.
 - This is not a server-side Open WebUI chat creation workflow: S3 supplies the messages array on each direct completion request without `chat_id`. Other Open WebUI logging/filter persistence policies must be checked separately.
 - Latest development is **not confirmed by firmware CI or a hardware test**. Build and inspect artifacts before flashing. Stable branch remains untouched.
+
+## 2026-10-27 hardware acceptance checkpoint — C5 v11 + S3 24-hour chat
+
+**User reported 9/9 PASS on physical hardware**: S3 valid DHCP IP, C5 clock, BLE reconnect, C5 v11 OTA, Japanese AI text, return to last regular message after 2 minutes, follow-up memory, S3 reboot memory persistence, and New Conversation clearing.
+
+**New immutable rollback branch:** `stable/2026-10-27-c5-v11-conversation-24h-hardware-tested`
+**Exact code SHA:** `a5dc985e94e89d44219d1dcaae839d55514a458e`
+**Previous stable v10 remains:** `stable/2026-10-27-s3-ai-japanese-working` at `416a6212f90a6339fd64c48e41ec341b844d5be3`.
+
+This is a **user-confirmed hardware acceptance checkpoint**, not an independently verified GitHub Actions build: connector commit checks did not return Actions evidence. The reported checks do not independently establish that expiration occurs exactly at 24 hours, nor long-run stability. Do not modify the new stable branch; continue enhancements on `feature/s3-ai-streaming`.
+
+**Next phases requested:** (2) AI error/status reporting; (3) Stop/Retry; (4) memory/streaming-limit hardening; then microphone/voice AI. Preserve UART/wiring, NTP, Japanese font, OTA and the working AI streaming implementation.
