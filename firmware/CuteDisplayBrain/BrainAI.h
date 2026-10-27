@@ -187,7 +187,7 @@ inline bool provision(const String &cmd,String &reply){
   if(cut<0){reply="ERR:AI_FORMAT";return true;}
   String field=cmd.substring(9,cut);
   size_t size=(size_t)cmd.substring(cut+1).toInt();
-  size_t limit=field=="C"?4096:field=="P"?1024:field=="K"?256:field=="U"?256:field=="M"?128:0;
+  size_t limit=field=="C"?4096:field=="P"?1024:field=="K"?8192:field=="U"?256:field=="M"?128:0;
   if(busy || !limit || !size || size>limit){reply="ERR:AI_SIZE";return true;}
   provisioningField=field;provisioningExpected=size;provisioningBuffer="";
   provisioningAt=millis();reply="ACK:AI_BEGIN";return true;

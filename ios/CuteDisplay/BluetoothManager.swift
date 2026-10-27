@@ -639,7 +639,7 @@ final class BluetoothManager: NSObject, ObservableObject {
         var commands: [String] = []
         for (name, value) in fields {
             let bytes = Array(value.utf8)
-            let maxCount = name == "C" ? 4096 : name == "P" ? 1024 : 256
+            let maxCount = name == "K" ? 8192 : name == "P" ? 1024 : 256
             guard bytes.count > 0, bytes.count <= maxCount else {
                 status = "AI field \(name) is too large"
                 return
