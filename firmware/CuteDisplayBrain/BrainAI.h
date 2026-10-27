@@ -14,6 +14,10 @@
 namespace BrainAI {
 struct Packet { char kind[12]; char text[81]; };
 static QueueHandle_t out=nullptr;
+static QueueHandle_t statusOut=nullptr;
+inline void report(const char *state){if(statusOut){char entry[36]={};strlcpy(entry,state,sizeof(entry));xQueueSend(statusOut,entry,0);}}
+inline bool takeStatus(String &value){char entry[36]={};if(!statusOut||xQueueReceive(statusOut,entry,0)!=pdTRUE)return false;value=String("AI:STATUS:")+entry;return true;}
+
 static TaskHandle_t worker=nullptr;
 static volatile bool busy=false;
 static uint16_t uartSeq=52000,pending=0;
@@ -107,7 +111,7 @@ static String provisioningField,provisioningBuffer;
 static size_t provisioningExpected=0;
 static uint32_t provisioningAt=0;
 
-inline void init(){if(!out)out=xQueueCreate(16,sizeof(Packet));}
+inline void init(){if(!out)out=xQueueCreate(16,sizeof(Packet));if(!statusOut)statusOut=xQueueCreate(12,36);}
 inline bool sendPacket(const char *kind,const String &payload) {
  if(!out || payload.length()>80)return false;
  Packet row={};
@@ -156,6 +160,7 @@ inline void processSSELine(String line){
   }
   if(!firstTokenAt && !chunk.isEmpty()){
    firstTokenAt=millis();
+   report("STREAMING");
    Serial.printf("[AI PERF] First token in %lums\n",(unsigned long)(firstTokenAt-requestStarted));
   }
   if(staged.length()+chunk.length()<=512)staged+=chunk;
@@ -197,6 +202,7 @@ inline void run(void*){
     model.isEmpty() || key.isEmpty() ||
     prompt.isEmpty()){
   Serial.println("[AI] HTTPS, WiFi or saved configuration missing");
+  report(WiFi.status()!=WL_CONNECTED?"WIFI_ERROR":"CONFIG_ERROR");
   sendPacket("AI_END","");
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
@@ -204,6 +210,7 @@ inline void run(void*){
  // Never start NTP or block this AI worker waiting for clock synchronization.
  if(!BrainClock::valid()){
   Serial.println("[AI TIME] Clock not ready; wait for background SNTP synchronization");
+  report("CLOCK_ERROR");
   sendPacket("AI_END","");
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
@@ -213,6 +220,7 @@ inline void run(void*){
  sendPacket("AI_BEGIN","");
  failed=false;doneSeen=false;sseBuffer="";staged="";currentAnswer="";
  requestStarted=millis();firstTokenAt=0;lastTextFlush=millis();
+ report("CONNECTING");
  emittedBytes=0;ackedBytes=0;packetCount=0;
  String address=url;
  if(address.endsWith("/"))address.remove(address.length()-1);
@@ -255,6 +263,12 @@ inline void run(void*){
    esp_err_t rc=esp_http_client_perform(http);
    int code=esp_http_client_get_status_code(http);
    Serial.printf("[AI] Request finished: HTTP=%d transport=%d\n",code,(int)rc);
+   if(rc!=ESP_OK)report("NETWORK_ERROR");
+   else if(code==401||code==403)report("AUTH_ERROR");
+   else if(code==404)report("MODEL_OR_URL_ERROR");
+   else if(code==429)report("RATE_LIMIT");
+   else if(code!=200)report("SERVER_ERROR");
+   else if(!doneSeen)report("STREAM_INCOMPLETE");
    if(rc!=ESP_OK || code!=200 || !doneSeen)failed=true;
    esp_http_client_cleanup(http);
   }else failed=true;
@@ -268,12 +282,15 @@ inline void run(void*){
   (unsigned long)emittedBytes,(unsigned long)ackedBytes,(unsigned long)packetCount,
   (unsigned long)(millis()-requestStarted));
  Serial.println(failed?"[AI] Stream ended with an error":"[AI] Stream complete");
+ if(!failed)report("COMPLETE");
+ else report("FAILED");
  busy=false;worker=nullptr;vTaskDelete(nullptr);
 }
 inline bool start(){
  init();
  if(busy || !out)return false;
  busy=true;failed=false;
+ report("QUEUED");
  if(xTaskCreatePinnedToCore(run,"brain_ai",16384,nullptr,1,&worker,0)!=pdPASS){
   busy=false;worker=nullptr;return false;
  }
