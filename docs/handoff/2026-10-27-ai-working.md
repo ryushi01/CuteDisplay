@@ -122,3 +122,10 @@ This is a **user-confirmed hardware acceptance checkpoint**, not an independentl
 - **Step 4 development changes:** `BrainAI.h` now avoids rewriting conversation NVS keys whose values have not changed, while preserving each completed-turn persistence and deletion. It also processes unusually large valid streaming text deltas in smaller UTF-8-boundary-aligned pieces, instead of marking a response failed solely because an SSE delta exceeded the 512-byte staging threshold.
 - C5 v11 sketch and wiring are unchanged. The last hardware-tested checkpoint (`stable/2026-10-27-c5-v11-conversation-24h-hardware-tested`) remains unmodified.
 - **Outstanding verification:** compile combined firmware, flash S3, test long Japanese replies and multi-turn conversation after S3 reboot, verify 24-hour expiry with real elapsed time; do not claim these Step 4 changes have passed hardware tests.
+
+## Step 4 physical validation + voice preparation (2026-10-27)
+- User reported **6/6 PASS** for Japanese chat, long Japanese response, Stop AI, Retry, S3 reboot persistence, and New Conversation clearing.
+- Created immutable rollback branch `stable/2026-10-27-step4-streaming-hardware-tested` at commit `e7d31bbd7925c69173306e268378045834dff16e`. Older stable checkpoints untouched.
+- 24-hour *elapsed* expiry still requires an overnight test, not established by the six checks.
+- Audio preparation: reuse existing `firmware/CuteDisplayBrain/BrainAudioTest.h` local 16 kHz 2-second record→playback loopback and the existing `A:TEST` BLE command / USB audio test. I2S BCLK GPIO41, WS GPIO42, DIN GPIO1, DOUT GPIO2 on S3; do not change pins. Start with standalone mic capture/level and speaker diagnostics before STT/TTS networking. Record logs for mic left-channel amplitude/saturation, intelligible speaker playback, and BLE/Wi-Fi coexistence.
+- Planned voice flow: S3 mic PCM -> server STT -> existing Open WebUI chat -> server TTS -> S3 I2S speaker, initially push-to-talk. Audio network protocol, latency and buffer strategy require implementation and testing; no claim that streaming voice is implemented.
