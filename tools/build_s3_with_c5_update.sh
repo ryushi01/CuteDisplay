@@ -69,8 +69,8 @@ python3 "$ROOT/tools/package_c5_firmware.py" \
   --version-header "$WORK/lcd/C5FirmwareVersion.h" \
   --output "$WORK/CuteDisplayBrain/C5FirmwareImage.h"
 # A missing or empty image must NEVER produce a seemingly valid release artifact.
-grep -Fq "inline constexpr uint32_t version=$VERSION;" "$WORK/CuteDisplayBrain/C5FirmwareImage.h" || { echo "Bundled image version mismatch" >&2; exit 1; }
-if grep -Fq 'inline constexpr size_t length=0;' "$WORK/CuteDisplayBrain/C5FirmwareImage.h"; then
+grep -Eq "inline constexpr uint32_t version=${VERSION}(UL)?;" "$WORK/CuteDisplayBrain/C5FirmwareImage.h" || { echo "Bundled image version mismatch" >&2; exit 1; }
+if grep -Eq 'inline constexpr size_t length=0(UL)?;' "$WORK/CuteDisplayBrain/C5FirmwareImage.h"; then
   echo "ERROR: bundled C5 image is empty" >&2; exit 1
 fi
 
