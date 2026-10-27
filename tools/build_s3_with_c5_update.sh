@@ -98,7 +98,7 @@ NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
 1. Open CuteDisplayBrain/CuteDisplayBrain.ino FROM THIS ARTIFACT.
 2. Choose ESP32S3 Dev Module, 16 MB flash, OPI PSRAM, Custom
    partition scheme (included partitions.csv); select S3 USB port.
-3. Upload ONLY the S3 sketch, then open Serial Monitor at 115200.
+3. Before compiling in Arduino IDE install library esp32_opus version 1.0.3\n   (Library Manager). Without this optional library WAV fallback remains available.\n4. Upload ONLY the S3 sketch, then open Serial Monitor at 115200.
 4. S3 upgrades C5 automatically ONLY if bundled version is newer.
    Expect: [S3 OTA] SUCCESS: new display firmware confirmed after reboot
 
