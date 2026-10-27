@@ -894,15 +894,24 @@ struct ContentView: View {
                 Text(aiResponse).font(.subheadline).textSelection(.enabled)
             }
             Button {
-                bluetooth.sendControlCommand("A:VOICE")
-                aiStatus = "Recording 3 seconds on S3; sending to Open WebUI for transcription."
+                if bluetooth.aiLiveStatus == "Voice recording" {
+                    bluetooth.sendControlCommand("A:VOICE:STOP")
+                    bluetooth.aiLiveStatus = "Uploading voice"
+                    aiStatus = "Recording finished. Sending audio to Open WebUI."
+                } else {
+                    bluetooth.aiLiveStatus = "Voice recording"
+                    bluetooth.sendControlCommand("A:VOICE")
+                    aiStatus = "Speak now, then tap Stop & Send. Automatically stops after 30 seconds."
+                }
             } label: {
-                Label("Talk to Kitty (3 seconds)", systemImage: "mic.fill")
+                Label(bluetooth.aiLiveStatus == "Voice recording" ? "Stop & Send" : "Talk to Kitty (30 sec max)",
+                      systemImage: bluetooth.aiLiveStatus == "Voice recording" ? "stop.circle.fill" : "mic.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .disabled(!bluetooth.bluetoothBrainConnected ||
-                ["Queued", "Connecting to AI server", "Kitty is responding", "Stopping"].contains(bluetooth.aiLiveStatus))
+                (bluetooth.aiLiveStatus != "Voice recording" &&
+                 ["Queued", "Connecting to AI server", "Kitty is responding", "Stopping", "Uploading voice"].contains(bluetooth.aiLiveStatus)))
             Text("Uses S3 microphone and your existing Open WebUI speech-to-text service. The transcript becomes the next Kitty AI prompt.")
                 .font(.caption2).foregroundStyle(.secondary)
             Button("Test S3 AI command connection") {
