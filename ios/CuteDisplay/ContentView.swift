@@ -839,9 +839,9 @@ struct ContentView: View {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         for character in normalized {
             let part = String(character)
-            if (page + part).utf8.count > 42 {
+            if (page + part).utf8.count > 90 {
                 if !page.isEmpty { pages.append(page) }
-                page = part.utf8.count <= 42 ? part : ""
+                page = part.utf8.count <= 90 ? part : ""
             } else {
                 page += part
             }
@@ -855,6 +855,7 @@ struct ContentView: View {
         let pages = kittyPages(answer)
         guard !pages.isEmpty else { return }
         aiDisplayTask = Task { @MainActor in
+            bluetooth.sendControlCommand("AI:ON")
             for (index, page) in pages.enumerated() {
                 guard !Task.isCancelled else { return }
                 guard bluetooth.isConnected else {
@@ -865,7 +866,7 @@ struct ContentView: View {
                 aiStatus = "Showing AI answer on Kitty: page \(index + 1)/\(pages.count)"
                 if index + 1 < pages.count {
                     // Allow BLE glyph transfers and enough reading time.
-                    try? await Task.sleep(for: .seconds(12))
+                    try? await Task.sleep(for: .seconds(14))
                 }
             }
             if !Task.isCancelled {

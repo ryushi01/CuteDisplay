@@ -493,6 +493,10 @@ int brightness = 75;
 String message = "こんにちわ";
 bool bubbleEnabled = false; // Normal scrolling remains the default.
 bool bubbleTypewriter = true;
+bool aiScrollMode=false;
+unsigned long aiScrollStarted=0;
+unsigned long aiLastScrollStep=0;
+int aiFirstVisibleLine=0;
 size_t revealedCharacters = 0;
 unsigned long lastBubbleReveal = 0;
 const unsigned long BUBBLE_LETTER_MS = 135;
@@ -1936,12 +1940,27 @@ void drawSpeechBubble() {
  }
  const int innerLeft=bx+10,innerRight=bx+bw-10;
  const int avail=max(10,innerRight-innerLeft);
- String shown=(bubbleTypewriter ? bubblePrefix(message,revealedCharacters):message);
+ String shown=(bubbleTypewriter && !aiScrollMode ? bubblePrefix(message,revealedCharacters):message);
  // Fixed readable font: never shrink glyphs as typewriter text grows.
  // Long AI answers arrive as short pages from the iPhone.
  const int a=2,j=1;
  const int lineH=max(7*a,16*j)+7;
- int x=innerLeft,y=by+13;
+ // AI mode scrolls upward by one entire wrapped line at a time.
+ // Font sizes remain fixed independently of text length and language.
+ const int visibleLines=max(1,(bh-24)/lineH);
+ int totalLines=1, measureX=innerLeft;
+ if(aiScrollMode){
+  for(int t=0;t<(int)shown.length();){
+   uint32_t cp=decodeUTF8(shown,t);
+   if(cp=='\r')continue;
+   if(cp=='\n'){totalLines++;measureX=innerLeft;continue;}
+   int cw=utfWidth(cp,a,j);
+   if(measureX+cw>innerRight && measureX>innerLeft){totalLines++;measureX=innerLeft;}
+   measureX+=cw;
+  }
+ }
+ const int firstLine=aiScrollMode?min(aiFirstVisibleLine,max(0,totalLines-visibleLines)):0;
+ int x=innerLeft,y=by+13-firstLine*lineH;
  for(int p=0;p<(int)shown.length();) {
   int begin=p;uint32_t cp=decodeUTF8(shown,p);
   if(cp=='\r')continue;
@@ -1950,11 +1969,11 @@ void drawSpeechBubble() {
   int w=utfWidth(cp,a,j);
   if(x+w>innerRight && x>innerLeft){x=innerLeft;y+=lineH;}
   if(y+max(7*a,16*j)>by+bh-8)break;
-  richText(shown.substring(begin,p),x,y,a,j,BLACK,innerRight);
+  if(y>=by+8)richText(shown.substring(begin,p),x,y,a,j,BLACK,innerRight);
   x+=w;
  }
  // Blinking caret for optional typewriter animation.
- if(bubbleTypewriter && revealedCharacters<bubbleCharacterCount(message)
+ if(bubbleTypewriter && !aiScrollMode && revealedCharacters<bubbleCharacterCount(message)
     && ((millis()/280)%2==0) && y<by+bh-14)
   rect(min(x,innerRight-3),y,2,max(7*a,16*j),BLACK);
 }
@@ -1963,7 +1982,7 @@ void drawMessage() {
  int a=asciiMessageScale(), j=jpMessageScale();
  int height=max(7*a,16*j);
  int multilineHeight=height+(richLineCount(message)-1)*(height+4);
- if(bubbleEnabled){drawSpeechBubble();drawMascot();}
+ if(bubbleEnabled || aiScrollMode){drawSpeechBubble();drawMascot();}
  else {drawMascot();richText(message,scrollX,max(0,(LCD_H-multilineHeight)/2),a,j,themeColor(),contentRight());}
  drawBatteryOverlay();
  drawConnectivityHUD();
@@ -1999,7 +2018,8 @@ void showMessage(String s) {
  revealedCharacters=0;lastBubbleReveal=millis();
  int width=richWidth(s,asciiMessageScale(),jpMessageScale());
  int right=contentRight();
- scrolling=!bubbleEnabled && width>right-16;
+ scrolling=!(bubbleEnabled||aiScrollMode) && width>right-16;
+ aiFirstVisibleLine=0;aiScrollStarted=millis();aiLastScrollStep=millis();
  scrollX=scrolling?right:(right-width)/2;
  drawMessage();lastScroll=millis();
  Serial.println("[MODE] Message");
@@ -2322,6 +2342,13 @@ void setWiFiPower(bool enable,bool showToast){
 }
 void processCommand(String cmd){
  cmd.trim();
+ if(cmd=="AI:ON"){
+  aiScrollMode=true;aiFirstVisibleLine=0;aiScrollStarted=millis();
+  aiLastScrollStep=millis();drawMessage();return;
+ }
+ if(cmd=="AI:OFF"){
+  aiScrollMode=false;aiFirstVisibleLine=0;showMessage(message);return;
+ }
  if(cmd.startsWith("W:"))return; // Only Brain may provision/use WiFi.
  if(cmd=="W:INFO"){sendNetworkTelemetry();return;}
  if(cmd=="W:GET:KEY"){
@@ -2924,6 +2951,27 @@ void loop(){
   // The scrolling message already redraws frequently; avoid unnecessary transfers.
   if(!scrolling)redrawCurrent();
  }
+ // Advance AI text vertically like a page, without changing font scale.
+ if(aiScrollMode && now-aiScrollStarted>=2200UL &&
+    now-aiLastScrollStep>=1700UL){
+  aiLastScrollStep=now;
+  // Count actual wrapped lines using the same metrics as drawSpeechBubble.
+  const int right=contentRight(), innerLeft=17, innerRight=right-29;
+  const int lineH=max(14,16)+7;
+  const int visibleLines=max(1,(116-24)/lineH);
+  int lines=1,x=innerLeft;
+  for(int i=0;i<(int)message.length();){
+   uint32_t cp=decodeUTF8(message,i);
+   if(cp=='\r')continue;
+   if(cp=='\n'){lines++;x=innerLeft;continue;}
+   int w=utfWidth(cp,2,1);
+   if(x+w>innerRight && x>innerLeft){lines++;x=innerLeft;}
+   x+=w;
+  }
+  if(aiFirstVisibleLine<max(0,lines-visibleLines)){
+   aiFirstVisibleLine++;drawMessage();
+  }
+ }
  // Animate mouth independently from the letters in ordinary Message Mode.
  // News already redraws up to ~28 fps while its typewriter is active.
  static unsigned long lastSpeakingFrame = 0;
@@ -2932,7 +2980,7 @@ void loop(){
    lastSpeakingFrame=millis();
    drawMessage();
  }
- if(bubbleEnabled && bubbleTypewriter
+ if(bubbleEnabled && bubbleTypewriter && !aiScrollMode
     && revealedCharacters<bubbleCharacterCount(message)
     && millis()-lastBubbleReveal>=BUBBLE_LETTER_MS){
   lastBubbleReveal=millis();revealedCharacters++;drawMessage();
@@ -2953,7 +3001,7 @@ void loop(){
  };
  if(mascotVisible)untilDue(lastMascotAnimation+MASCOT_ANIMATION_MS);
  if(scrolling)untilDue(lastScroll+55UL);
- if(bubbleEnabled && bubbleTypewriter &&
+ if(bubbleEnabled && bubbleTypewriter && !aiScrollMode &&
     revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+BUBBLE_LETTER_MS);
  if(mascotVisible && mascotIsSpeaking())untilDue(lastSpeakingFrame+105UL);
  if(chargeNoticeUntil)untilDue(lastBatteryOverlayFrame+220UL);
