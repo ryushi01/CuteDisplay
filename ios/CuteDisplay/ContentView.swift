@@ -114,6 +114,7 @@ struct ContentView: View {
     @State private var aiServer = UserDefaults.standard.string(forKey: "cuteAIServer") ?? ""
     @State private var aiModel = UserDefaults.standard.string(forKey: "cuteAIModel") ?? ""
     @State private var aiAPIKey = CuteAISecret.load()
+    @State private var aiTrustedCA = UserDefaults.standard.string(forKey: "cuteAITrustedCA") ?? ""
     @State private var aiQuestion = ""
     @State private var aiResponse = ""
     @State private var aiStatus = "Not configured"
@@ -798,10 +799,16 @@ struct ContentView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
+            TextEditor(text: $aiTrustedCA)
+                .frame(height: 90)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.gray.opacity(0.4)))
+            Text("Paste the trusted HTTPS CA certificate (PEM). Required for S3 TLS validation.")
+                .font(.caption2).foregroundStyle(.secondary)
             Button("Save AI connection") {
                 UserDefaults.standard.set(aiServer, forKey: "cuteAIServer")
                 UserDefaults.standard.set(aiModel, forKey: "cuteAIModel")
                 CuteAISecret.save(aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
+                UserDefaults.standard.set(aiTrustedCA, forKey: "cuteAITrustedCA")
                 aiStatus = "Connection settings saved on iPhone"
             }
             .buttonStyle(.bordered)
@@ -877,125 +884,23 @@ struct ContentView: View {
 
     @MainActor private func askKittyAI() async {
         let prompt = aiQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        let server = aiServer.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
         let secret = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: aiServer.trimmingCharacters(in: .whitespacesAndNewlines)),
-              url.scheme?.lowercased() == "https", url.host != nil,
-              url.user == nil, url.password == nil,
-              !model.isEmpty, !secret.isEmpty else {
-            aiStatus = "Enter HTTPS Open WebUI URL, model ID and API key"
+        guard !prompt.isEmpty else { return }
+        guard bluetooth.bluetoothBrainConnected else {
+            aiStatus = "Connect to S3 Brain over encrypted Bluetooth first"
             return
         }
-        aiDisplayTask?.cancel()
-        aiBusy = true
-        aiStatus = "Contacting AI-SERVER..."
-        defer { aiBusy = false }
-        do {
-            var endpoint = url
-            endpoint.append(path: "api/chat/completions")
-            var request = URLRequest(url: endpoint)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 45
-            request.setValue("Bearer " + secret, forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "model": model,
-                "stream": false,
-                "messages": [
-                    ["role": "system", "content": "You are CuteDisplay, a friendly tiny companion. Reply naturally in the user's language (Japanese, English or French). Be concise: one or two sentences. Avoid markdown."],
-                    ["role": "user", "content": prompt]
-                ]
-            ])
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let http = response as? HTTPURLResponse
-            let statusCode = http?.statusCode ?? 0
-            let mime = http?.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
-            // Restrict diagnostics to a small body excerpt. Never include the
-            // bearer token or request headers in diagnostics.
-            let bodyExcerpt = String(decoding: data.prefix(480), as: UTF8.self)
-                .replacingOccurrences(of: "\n", with: " ")
-                .replacingOccurrences(of: "\r", with: " ")
-            guard (200...299).contains(statusCode) else {
-                let detail = bodyExcerpt.isEmpty ? "(empty response)" : bodyExcerpt
-                throw NSError(domain: "CuteDisplayAI", code: statusCode,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                "Open WebUI HTTP \(statusCode): \(detail)"])
-            }
-            // Some Open WebUI pipelines return SSE despite stream=false.
-            // Decode both standard OpenAI JSON and completed SSE chunks.
-            var answer = ""
-            if mime.lowercased().contains("text/event-stream") ||
-               String(decoding: data.prefix(6), as: UTF8.self).hasPrefix("data:") {
-                let rawStream = String(decoding: data, as: UTF8.self)
-                // SSE events are separated by blank lines; a data field can
-                // contain multiple lines. This also handles CRLF.
-                let events = rawStream.replacingOccurrences(of: "\r\n", with: "\n")
-                    .components(separatedBy: "\n\n")
-                for event in events {
-                    let payload = event.split(separator: "\n", omittingEmptySubsequences: false)
-                        .filter { $0.hasPrefix("data:") }
-                        .map { String($0.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
-                        .joined(separator: "\n")
-                    if payload.isEmpty || payload == "[DONE]" { continue }
-                    guard let bytes = payload.data(using: .utf8),
-                          let chunk = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any]
-                    else { continue }
-                    if let error = chunk["error"] {
-                        throw NSError(domain: "CuteDisplayAI", code: 6,
-                                      userInfo: [NSLocalizedDescriptionKey:
-                                        "Open WebUI stream error: \(String(describing: error).prefix(240))"])
-                    }
-                    if let choices = chunk["choices"] as? [[String: Any]],
-                       let choice = choices.first {
-                        if let delta = choice["delta"] as? [String: Any] {
-                            if let token = delta["content"] as? String { answer += token }
-                        } else if let message = choice["message"] as? [String: Any],
-                                  let text = message["content"] as? String {
-                            answer = text
-                        }
-                    }
-                }
-            } else {
-                guard let object = try? JSONSerialization.jsonObject(with: data),
-                      let result = object as? [String: Any] else {
-                    throw NSError(domain: "CuteDisplayAI", code: 2,
-                                  userInfo: [NSLocalizedDescriptionKey:
-                                    "Unexpected response (\(mime)): \(bodyExcerpt). Check Open WebUI base URL."])
-                }
-                if let error = result["error"] {
-                    throw NSError(domain: "CuteDisplayAI", code: 3,
-                                  userInfo: [NSLocalizedDescriptionKey:
-                                    "Open WebUI error: \(String(describing: error).prefix(240))"])
-                }
-                guard let choices = result["choices"] as? [[String: Any]],
-                      let message = choices.first?["message"] as? [String: Any] else {
-                    throw NSError(domain: "CuteDisplayAI", code: 4,
-                                  userInfo: [NSLocalizedDescriptionKey:
-                                    "No chat choices in response: \(bodyExcerpt)"])
-                }
-                if let text = message["content"] as? String {
-                    answer = text
-                } else if let parts = message["content"] as? [[String: Any]] {
-                    answer = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
-                }
-            }
-            guard !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw NSError(domain: "CuteDisplayAI", code: 5,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                "Open WebUI returned no visible answer (\(mime))."])
-            }
-            aiResponse = answer
-            aiStatus = "AI response received"
-            if aiSendToKitty {
-                if bluetooth.isConnected {
-                    showKittyAIPages(answer)
-                } else {
-                    aiStatus = "AI response received; connect Kitty to display it"
-                }
-            }
-        } catch {
-            aiStatus = "AI request failed: " + error.localizedDescription
+        guard server.hasPrefix("https://"), !model.isEmpty,
+              !secret.isEmpty, aiTrustedCA.contains("BEGIN CERTIFICATE") else {
+            aiStatus = "Enter HTTPS URL, model, key and trusted CA PEM"
+            return
         }
+        aiResponse = ""
+        aiStatus = "Prompt queued on S3 Brain. The S3 will contact Open WebUI over Wi-Fi."
+        bluetooth.sendBrainAIPrompt(url: server, model: model, key: secret,
+                                    certificate: aiTrustedCA, prompt: prompt)
     }
 
     // MARK: Message mode
