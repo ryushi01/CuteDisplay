@@ -828,6 +828,24 @@ struct ContentView: View {
                 aiStatus = "Connection settings saved on iPhone"
             }
             .buttonStyle(.bordered)
+            HStack(spacing: 10) {
+                Label("Conversation", systemImage: "bubble.left.and.bubble.right")
+                    .font(.subheadline.bold())
+                Spacer()
+                Button {
+                    bluetooth.sendControlCommand("AI:NEW")
+                    aiQuestion = ""
+                    aiResponse = ""
+                    aiStatus = "New conversation requested; previous context will be cleared on S3."
+                } label: {
+                    Label("New conversation", systemImage: "plus.circle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!bluetooth.bluetoothBrainConnected)
+            }
+            Text("Follow-up prompts remember the last 4 exchanges on the S3. The display returns to your regular message after 2 minutes, but conversation context remains until New conversation or an S3 reboot.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             TextField("Ask Kitty something...", text: $aiQuestion, axis: .vertical)
                 .lineLimit(2...4)
                 .textFieldStyle(.roundedBorder)
