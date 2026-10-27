@@ -104,8 +104,8 @@ static void task(void*){
   responseBuffer=(uint8_t*)heap_caps_malloc(4096,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!responseBuffer){strcpy(result.error,"NO_PSRAM");break;}
   const char *boundary="CuteDisplayAudioBoundary";
-  String prefix=String("--")+boundary+"\\r\\nContent-Disposition: form-data; name=\\\"file\\\"; filename=\\\"kitty.wav\\\"\\r\\nContent-Type: audio/wav\\r\\n\\r\\n";
-  String suffix=String("\\r\\n--")+boundary+"--\\r\\n";
+  String prefix=String("--")+boundary+"\r\nContent-Disposition: form-data; name=\\"file\\"; filename=\\"kitty.wav\\"\r\nContent-Type: audio/wav\r\n\r\n";
+  String suffix=String("\r\n--")+boundary+"--\r\n";
   const size_t pcm8Bytes=44+captured;
   const size_t largest=prefix.length()+actualWavBytes+suffix.length();
   body=(uint8_t*)heap_caps_malloc(largest,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -141,7 +141,7 @@ static void task(void*){
    esp_http_client_set_header(client,"Authorization",auth.c_str());
    esp_http_client_set_header(client,"Content-Type",type.c_str());
    esp_http_client_set_post_field(client,(const char*)body,bodySize);
-   Serial.printf("[VOICE] Sending %s: %lu bytes\\n",compact?"8-bit WAV":"16-bit WAV",(unsigned long)audioBytes);
+   Serial.printf("[VOICE] Sending %s: %lu bytes\n",compact?"8-bit WAV":"16-bit WAV",(unsigned long)audioBytes);
    esp_err_t rc=esp_http_client_perform(client);
    int code=esp_http_client_get_status_code(client);
    esp_http_client_cleanup(client);
