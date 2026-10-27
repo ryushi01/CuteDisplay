@@ -98,10 +98,9 @@ NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
 1. Open CuteDisplayBrain/CuteDisplayBrain.ino FROM THIS ARTIFACT.
 2. Choose ESP32S3 Dev Module, 16 MB flash, OPI PSRAM, Custom
    partition scheme (included partitions.csv); select S3 USB port.
-3. Before compiling in Arduino IDE, install:
-   - esp32_opus from https://github.com/sh123/esp32_opus_arduino\n     (Code > Download ZIP, then Sketch > Include Library > Add .ZIP Library).\n     Confirm Serial Monitor prints Opus compiled=1 in [VOICE] logs; if 0,\n     the library was not found by the local Arduino IDE build.
-   - ESP8266Audio 2.4.1 (for Open WebUI MP3 text-to-speech playback).
-   The combined GitHub Actions build installs these dependencies.
+3. Before compiling in Arduino IDE, install ESP8266Audio 2.4.1
+   for MP3 voice replies. Recording sends 8-bit PCM WAV (16 kHz)
+   with 16-bit PCM WAV fallback; no extra recording codec library.
 4. Upload ONLY the S3 sketch, then open Serial Monitor at 115200.
 5. S3 upgrades C5 automatically ONLY if bundled version is newer.
    Expect: [S3 OTA] SUCCESS: new display firmware confirmed after reboot
