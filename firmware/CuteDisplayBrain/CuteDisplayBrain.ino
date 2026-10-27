@@ -951,6 +951,7 @@ void setup(){
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
  BrainAI::init();
+ BrainTTS::init();
  BrainVoiceSTT::init();
  BrainClock::init();
  BrainAudioTest::loadLevels();
@@ -1057,6 +1058,7 @@ void loop(){
   }
  }
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
+ BrainTTS::tick(BrainVoiceSTT::running || BrainAudioTest::running || BrainC5OTA::updating() || BrainAI::busy);
  // Status notifications are separate from command acknowledgements.
  String aiEvent;
  for(int i=0;i<4 && BrainAI::takeStatus(aiEvent);i++){
