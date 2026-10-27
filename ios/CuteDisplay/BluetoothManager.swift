@@ -511,13 +511,13 @@ final class BluetoothManager: NSObject, ObservableObject {
                 // CoreBluetooth transport alone is not an encrypted/ready GATT
                 // session. Re-discover once, then recreate a stuck connection.
                 let elapsed = now.timeIntervalSince(bleConnectStarted)
-                if elapsed >= 30 {
+                if elapsed >= 38 {
                     status = "Bluetooth handshake stalled; reconnecting..."
                     central.cancelPeripheralConnection(current)
                     // Keep reference until didDisconnect (avoids concurrent
                     // duplicate connections to the same peripheral).
                     bleConnectStarted = now
-                } else if elapsed >= 12 && bleRecoveryAttempts == 0 {
+                } else if elapsed >= 16 && bleRecoveryAttempts == 0 {
                     bleRecoveryAttempts = 1
                     status = "Retrying Brain encrypted service discovery..."
                     discoverOrRestoreServices(on: current)
@@ -1000,7 +1000,10 @@ extension BluetoothManager: CBPeripheralDelegate {
                         ? "Brain Bluetooth pairing failed; forget and pair again"
                         : "Waiting for Brain command relay..."
                     brainReadyReadAttempts += 1
-                    if brainReadyReadAttempts <= 12 {
+                    if brainReadyReadAttempts == 1 || brainReadyReadAttempts.isMultiple(of: 10) {
+                        print("[CuteDisplay BLE] FFF1 read attempt \(brainReadyReadAttempts): \(response)")
+                    }
+                    if brainReadyReadAttempts <= 60 {
                         Task { @MainActor [weak self] in
                             try? await Task.sleep(for: .milliseconds(500))
                             guard let self, !self.isConnected,
@@ -1010,7 +1013,7 @@ extension BluetoothManager: CBPeripheralDelegate {
                             device.readValue(for: control)
                         }
                     } else {
-                        status = "Brain relay not ready; check S3 Serial Monitor"
+                        status = "Brain FFF1 still not ready (last: \(response)); retrying BLE..."
                     }
                     return
                 }
