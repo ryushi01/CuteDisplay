@@ -121,15 +121,13 @@ static void task(void *) {
       goto done;
     }
   }
-  // INMP441 speech is naturally quiet in 32-bit I2S slots. Auto-scale
-  // the recorded voice to a safe peak, bounded to 24x to avoid noise blow-up.
+  // Recordings can contain occasional high transient peaks. Calculate\n  // playback level from average energy rather than a single peak; clamp output.
   speechPeak=0;
   for(size_t i=0;i<FRAMES;i++){
     int64_t m=recorded[i]<0?-(int64_t)recorded[i]:(int64_t)recorded[i];
     if(m>speechPeak)speechPeak=(uint32_t)m;
   }
-  autoGainQ10=(uint32_t)min(81920ULL,
-    (targetPeak*1024ULL)/max((uint32_t)1,speechPeak));
+  autoGainQ10=(uint32_t)min(8192ULL,\n    (targetPeak*1024ULL)/max((uint32_t)1,speechPeak));
   // Never attenuate during normalization; speakerVolume remains attenuation.
   if(autoGainQ10<1024)autoGainQ10=1024;
   Serial.printf("[AUDIO] Playback raw_peak=%lu auto_gain=%.2fx mic_gain=%u%% speaker_volume=%u%%\n",
@@ -140,11 +138,10 @@ static void task(void *) {
       for(size_t i=0;i<BLOCK;++i){
         // Clamp suspicious transients, then apply bounded digital normalization.
         int32_t sample=recorded[start+i];
-        if(sample>0x18000000)sample=0x18000000;
-        if(sample<-(int32_t)0x18000000)sample=-(int32_t)0x18000000;
+        if(sample>0x28000000)sample=0x28000000;\n        if(sample<-(int32_t)0x28000000)sample=-(int32_t)0x28000000;
         // Fixed-point gain adjustment with wide intermediate, no overflow.
         int64_t scaled=((int64_t)sample*autoGainQ10*micGain*speakerVolume)/(1024LL*10000LL);
-        const int64_t ceiling=0x58000000LL;
+        const int64_t ceiling=0x38000000LL;
         if(scaled>ceiling)scaled=ceiling;
         if(scaled<-ceiling)scaled=-ceiling;
         stereo[2*i]=(int32_t)scaled;stereo[2*i+1]=(int32_t)scaled;
@@ -198,8 +195,7 @@ static void beepTask(void *arg) {
      phase+=step;
      uint32_t p=phase>>16;
      int32_t tri=p<32768?(int32_t)p:(int32_t)(65535-p);
-     int32_t sample=(tri-16384)*4096;
-     samples[2*i]=sample;samples[2*i+1]=sample;
+     // Previous chirp was ~3% full scale and extremely quiet.\n     // Raise to ~25% full scale, with 8ms attack/release to avoid pops.\n     const int32_t sampleIndex=chunk*(int32_t)BLOCK+(int32_t)i;\n     const int32_t totalSamples=14*(int32_t)BLOCK;\n     int32_t edge=min(sampleIndex,totalSamples-1-sampleIndex);\n     int32_t fade=min((int32_t)128,edge);\n     int32_t sample=(int32_t)(((int64_t)(tri-16384)*32768*fade)/128);\n     samples[2*i]=sample;samples[2*i+1]=sample;
     }
     size_t written=0;
     if(i2s_channel_write(tx,samples,sizeof(samples),&written,1500)!=ESP_OK || written!=sizeof(samples)){
