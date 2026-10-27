@@ -1937,9 +1937,9 @@ void drawSpeechBubble() {
  const int innerLeft=bx+10,innerRight=bx+bw-10;
  const int avail=max(10,innerRight-innerLeft);
  String shown=(bubbleTypewriter ? bubblePrefix(message,revealedCharacters):message);
- // Scale down long messages so more fits within the bubble.
- int a=min(3,asciiMessageScale()),j=min(2,jpMessageScale());
- while((a>1 || j>1) && richWidth(shown,a,j)>avail*3){if(a>1)a--;if(j>1)j--;}
+ // Fixed readable font: never shrink glyphs as typewriter text grows.
+ // Long AI answers arrive as short pages from the iPhone.
+ const int a=2,j=1;
  const int lineH=max(7*a,16*j)+7;
  int x=innerLeft,y=by+13;
  for(int p=0;p<(int)shown.length();) {

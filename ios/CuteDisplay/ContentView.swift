@@ -831,16 +831,17 @@ struct ContentView: View {
     }
 
     private func kittyPages(_ text: String) -> [String] {
-        // Each page respects the S3/C5 96-byte UTF-8 command limit.
+        // Limit AI text to short, readable pages for the fixed-size LCD
+        // speech bubble (the underlying BLE/C5 protocol still allows 96 bytes).
         // Iterate by Swift Character so Japanese and emoji remain intact.
         var pages: [String] = []
         var page = ""
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         for character in normalized {
             let part = String(character)
-            if (page + part).utf8.count > 96 {
+            if (page + part).utf8.count > 42 {
                 if !page.isEmpty { pages.append(page) }
-                page = part.utf8.count <= 96 ? part : ""
+                page = part.utf8.count <= 42 ? part : ""
             } else {
                 page += part
             }
