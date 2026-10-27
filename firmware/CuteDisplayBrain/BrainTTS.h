@@ -10,9 +10,9 @@
 #include <esp_heap_caps.h>
 #include <cJSON.h>
 #include "BrainPinPlan.h"
-#include <AudioFileSourcePROGMEM.h>
-#include <AudioGeneratorMP3.h>
-#include <AudioOutputI2S.h>
+#define MINIMP3_IMPLEMENTATION
+#define MINIMP3_ONLY_MP3
+#include "minimp3.h"
 namespace BrainTTS {
 static volatile bool running=false;
 static volatile bool cancelRequested=false;
@@ -83,29 +83,71 @@ static bool playback(){
  if(tx){i2s_channel_disable(tx);i2s_del_channel(tx);}
  return good;
 }
-// Decode MP3 from PSRAM directly into the MAX98357A, preserving WAV support.
+// Decode MP3 using the CC0 minimp3 decoder; no second libopus is linked.
 static bool playbackMP3(){
  if(!audio||audioUsed<4)return false;
- AudioFileSourcePROGMEM *file=new AudioFileSourcePROGMEM(audio,(uint32_t)audioUsed);
- AudioOutputI2S *output=new AudioOutputI2S();
- AudioGeneratorMP3 *decoder=new AudioGeneratorMP3();
- bool ok=file&&output&&decoder;
- if(ok){
-  ok=output->SetPinout(BrainPinPlan::I2S_BCLK,BrainPinPlan::I2S_WS,BrainPinPlan::I2S_DOUT);
-  output->SetGain(0.35f);
+ mp3dec_t *decoder=(mp3dec_t*)heap_caps_malloc(sizeof(mp3dec_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ mp3d_sample_t *pcm=(mp3d_sample_t*)heap_caps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME*sizeof(mp3d_sample_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!decoder||!pcm){
+  if(decoder)heap_caps_free(decoder);
+  if(pcm)heap_caps_free(pcm);
+  return false;
  }
- if(ok)ok=decoder->begin(file,output);
- if(ok){
-  Serial.println("[TTS] MP3 playback started");
-  while(decoder->isRunning() && !cancelRequested){
-   if(!decoder->loop()){decoder->stop();break;}
-   vTaskDelay(1);
+ mp3dec_init(decoder);
+ i2s_chan_handle_t tx=nullptr;
+ bool good=true,started=false;
+ int rate=0,channels=0;
+ size_t offset=0,decodedFrames=0;
+ // Skip ID3v2 metadata (synchsafe 28-bit size).
+ if(audioUsed>=10 && memcmp(audio,"ID3",3)==0){
+  size_t tag=((size_t)(audio[6]&127)<<21)|((size_t)(audio[7]&127)<<14)|
+             ((size_t)(audio[8]&127)<<7)|(audio[9]&127);
+  offset=10+tag+((audio[5]&0x10)?10:0);
+ }
+ while(offset<audioUsed && !cancelRequested){
+  mp3dec_frame_info_t info={};
+  int samples=mp3dec_decode_frame(decoder,audio+offset,(int)min((size_t)INT_MAX,audioUsed-offset),pcm,&info);
+  if(info.frame_bytes<=0){good=false;break;}
+  offset+=info.frame_bytes;
+  if(samples<=0)continue;
+  if(info.channels<1 || info.channels>2 || info.hz<8000 || info.hz>48000){good=false;break;}
+  if(!started){
+   rate=info.hz;channels=info.channels;
+   i2s_chan_config_t ch=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1,I2S_ROLE_MASTER);
+   if(i2s_new_channel(&ch,&tx,nullptr)!=ESP_OK){good=false;break;}
+   i2s_std_config_t cfg={
+    .clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(rate),
+    .slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,I2S_SLOT_MODE_STEREO),
+    .gpio_cfg={.mclk=I2S_GPIO_UNUSED,.bclk=(gpio_num_t)BrainPinPlan::I2S_BCLK,
+     .ws=(gpio_num_t)BrainPinPlan::I2S_WS,.dout=(gpio_num_t)BrainPinPlan::I2S_DOUT,
+     .din=I2S_GPIO_UNUSED,.invert_flags={.mclk_inv=false,.bclk_inv=false,.ws_inv=false}}
+   };
+   if(i2s_channel_init_std_mode(tx,&cfg)!=ESP_OK || i2s_channel_enable(tx)!=ESP_OK){good=false;break;}
+   started=true;
+   Serial.printf("[TTS] MP3 playback started rate=%d channels=%d\n",rate,channels);
   }
+  if(info.hz!=rate || info.channels!=channels){good=false;break;}
+  int16_t out[256];
+  for(int n=0;n<samples && !cancelRequested;n+=128){
+   int count=min(128,samples-n);
+   for(int j=0;j<count;j++){
+    int16_t left=pcm[(n+j)*channels];
+    int16_t right=channels==2?pcm[(n+j)*channels+1]:left;
+    out[2*j]=(int16_t)((int32_t)left*35/100);
+    out[2*j+1]=(int16_t)((int32_t)right*35/100);
+   }
+   size_t written=0;
+   if(i2s_channel_write(tx,out,(size_t)count*4,&written,2000)!=ESP_OK||written!=(size_t)count*4){
+    good=false;break;
+   }
+  }
+  if(!good)break;
+  decodedFrames++;
+  vTaskDelay(1);
  }
- if(decoder){decoder->stop();delete decoder;}
- if(output)delete output;
- if(file)delete file;
- return ok;
+ if(tx){i2s_channel_disable(tx);i2s_del_channel(tx);}
+ heap_caps_free(decoder);heap_caps_free(pcm);
+ return good && started && decodedFrames>0 && !cancelRequested;
 }
 static bool appearsMP3(){
  if(audioUsed<4)return false;
