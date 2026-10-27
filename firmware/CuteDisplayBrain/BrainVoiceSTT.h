@@ -58,16 +58,22 @@ static size_t makeOpus(const uint8_t *wav,size_t frames,uint8_t *out,size_t capa
  int16_t input[320]={};
  uint8_t packet[512]={};
  bool good=true;
- for(size_t offset=0;offset<frames;offset+=320){
+ // Flush the encoder's lookahead using silence after the real recording.
+ // The last Ogg granule trims exactly to captured samples + pre-skip.
+ size_t encodeFrames=frames+(size_t)delaySamples;
+ for(size_t offset=0;offset<encodeFrames;offset+=320){
   memset(input,0,sizeof(input));
-  size_t count=min((size_t)320,frames-offset);
-  for(size_t i=0;i<count;i++)
-   input[i]=(int16_t)((uint16_t)wav[44+(offset+i)*2]|((uint16_t)wav[45+(offset+i)*2]<<8));
+  if(offset<frames){
+   size_t count=min((size_t)320,frames-offset);
+   for(size_t i=0;i<count;i++)
+    input[i]=(int16_t)((uint16_t)wav[44+(offset+i)*2]|((uint16_t)wav[45+(offset+i)*2]<<8));
+  }
   int bytes=opus_encode(enc,input,320,packet,sizeof(packet));
   if(bytes<=0){good=false;break;}
-  // Ogg granules are at 48 kHz. Trim encoder's final padded frame.
-  uint64_t granule=(uint64_t)preSkip+(uint64_t)min(frames,offset+320)*3ULL;
-  if(!writer.packet(packet,(size_t)bytes,granule,offset+320>=frames)){good=false;break;}
+  bool last=offset+320>=encodeFrames;
+  uint64_t granule=last?((uint64_t)preSkip+(uint64_t)frames*3ULL):
+    ((uint64_t)(offset+320)*3ULL);
+  if(!writer.packet(packet,(size_t)bytes,granule,last)){good=false;break;}
   vTaskDelay(1);
  }
  size_t result=good?writer.size():0;
