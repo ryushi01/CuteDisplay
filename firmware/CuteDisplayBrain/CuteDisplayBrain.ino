@@ -228,6 +228,7 @@ static void pushNetwork(const String &v){
 }
 static void sendRadioStatus(bool immediate);
 static void toggleBrainWiFiByButton();
+static uint16_t brainActivitySeq=33000;
 static void processFace(const CuteLink::Frame &f){
  lastFace=millis();
  if(!faceOnline){
@@ -261,6 +262,11 @@ static void processFace(const CuteLink::Frame &f){
   // C5 radios are disabled; ignore any stale C5 radio telemetry.
  } else if(f.type=="BATTERY"){
   Serial.printf("[C5] BATTERY %s\n",f.payload.c_str());
+ } else if(f.type=="VOICE_INTERRUPT"){
+  BrainTTS::interrupt();
+ } else if(f.type=="VOICE_CANCEL"){
+  BrainTTS::interrupt();
+  if(BrainAI::busy){String ignored;BrainAI::control("AI:STOP",ignored);}
  } else if(f.type=="VOICE_START"){
   if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy && !BrainTTS::running){
    if(BrainVoiceSTT::start())Serial.println("[VOICE] C5 button started recording");
@@ -1059,6 +1065,12 @@ void loop(){
  }
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
  BrainTTS::tick(BrainVoiceSTT::running || BrainAudioTest::running || BrainC5OTA::updating() || BrainAI::busy);
+ static String priorActivity;
+ String activity=BrainVoiceSTT::capturing?"LISTENING":BrainVoiceSTT::running?"UPLOADING":BrainAI::busy?"THINKING":BrainTTS::running?"SPEAKING":"";
+ if(activity!=priorActivity && faceOnline && !BrainC5OTA::updating()){
+  CuteLink::send(Serial1,++brainActivitySeq,"ACTIVITY",activity);
+  priorActivity=activity;
+ }
  // Status notifications are separate from command acknowledgements.
  String aiEvent;
  for(int i=0;i<4 && BrainAI::takeStatus(aiEvent);i++){
