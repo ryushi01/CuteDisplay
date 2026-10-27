@@ -593,10 +593,30 @@ static void sendRadioStatus(bool immediate){
  sendLink("RADIO",packet);
 }
 
+// Some boards leave UART1 unresponsive after the USB auto-reset at upload end.
+// Only when *no C5 frame has ever arrived* do we restart UART1 in-place.
+// This never resets the S3, clears NVS, or interrupts an established link.
+static uint32_t uartRecoveryAt=0;
+static uint8_t uartRecoveryAttempts=0;
+static void recoverFreshBootUART(uint32_t now){
+ if(faceOnline || lastFace!=0 || BrainC5OTA::updating())return;
+ if(now<12000UL || (uint32_t)(now-uartRecoveryAt)<9000UL || uartRecoveryAttempts>=4)return;
+ uartRecoveryAt=now;
+ ++uartRecoveryAttempts;
+ Serial.printf("[S3 UART] No C5 frames since boot; restart UART1 (attempt %u)\n",uartRecoveryAttempts);
+ Serial1.flush();
+ Serial1.end();
+ delay(25);
+ Serial1.setRxBufferSize(2048);
+ Serial1.setTxBufferSize(2048);
+ Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
+ lastHello=0; // Force the normal HELLO retry in pollFace().
+}
 static void pollFace(){
  CuteLink::Frame f;
  for(int i=0;i<16 && frameReader.poll(Serial1,f);++i)processFace(f);
  uint32_t now=millis();
+ recoverFreshBootUART(now);
  if(faceOnline&&(uint32_t)(now-lastFace)>10000UL){
   faceOnline=false;
   Serial.printf("[S3] Face UART timed out: silence=%lums bad_frames=%lu queued=%u\n",
