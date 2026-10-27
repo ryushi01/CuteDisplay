@@ -1633,7 +1633,7 @@ size_t bubbleCharacterCount(const String &s);
 static bool mascotIsSpeaking() {
   // Keep eyes continuously open during the entire news bubble,
   // including page-transition pauses; never fall back to sleepy blink mid-speech.
-  return bubbleEnabled && bubbleTypewriter
+  return (bubbleEnabled && bubbleTypewriter || aiScrollMode)
       && revealedCharacters < bubbleCharacterCount(message);
 }
 
@@ -1940,7 +1940,7 @@ void drawSpeechBubble() {
  }
  const int innerLeft=bx+10,innerRight=bx+bw-10;
  const int avail=max(10,innerRight-innerLeft);
- String shown=(bubbleTypewriter && !aiScrollMode ? bubblePrefix(message,revealedCharacters):message);
+ String shown=((bubbleTypewriter || aiScrollMode) ? bubblePrefix(message,revealedCharacters):message);
  // Fixed readable font: never shrink glyphs as typewriter text grows.
  // Long AI answers arrive as short pages from the iPhone.
  const int a=2,j=1;
@@ -2980,9 +2980,9 @@ void loop(){
    lastSpeakingFrame=millis();
    drawMessage();
  }
- if(bubbleEnabled && bubbleTypewriter && !aiScrollMode
+ if((bubbleEnabled && bubbleTypewriter || aiScrollMode)
     && revealedCharacters<bubbleCharacterCount(message)
-    && millis()-lastBubbleReveal>=BUBBLE_LETTER_MS){
+    && millis()-lastBubbleReveal>=(aiScrollMode?65UL:BUBBLE_LETTER_MS)){
   lastBubbleReveal=millis();revealedCharacters++;drawMessage();
  }
  if(scrolling&&millis()-lastScroll>=55UL){
@@ -3001,8 +3001,8 @@ void loop(){
  };
  if(mascotVisible)untilDue(lastMascotAnimation+MASCOT_ANIMATION_MS);
  if(scrolling)untilDue(lastScroll+55UL);
- if(bubbleEnabled && bubbleTypewriter && !aiScrollMode &&
-    revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+BUBBLE_LETTER_MS);
+ if((bubbleEnabled && bubbleTypewriter || aiScrollMode) &&
+    revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+(aiScrollMode?65UL:BUBBLE_LETTER_MS));
  if(mascotVisible && mascotIsSpeaking())untilDue(lastSpeakingFrame+105UL);
  if(chargeNoticeUntil)untilDue(lastBatteryOverlayFrame+220UL);
  if(userButtonStable==LOW)sleepMs=min(sleepMs,(uint32_t)8);
