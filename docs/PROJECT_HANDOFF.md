@@ -1,3 +1,9 @@
+## 2026-10-27 — Speaker purchase reference
+
+Physical speaker installed for the S3 MAX98357A audio tests: Amazon Japan product [ASIN B0D4LHNLJ4](https://www.amazon.co.jp/dp/B0D4LHNLJ4), as supplied by user. Product page could not be independently fetched, so **impedance, rated wattage, dimensions, and model name are NOT verified**. Do not assume this is a 4Ω or 8Ω speaker. Before changing MAX98357A GAIN or recommending higher amplifier output, inspect markings/retailer specifications (especially Ω and W), and check both speaker leads are connected across SPK+ / SPK− rather than ground. The current speaker is audible on startup beep and quieter on recorded playback; recordings exhibit unusually high 32-bit peak values and 1.00x auto normalization. Keep stable branch unchanged.
+
+---
+
 ## 2026-10-27 — CONFIRMED STABLE AUDIO AND RECOVERY CHECKPOINT
 
 Git ref: [stable/2026-10-27-audio-tested](https://github.com/ryushi01/CuteDisplay/tree/stable/2026-10-27-audio-tested), pinned at commit `baf2b0b98dfa12b2d732c4618c060ea55e92d804`. Successful GitHub Actions combined build: [40449317276](https://github.com/ryushi01/CuteDisplay/actions/runs/40449317276). Artifact: `CuteDisplay-CombinedFirmware`. The stable branch holds the hardware-tested firmware and iOS implementation; documentation can continue to evolve separately on main.
