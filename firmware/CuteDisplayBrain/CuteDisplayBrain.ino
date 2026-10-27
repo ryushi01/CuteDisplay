@@ -32,7 +32,7 @@
 #include "BrainAI.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
-static constexpr char S3_FW_VERSION[]="Phase6-UART-C5-OTA-20261027";
+static constexpr char S3_FW_VERSION[]="Phase7-S3-AI-STREAM-BLE-DIAGNOSTIC";
 static constexpr size_t MAX_CMD=96;
 // Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
 // UART frame payload (one-digit chunk index, total, delimiters).
@@ -614,6 +614,8 @@ static void pollBLECommands(){
                   incoming=="AI:GO"?"Start":incoming=="AI:PING"?"Ping":"Field complete",result.c_str());
    proxyResult(result);return;
   }
+  Serial.println("[AI CTRL] Unsupported AI command rejected");
+  proxyResult("ERR:AI_UNKNOWN");return;
  }
  if(incoming=="A:TEST"){
   if(BrainAudioTest::running){proxyResult("ERR:AUDIO_BUSY");return;}
