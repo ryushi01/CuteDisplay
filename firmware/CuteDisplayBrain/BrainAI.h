@@ -22,6 +22,8 @@ static uint8_t retries=0;
 static String fragment,staged;
 static bool failed=false;
 static bool doneSeen=false;
+static uint32_t requestStarted=0,firstTokenAt=0,lastTextFlush=0;
+static uint32_t emittedBytes=0,ackedBytes=0,packetCount=0;
 static String provisioningField,provisioningBuffer;
 static size_t provisioningExpected=0;
 static uint32_t provisioningAt=0;
@@ -41,6 +43,8 @@ inline void releaseText(bool force=false){
   if(len==0)break;
   String part=staged.substring(0,len);
   if(!sendPacket("AI_DATA",part)){failed=true;return;}
+  emittedBytes+=len;
+  lastTextFlush=millis();
   staged.remove(0,len);
  }
 }
@@ -63,9 +67,15 @@ inline void processSSELine(String line){
  if(cJSON_IsString(txt) && txt->valuestring){
   // Single stream delta; never split a multi-byte Unicode scalar on the UART.
   String chunk(txt->valuestring);
+  if(!firstTokenAt && !chunk.isEmpty()){
+   firstTokenAt=millis();
+   Serial.printf("[AI PERF] First token in %lums\n",(unsigned long)(firstTokenAt-requestStarted));
+  }
   if(staged.length()+chunk.length()<=512)staged+=chunk;
   else failed=true;
   releaseText(false);
+  // First phrase appears immediately rather than waiting for 64 bytes.
+  if(emittedBytes==0 && staged.length()>=12)releaseText(true);
  }
  cJSON_Delete(root);
 }
@@ -81,6 +91,8 @@ static esp_err_t event(esp_http_client_event_t *e){
     if(sseBuffer.length()<8192)sseBuffer+=ch;else failed=true;
    }
   }
+  // Flush partial phrases after a pause in token generation.
+  if(staged.length()>=12 && millis()-lastTextFlush>280)releaseText(true);
  }
  return ESP_OK;
 }
@@ -113,6 +125,8 @@ inline void run(void*){
  init();
  sendPacket("AI_BEGIN","");
  failed=false;doneSeen=false;sseBuffer="";staged="";
+ requestStarted=millis();firstTokenAt=0;lastTextFlush=millis();
+ emittedBytes=0;ackedBytes=0;packetCount=0;
  String address=url;
  if(address.endsWith("/"))address.remove(address.length()-1);
  address+="/api/chat/completions";
@@ -151,6 +165,9 @@ inline void run(void*){
  }else failed=true;
  releaseText(true);
  sendPacket("AI_END","");
+ Serial.printf("[AI PERF] Generated UART bytes=%lu acked=%lu packets=%lu total=%lums\n",
+  (unsigned long)emittedBytes,(unsigned long)ackedBytes,(unsigned long)packetCount,
+  (unsigned long)(millis()-requestStarted));
  Serial.println(failed?"[AI] Stream ended with an error":"[AI] Stream complete");
  busy=false;worker=nullptr;vTaskDelete(nullptr);
 }
@@ -216,7 +233,11 @@ inline bool provision(const String &cmd,String &reply){
 }
 inline void onAck(uint16_t seq,const String &type,const String &payload){
  if(!pending||seq!=pending)return;
- if(type=="ACK" && payload=="AI"){pending=0;retries=0;return;}
+ if(type=="ACK" && payload=="AI"){
+  if(!strcmp(outstanding.kind,"AI_DATA"))ackedBytes+=strlen(outstanding.text);
+  packetCount++;
+  pending=0;retries=0;return;
+ }
  // NACK or bad ACK: stop streaming until a fresh request.
  Serial.printf("[AI] UART rejected packet %u: %s %s\n",seq,type.c_str(),payload.c_str());
  pending=0;failed=true;
