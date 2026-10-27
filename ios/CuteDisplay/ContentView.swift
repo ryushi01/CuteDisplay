@@ -871,18 +871,53 @@ struct ContentView: View {
                 ]
             ])
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode) else {
-                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                throw NSError(domain: "CuteDisplayAI", code: code,
-                              userInfo: [NSLocalizedDescriptionKey: "Open WebUI HTTP \(code). Check URL, key and model."])
+            let http = response as? HTTPURLResponse
+            let statusCode = http?.statusCode ?? 0
+            let mime = http?.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
+            // Restrict diagnostics to a small body excerpt. Never include the
+            // bearer token or request headers in diagnostics.
+            let bodyExcerpt = String(decoding: data.prefix(480), as: UTF8.self)
+                .replacingOccurrences(of: "\\n", with: " ")
+                .replacingOccurrences(of: "\\r", with: " ")
+            guard (200...299).contains(statusCode) else {
+                let detail = bodyExcerpt.isEmpty ? "(empty response)" : bodyExcerpt
+                throw NSError(domain: "CuteDisplayAI", code: statusCode,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Open WebUI HTTP \\(statusCode): \\(detail)"])
             }
-            guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = result["choices"] as? [[String: Any]],
-                  let message = choices.first?["message"] as? [String: Any],
-                  let answer = message["content"] as? String, !answer.isEmpty else {
-                throw NSError(domain: "CuteDisplayAI", code: 1,
-                              userInfo: [NSLocalizedDescriptionKey: "Open WebUI returned no text answer"])
+            // Open WebUI should return an OpenAI-compatible JSON object when
+            // stream=false. A reverse proxy can instead return HTML or SSE.
+            guard let object = try? JSONSerialization.jsonObject(with: data),
+                  let result = object as? [String: Any] else {
+                throw NSError(domain: "CuteDisplayAI", code: 2,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Unexpected response (\\(mime)): \\(bodyExcerpt). Check the Open WebUI base URL and reverse proxy."])
+            }
+            if let error = result["error"] {
+                throw NSError(domain: "CuteDisplayAI", code: 3,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Open WebUI error: \\(String(describing: error).prefix(480))"])
+            }
+            guard let choices = result["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any] else {
+                let keys = result.keys.sorted().joined(separator: ", ")
+                throw NSError(domain: "CuteDisplayAI", code: 4,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "No chat choices in JSON (fields: \\(keys)). Response: \\(bodyExcerpt)"])
+            }
+            let content = message["content"]
+            let answer: String
+            if let plainText = content as? String {
+                answer = plainText
+            } else if let parts = content as? [[String: Any]] {
+                answer = parts.compactMap { $0["text"] as? String }.joined(separator: "\\n")
+            } else {
+                answer = ""
+            }
+            guard !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw NSError(domain: "CuteDisplayAI", code: 5,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Model returned no visible text. Finish reason: \\(String(describing: choices.first?["finish_reason"] ?? "unknown"))"])
             }
             aiResponse = answer
             aiStatus = "AI response received"
