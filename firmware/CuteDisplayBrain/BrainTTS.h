@@ -10,6 +10,9 @@
 #include <esp_heap_caps.h>
 #include <cJSON.h>
 #include "BrainPinPlan.h"
+#include <AudioFileSourcePROGMEM.h>
+#include <AudioGeneratorMP3.h>
+#include <AudioOutputI2S.h>
 namespace BrainTTS {
 static volatile bool running=false;
 static QueueHandle_t requests=nullptr;
@@ -78,6 +81,36 @@ static bool playback(){
  if(tx){i2s_channel_disable(tx);i2s_del_channel(tx);}
  return good;
 }
+// Decode MP3 from PSRAM directly into the MAX98357A, preserving WAV support.
+static bool playbackMP3(){
+ if(!audio||audioUsed<4)return false;
+ AudioFileSourcePROGMEM *file=new AudioFileSourcePROGMEM(audio,(uint32_t)audioUsed);
+ AudioOutputI2S *output=new AudioOutputI2S();
+ AudioGeneratorMP3 *decoder=new AudioGeneratorMP3();
+ bool ok=file&&output&&decoder;
+ if(ok){
+  ok=output->SetPinout(BrainPinPlan::I2S_BCLK,BrainPinPlan::I2S_WS,BrainPinPlan::I2S_DOUT);
+  output->SetGain(0.35f);
+ }
+ if(ok)ok=decoder->begin(file,output);
+ if(ok){
+  Serial.println("[TTS] MP3 playback started");
+  while(decoder->isRunning()){
+   if(!decoder->loop()){decoder->stop();break;}
+   vTaskDelay(1);
+  }
+ }
+ if(decoder){decoder->stop();delete decoder;}
+ if(output)delete output;
+ if(file)delete file;
+ return ok;
+}
+static bool appearsMP3(){
+ if(audioUsed<4)return false;
+ if(memcmp(audio,"ID3",3)==0)return true;
+ // MPEG audio sync bits, not a guarantee of a valid playable stream.
+ return audio[0]==0xFF && (audio[1]&0xE0)==0xE0;
+}
 static void task(void *){
  Text text={};
  if(!requests || xQueueReceive(requests,&text,0)!=pdTRUE){running=false;vTaskDelete(nullptr);return;}
@@ -115,8 +148,13 @@ static void task(void *){
   esp_http_client_cleanup(http);free(body);
   Serial.printf("[TTS] HTTP=%d transport=%d bytes=%lu\n",code,(int)err,(unsigned long)audioUsed);
   if(err!=ESP_OK||code!=200){failure="HTTP_ERROR";break;}
-  if(audioUsed<12||memcmp(audio,"RIFF",4)!=0){failure="NOT_PCM_WAV";break;}
-  if(!playback()){failure="INVALID_WAV_OR_PLAYBACK";break;}
+  if(audioUsed>=12 && memcmp(audio,"RIFF",4)==0 && memcmp(audio+8,"WAVE",4)==0){
+   Serial.println("[TTS] Format: WAV");
+   if(!playback()){failure="INVALID_WAV_OR_PLAYBACK";break;}
+  }else if(appearsMP3()){
+   Serial.println("[TTS] Format: MP3");
+   if(!playbackMP3()){failure="MP3_DECODER_OR_PLAYBACK";break;}
+  }else{failure="UNSUPPORTED_AUDIO_FORMAT";break;}
   failure=nullptr;
  }while(false);
  if(failure)Serial.printf("[TTS] SKIPPED: %s (text remains visible)\n",failure);
