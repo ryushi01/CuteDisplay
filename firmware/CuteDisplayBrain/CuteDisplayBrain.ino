@@ -266,7 +266,7 @@ static void processFace(const CuteLink::Frame &f){
   BrainTTS::interrupt();
  } else if(f.type=="VOICE_CANCEL"){
   BrainTTS::interrupt();
-  if(BrainAI::busy){String ignored;BrainAI::control("AI:STOP",ignored);}
+  if(BrainAI::busy){String ignored;BrainAI::provision("AI:STOP",ignored);}
  } else if(f.type=="VOICE_START"){
   if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy && !BrainTTS::running){
    if(BrainVoiceSTT::start())Serial.println("[VOICE] C5 button started recording");
