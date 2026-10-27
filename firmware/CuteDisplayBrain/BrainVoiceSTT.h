@@ -17,6 +17,9 @@
 #else
 #define CUTE_HAS_OPUS 0
 #endif
+#if defined(CUTE_REQUIRE_OPUS) && CUTE_REQUIRE_OPUS && !CUTE_HAS_OPUS
+#error "CuteDisplay: Opus library is missing. Install esp32_opus in Arduino libraries before compiling."
+#endif
 
 namespace BrainVoiceSTT {
 static volatile bool running=false;
@@ -196,13 +199,15 @@ static void task(void*){
    responseLength=0;responseBuffer[0]=0;
    esp_http_client_config_t hc={};
    hc.url=url.c_str();hc.crt_bundle_attach=esp_crt_bundle_attach;
-   hc.event_handler=onHTTP;hc.timeout_ms=90000;hc.buffer_size=2048;
+   hc.event_handler=onHTTP;hc.timeout_ms=90000;
+   hc.buffer_size=4096;hc.buffer_size_tx=8192;
    esp_http_client_handle_t client=esp_http_client_init(&hc);
    if(!client){strcpy(result.error,"HTTP_INIT");break;}
    esp_http_client_set_method(client,HTTP_METHOD_POST);
    esp_http_client_set_header(client,"Authorization",auth.c_str());
    esp_http_client_set_header(client,"Content-Type",type.c_str());
    esp_http_client_set_post_field(client,(const char*)body,bodySize);
+   Serial.printf("[VOICE] Opus compiled=%d requestHeaderBuffer=8192 authBytes=%u\\n",CUTE_HAS_OPUS,(unsigned)auth.length());
    Serial.printf("[VOICE] Sending %s: %lu bytes\n",opus?"Ogg Opus":compact?"8-bit WAV":"16-bit WAV",(unsigned long)audioBytes);
    esp_err_t rc=esp_http_client_perform(client);
    int code=esp_http_client_get_status_code(client);
