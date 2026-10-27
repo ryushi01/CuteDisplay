@@ -618,7 +618,10 @@ final class BluetoothManager: NSObject, ObservableObject {
         }
         enqueue(glyphPackets(for: [text]) + [text])
     }
-    func sendControlCommand(_ payload: String) { enqueue([payload]) }
+    func sendControlCommand(_ payload: String) {
+        if payload == "AI:STOP" { aiLiveStatus = "Stopping" }
+        enqueue([payload])
+    }
     // Provision directly to the S3 over the authenticated/encrypted BLE relay.
     // Each operation is ACKed before the next one is sent.
     func sendBrainAIPrompt(url: String, model: String, key: String,
@@ -1096,6 +1099,8 @@ extension BluetoothManager: CBPeripheralDelegate {
                     case "CONNECTING": aiLiveStatus = "Connecting to AI server"
                     case "STREAMING": aiLiveStatus = "Kitty is responding"
                     case "COMPLETE": aiLiveStatus = "Complete"
+                    case "CANCELLED": aiLiveStatus = "Stopped"
+                    case "STOPPING": aiLiveStatus = "Stopping"
                     case "WIFI_ERROR": aiLiveStatus = "Failed: S3 Wi-Fi disconnected"
                     case "CONFIG_ERROR": aiLiveStatus = "Failed: check HTTPS URL, model and API key"
                     case "CLOCK_ERROR": aiLiveStatus = "Failed: S3 clock not synchronized"
