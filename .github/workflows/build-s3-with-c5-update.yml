@@ -50,11 +50,6 @@ jobs:
           git clone --quiet --depth 1 https://github.com/sh123/esp32_opus_arduino.git "$HOME/Arduino/libraries/esp32_opus"
           test -s "$HOME/Arduino/libraries/esp32_opus/src/opus.h"
 
-      - name: Install MP3 decoder library for Kitty TTS
-        shell: bash
-        run: |
-          arduino-cli lib install "ESP8266Audio@2.4.1"
-
       - name: Show available C5 and S3 board menu options
         shell: bash
         run: |
