@@ -497,6 +497,9 @@ bool bubbleEnabled = false; // Normal scrolling remains the default.
 bool bubbleTypewriter = true;
 bool aiScrollMode=false;
 bool aiStreamFinished=true;
+static constexpr unsigned long AI_RETURN_DELAY_MS=120000UL;
+unsigned long aiFinishedAt=0;
+String normalDisplayMessage="こんにちわ";
 unsigned long aiScrollStarted=0;
 unsigned long aiLastScrollStep=0;
 int aiFirstVisibleLine=0;
@@ -714,7 +717,7 @@ void setGlyph(uint32_t cp, const uint8_t *bits) {
 }
 void saveDisplayState(){
  // Persist the active message and user display preferences.
- const String &persistentMessage = message;
+ const String &persistentMessage = normalDisplayMessage;
  const bool persistentBubble = bubbleEnabled;
  displayPrefs.begin("cute-display",false);
  displayPrefs.putUChar("v",1);
@@ -777,6 +780,7 @@ void loadDisplayState(){
  message=displayPrefs.getString("message","こんにちわ");
  // An empty/corrupt NVS string must not leave the display without text.
  if(message.isEmpty())message="こんにちわ";
+ normalDisplayMessage=message;
  Serial.printf("[STATE] Restored message: %u bytes, bubble=%d\n",
                (unsigned)message.length(),bubbleEnabled?1:0);
  displayPrefs.end();
@@ -2024,8 +2028,10 @@ void drawMessage() {
  finishDrawing();
 }
 void showMessage(String s) {
- noteStateChanged();
  s.trim(); if(s.isEmpty())return;
+ aiScrollMode=false;aiStreamFinished=true;aiFinishedAt=0;
+ normalDisplayMessage=s;
+ noteStateChanged();
  message=s;
  revealedCharacters=0;lastBubbleReveal=millis();
  int width=richWidth(s,asciiMessageScale(),jpMessageScale());
@@ -2355,11 +2361,12 @@ void setWiFiPower(bool enable,bool showToast){
 void processCommand(String cmd){
  cmd.trim();
  if(cmd=="AI:ON"){
-  aiScrollMode=true;aiFirstVisibleLine=0;aiScrollStarted=millis();
+  aiScrollMode=true;aiStreamFinished=false;aiFinishedAt=0;
+  aiFirstVisibleLine=0;aiScrollStarted=millis();
   aiLastScrollStep=millis();drawMessage();return;
  }
  if(cmd=="AI:OFF"){
-  aiScrollMode=false;aiFirstVisibleLine=0;showMessage(message);return;
+  aiScrollMode=false;aiFirstVisibleLine=0;showMessage(normalDisplayMessage);return;
  }
  if(cmd.startsWith("W:"))return; // Only Brain may provision/use WiFi.
  if(cmd=="W:INFO"){sendNetworkTelemetry();return;}
@@ -2770,7 +2777,7 @@ static void serviceBrain() {
   else if(f.type=="AI_BEGIN"){
    if(!lcdReady){CuteLink::send(Serial1,f.seq,"NACK","DISPLAY");}
    else{
-    aiScrollMode=true;aiStreamFinished=false;aiFirstVisibleLine=0;
+    aiScrollMode=true;aiStreamFinished=false;aiFinishedAt=0;aiFirstVisibleLine=0;
     message="";revealedCharacters=0;lastBubbleReveal=millis();
     aiScrollStarted=millis();aiLastScrollStep=millis();
     drawMessage();
@@ -2796,7 +2803,7 @@ static void serviceBrain() {
    }
   }
   else if(f.type=="AI_END"){
-   aiStreamFinished=true;
+   if(aiScrollMode){aiStreamFinished=true;aiFinishedAt=millis();}
    CuteLink::send(Serial1,f.seq,"ACK","AI");
   }
   else if(f.type=="CMDHEX")receiveCmdChunk(f);
@@ -2927,6 +2934,11 @@ void loop(){
   if(lcdReady)redrawCurrent();
  }
  updatePersonalityPose(now);
+ if(aiScrollMode && aiStreamFinished && aiFinishedAt &&
+    (uint32_t)(now-aiFinishedAt)>=AI_RETURN_DELAY_MS){
+  Serial.println("[AI] Returning to last regular message");
+  showMessage(normalDisplayMessage);
+ }
  if(stateDirty && now-stateDirtyAt>=3500UL)saveDisplayState();
  bool raw=digitalRead(PIN_USER_BUTTON);
  if(raw!=userButtonLastRaw){userButtonChangedAt=now;userButtonLastRaw=raw;}
