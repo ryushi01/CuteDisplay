@@ -86,6 +86,62 @@ done:
   running=false;
   vTaskDelete(nullptr);
 }
+
+static void beepTask(void *arg) {
+ if((uintptr_t)arg)vTaskDelay(pdMS_TO_TICKS(4500));
+ i2s_chan_handle_t tx=nullptr;
+ const char *error=nullptr;
+ {
+  i2s_chan_config_t ch=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1,I2S_ROLE_MASTER);
+  if(i2s_new_channel(&ch,&tx,nullptr)!=ESP_OK){error="create TX";goto doneBeep;}
+  i2s_std_config_t cfg={
+   .clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(RATE),
+   .slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,I2S_SLOT_MODE_STEREO),
+   .gpio_cfg={.mclk=I2S_GPIO_UNUSED,
+    .bclk=(gpio_num_t)BrainPinPlan::I2S_BCLK,
+    .ws=(gpio_num_t)BrainPinPlan::I2S_WS,
+    .dout=(gpio_num_t)BrainPinPlan::I2S_DOUT,
+    .din=I2S_GPIO_UNUSED,
+    .invert_flags={.mclk_inv=false,.bclk_inv=false,.ws_inv=false}}
+  };
+  if(i2s_channel_init_std_mode(tx,&cfg)!=ESP_OK){error="init TX";goto doneBeep;}
+  if(i2s_channel_enable(tx)!=ESP_OK){error="enable TX";goto doneBeep;}
+ }
+ Serial.println("[AUDIO] BEEP: testing speaker with two tones");
+ {
+  int32_t samples[BLOCK*2];
+  uint32_t phase=0;
+  const uint32_t notes[]={660,880};
+  for(int n=0;n<2;++n){
+   uint32_t step=(uint32_t)(((uint64_t)notes[n]*4294967296ULL)/RATE);
+   for(int chunk=0;chunk<40;++chunk){
+    for(size_t i=0;i<BLOCK;++i){
+     phase+=step;
+     uint32_t p=phase>>16;
+     int32_t tri=p<32768?(int32_t)p:(int32_t)(65535-p);
+     int32_t sample=(tri-16384)*4096;
+     samples[2*i]=sample;samples[2*i+1]=sample;
+    }
+    size_t written=0;
+    if(i2s_channel_write(tx,samples,sizeof(samples),&written,1500)!=ESP_OK || written!=sizeof(samples)){
+     error="write TX";goto doneBeep;
+    }
+   }
+  }
+ }
+doneBeep:
+ if(tx){i2s_channel_disable(tx);i2s_del_channel(tx);}
+ if(error)Serial.printf("[AUDIO] BEEP ERROR: %s\n",error);
+ else Serial.println("[AUDIO] BEEP COMPLETE: check audible output");
+ running=false;vTaskDelete(nullptr);
+}
+inline void beep(bool onBoot=false){
+ if(running){Serial.println("[AUDIO] Busy");return;}
+ running=true;
+ if(xTaskCreatePinnedToCore(beepTask,"audio_beep",8192,(void*)(uintptr_t)(onBoot?1:0),2,nullptr,0)!=pdPASS){
+  running=false;Serial.println("[AUDIO] BEEP ERROR: task start failed");
+ }
+}
 inline void start() {
   if(running){Serial.println("[AUDIO] Already running");return;}
   running=true;
