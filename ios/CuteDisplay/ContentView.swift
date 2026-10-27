@@ -810,6 +810,15 @@ struct ContentView: View {
                 .textFieldStyle(.roundedBorder)
             Toggle("Show AI answer on Kitty", isOn: $aiSendToKitty)
                 .tint(.pink)
+            Button("Test S3 AI Bluetooth link") {
+                bluetooth.sendControlCommand("AI:PING")
+                aiStatus = "AI ping sent via Bluetooth; check connection status below and S3 Serial Monitor"
+            }
+            .buttonStyle(.bordered)
+            .disabled(!bluetooth.bluetoothBrainConnected)
+            Text("S3 command status: " + bluetooth.status)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             Button {
                 Task { await askKittyAI() }
             } label: {
