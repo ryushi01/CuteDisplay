@@ -162,7 +162,7 @@ static void task(void*){
   ogg=(uint8_t*)heap_caps_malloc(oggCapacity,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   size_t oggBytes=ogg?makeOpus(wav,captured,ogg,oggCapacity):0;
   if(oggBytes)Serial.printf("[VOICE] Ogg Opus encoded %lu bytes vs %lu PCM bytes\\n",(unsigned long)oggBytes,(unsigned long)actualWavBytes);
-  else Serial.println("[VOICE] Ogg unavailable: WAV fallback");
+  else Serial.printf("[VOICE] Opus encoding unavailable/failed (compiled=%d, buffer=%s): using WAV fallback\\n",CUTE_HAS_OPUS,ogg?"allocated":"missing");
   const size_t largest=prefix.length()+actualWavBytes+suffix.length();
   body=(uint8_t*)heap_caps_malloc(largest,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!body){strcpy(result.error,"NO_PSRAM");break;}
@@ -175,7 +175,7 @@ static void task(void*){
    const bool opus=(attempt==0),compact=(attempt==1);
    const size_t audioBytes=opus?oggBytes:(compact?pcm8Bytes:actualWavBytes);
    String selectedPrefix=opus?
-       String("--")+boundary+"\\r\\nContent-Disposition: form-data; name=\\\"file\\\"; filename=\\\"kitty.ogg\\\"\\r\\nContent-Type: audio/ogg\\r\\n\\r\\n":
+       String("--")+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"kitty.ogg\"\r\nContent-Type: audio/ogg\r\n\r\n":
        prefix;
    memcpy(body,selectedPrefix.c_str(),selectedPrefix.length());
    uint8_t *audio=body+selectedPrefix.length();
@@ -208,20 +208,22 @@ static void task(void*){
    int code=esp_http_client_get_status_code(client);
    esp_http_client_cleanup(client);
    if(rc!=ESP_OK||code!=200){
+    Serial.printf("[VOICE] %s rejected: transport=%d HTTP=%d response=%s\\n",opus?"Ogg Opus":compact?"8-bit WAV":"16-bit WAV",(int)rc,code,(const char*)responseBuffer);
     snprintf(result.error,sizeof(result.error),"STT_HTTP_%d",code);
     // Do not retry authorization/configuration errors with the same key.
     if(code==401||code==403||code==404||code==429)break;
     continue;
    }
    cJSON *json=cJSON_Parse((const char*)responseBuffer);
-   if(!json){strcpy(result.error,"BAD_STT_JSON");continue;}
+   if(!json){Serial.printf("[VOICE] %s: bad STT JSON\\n",opus?"Ogg Opus":compact?"8-bit WAV":"16-bit WAV");strcpy(result.error,"BAD_STT_JSON");continue;}
    cJSON *field=cJSON_GetObjectItem(json,"text");
    if(cJSON_IsString(field)&&field->valuestring&&strlen(field->valuestring)<sizeof(result.text)){
     strlcpy(result.text,field->valuestring,sizeof(result.text));
     result.ok=result.text[0]!=0;
    }
    cJSON_Delete(json);
-   if(!result.ok)strcpy(result.error,"NO_TRANSCRIPT");
+   if(result.ok)Serial.printf("[VOICE] Transcribed with %s\\n",opus?"Ogg Opus":compact?"8-bit WAV":"16-bit WAV");
+   else {Serial.printf("[VOICE] %s: empty transcript\\n",opus?"Ogg Opus":compact?"8-bit WAV":"16-bit WAV");strcpy(result.error,"NO_TRANSCRIPT");}
   }
  }while(false);
  if(rx){i2s_channel_disable(rx);i2s_del_channel(rx);}
