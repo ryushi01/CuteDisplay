@@ -44,31 +44,57 @@ static void task(void *) {
   Serial.println("[AUDIO] Recording 2 seconds at 16 kHz. Speak now.");
   {
     int32_t block[BLOCK*2];
-    int64_t peak=0;
+    uint32_t maxAbs[2]={0,0};
+    uint32_t saturated[2]={0,0}, allOnes[2]={0,0};
+    uint32_t nonzero[2]={0,0};
+    uint64_t sumAbs[2]={0,0};
     for(size_t start=0;start<FRAMES;start+=BLOCK){
       size_t got=0;
       if(i2s_channel_read(rx,block,sizeof(block),&got,1500)!=ESP_OK || got!=sizeof(block)){
         failure="microphone read timeout/error";goto done;
       }
-      for(size_t i=0;i<BLOCK;++i){
-        // INMP441 L/R wired to GND => left slot.
-        int32_t sample=block[i*2];
-        recorded[start+i]=sample;
-        int64_t level=sample<0?-(int64_t)sample:(int64_t)sample;
-        if(level>peak)peak=level;
+      for(size_t i=0;i<BLOCK;i++){
+        for(int ch=0;ch<2;ch++){
+          int32_t raw=block[i*2+ch];
+          int64_t magnitude=raw<0?-(int64_t)raw:(int64_t)raw;
+          if(magnitude>maxAbs[ch])maxAbs[ch]=(uint32_t)magnitude;
+          sumAbs[ch]+=(uint64_t)magnitude;
+          if(raw!=0)nonzero[ch]++;
+          if(raw==INT32_MAX || raw==INT32_MIN)saturated[ch]++;
+          if(raw==-1 || raw==INT32_MAX)allOnes[ch]++;
+        }
+        // INMP441 L/R grounded should put the audio in the left slot.
+        recorded[start+i]=block[2*i];
       }
     }
-    Serial.printf("[AUDIO] Recorded 2 seconds, microphone peak=%lld\n",(long long)peak);
-    if(peak<100000){Serial.println("[AUDIO] WARNING: input almost silent; check INMP441 SD, L/R=GND and clocks.");}
+    Serial.printf("[AUDIO] RX left: peak=%lu mean_abs=%lu nonzero=%lu saturated=%lu all_ones=%lu\n",
+       (unsigned long)maxAbs[0],(unsigned long)(sumAbs[0]/FRAMES),
+       (unsigned long)nonzero[0],(unsigned long)saturated[0],(unsigned long)allOnes[0]);
+    Serial.printf("[AUDIO] RX right: peak=%lu mean_abs=%lu nonzero=%lu saturated=%lu all_ones=%lu\n",
+       (unsigned long)maxAbs[1],(unsigned long)(sumAbs[1]/FRAMES),
+       (unsigned long)nonzero[1],(unsigned long)saturated[1],(unsigned long)allOnes[1]);
+    if(saturated[0]>0 || allOnes[0]>FRAMES/100 || maxAbs[0]>=0x7FFFFFFF ||
+       sumAbs[0]/FRAMES>0x30000000ULL){
+      Serial.println("[AUDIO] INVALID microphone signal: saturated/high-level input; playback skipped to avoid loud noise.");
+      Serial.println("[AUDIO] Check INMP441 soldered SD/SCK/WS/GND/VDD/LR, mic supply 3V3, L/R=GND.");
+      goto done;
+    }
+    if(nonzero[0]<FRAMES/100 || sumAbs[0]/FRAMES<10000ULL){
+      Serial.println("[AUDIO] Input near silent: playback skipped. Check microphone DATA on GPIO1.");
+      goto done;
+    }
   }
-  Serial.println("[AUDIO] Playing recording through MAX98357A at reduced level.");
+  Serial.println("[AUDIO] Playing validated recording at reduced level.");
   {
     int32_t stereo[BLOCK*2];
     for(size_t start=0;start<FRAMES;start+=BLOCK){
       for(size_t i=0;i<BLOCK;++i){
-        int32_t quiet=recorded[start+i]>>3; // -18 dB approximate volume
-        stereo[2*i]=quiet;
-        stereo[2*i+1]=quiet;
+        // Clamp suspicious transients, then attenuate approximately -18 dB.
+        int32_t sample=recorded[start+i];
+        if(sample>0x18000000)sample=0x18000000;
+        if(sample<-(int32_t)0x18000000)sample=-(int32_t)0x18000000;
+        int32_t quiet=sample>>3;
+        stereo[2*i]=quiet;stereo[2*i+1]=quiet;
       }
       size_t written=0;
       if(i2s_channel_write(tx,stereo,sizeof(stereo),&written,1500)!=ESP_OK ||
