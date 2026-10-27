@@ -78,3 +78,10 @@
 4. Improve iPhone AI status and multi-turn conversation; secure credential lifecycle; multilingual C5 glyph edge cases.
 5. Plan future local audio + remote MacBook speech services separately; no assumption of an existing directly usable ESP32 voice API.
 6. Update this handoff whenever major features change, preserving exact tested commit and firmware/action references.
+
+## Continuation — conversational memory (development, not stable)
+- S3 BrainAI.h now holds up to **4 completed user/assistant exchanges in RAM**, replayed as `messages` before the new prompt. Failed/incomplete responses are not committed. Stored assistant text is capped at 1,600 UTF-8 bytes per answer; longer replies may have incomplete remembered context.
+- iPhone Home > Kitty AI offers **New conversation**, sending the acknowledged `AI:NEW` command. The S3 rejects reset if an AI request is busy; verify S3 command status before assuming it succeeded. Follow-up prompts continue the chat by default.
+- Context is **volatile**: an S3 reboot clears it. The C5 v11 two-minute return to regular Message Mode does **not** clear conversation context.
+- Updated development files: `firmware/CuteDisplayBrain/BrainAI.h` and `ios/CuteDisplay/ContentView.swift`. No S3/C5 pins changed, C5 version stays v11. Do not change `stable/2026-10-27-s3-ai-japanese-working`.
+- **Verification pending:** GitHub connector did not expose a firmware Actions run for the latest commits, and Xcode compilation/hardware testing are not verified. Check the combined workflow run before flashing.
