@@ -29,6 +29,7 @@
 #include "CuteLink.h"
 #include "BrainC5OTA.h"
 #include "BrainAudioTest.h"
+#include "BrainClock.h"
 #include "BrainAI.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
@@ -986,6 +987,7 @@ void loop(){
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
  pollUSB();
  updateBrainWiFi();
+ BrainClock::tick(brainWiFiOnline());
  pollBrainLAN();
  if(connectPending){
   connectPending=false;clientConnected=true;

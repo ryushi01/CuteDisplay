@@ -114,31 +114,13 @@ inline void run(void*){
   sendPacket("AI_END","");
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
- // Certificate validation uses UTC; regional timezone configuration is unnecessary.
- auto clockReady=[]()->bool {
-  const time_t t=time(nullptr);
-  return t>=1735689600LL && t<4102444800LL;
- };
- if(!clockReady()){
-  IPAddress gw=WiFi.gatewayIP();
-  if(gw!=IPAddress(0,0,0,0)){
-   String host=gw.toString();
-   Serial.printf("[AI TIME] Gateway NTP %s: trying 4 seconds\n",host.c_str());
-   configTime(0,0,host.c_str());
-   for(int i=0;i<20 && !clockReady();i++)vTaskDelay(pdMS_TO_TICKS(200));
-  }
-  if(!clockReady()){
-   Serial.println("[AI TIME] Trying public NTP: time.google.com, pool.ntp.org, time.cloudflare.com");
-   configTime(0,0,"time.google.com","pool.ntp.org","time.cloudflare.com");
-   for(int i=0;i<100 && !clockReady();i++)vTaskDelay(pdMS_TO_TICKS(200));
-  }
- }
- if(!clockReady()){
-  Serial.println("[AI TIME] NTP failed. Verify S3 DNS, internet and UDP port 123");
+ // Background SNTP begins at Wi-Fi connection and refreshes hourly.
+ // Never start NTP or block this AI worker waiting for clock synchronization.
+ if(!BrainClock::valid()){
+  Serial.println("[AI TIME] Clock not ready; wait for background SNTP synchronization");
   sendPacket("AI_END","");
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
- Serial.printf("[AI TIME] UTC clock ready: %lld\n",(long long)time(nullptr));
  init();
  sendPacket("AI_BEGIN","");
  failed=false;doneSeen=false;sseBuffer="";staged="";
