@@ -621,21 +621,20 @@ final class BluetoothManager: NSObject, ObservableObject {
     // Provision directly to the S3 over the authenticated/encrypted BLE relay.
     // Each operation is ACKed before the next one is sent.
     func sendBrainAIPrompt(url: String, model: String, key: String,
-                           certificate: String, prompt: String) {
+                           prompt: String) {
         guard bleReady() else {
             status = "Brain AI configuration requires encrypted Bluetooth"
             return
         }
         guard url.hasPrefix("https://"), !url.contains("@"),
               !model.isEmpty, !key.isEmpty,
-              certificate.contains("BEGIN CERTIFICATE"),
               !prompt.isEmpty else {
-            status = "AI requires HTTPS URL, model, API key and trusted CA PEM"
+            status = "AI requires HTTPS URL, model and API key"
             return
         }
         let fields: [(String, String)] = [
             ("U", url), ("M", model), ("K", key),
-            ("C", certificate), ("P", prompt)
+            ("P", prompt)
         ]
         var commands: [String] = []
         for (name, value) in fields {

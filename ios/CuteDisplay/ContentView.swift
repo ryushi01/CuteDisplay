@@ -114,7 +114,6 @@ struct ContentView: View {
     @State private var aiServer = UserDefaults.standard.string(forKey: "cuteAIServer") ?? ""
     @State private var aiModel = UserDefaults.standard.string(forKey: "cuteAIModel") ?? ""
     @State private var aiAPIKey = CuteAISecret.load()
-    @State private var aiTrustedCA = UserDefaults.standard.string(forKey: "cuteAITrustedCA") ?? ""
     @State private var aiQuestion = ""
     @State private var aiResponse = ""
     @State private var aiStatus = "Not configured"
@@ -799,16 +798,10 @@ struct ContentView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
-            TextEditor(text: $aiTrustedCA)
-                .frame(height: 90)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.gray.opacity(0.4)))
-            Text("Paste the trusted HTTPS CA certificate (PEM). Required for S3 TLS validation.")
-                .font(.caption2).foregroundStyle(.secondary)
             Button("Save AI connection") {
                 UserDefaults.standard.set(aiServer, forKey: "cuteAIServer")
                 UserDefaults.standard.set(aiModel, forKey: "cuteAIModel")
                 CuteAISecret.save(aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
-                UserDefaults.standard.set(aiTrustedCA, forKey: "cuteAITrustedCA")
                 aiStatus = "Connection settings saved on iPhone"
             }
             .buttonStyle(.bordered)
@@ -893,14 +886,14 @@ struct ContentView: View {
             return
         }
         guard server.hasPrefix("https://"), !model.isEmpty,
-              !secret.isEmpty, aiTrustedCA.contains("BEGIN CERTIFICATE") else {
-            aiStatus = "Enter HTTPS URL, model, key and trusted CA PEM"
+              !secret.isEmpty else {
+            aiStatus = "Enter HTTPS URL, model and API key"
             return
         }
         aiResponse = ""
         aiStatus = "Prompt queued on S3 Brain. The S3 will contact Open WebUI over Wi-Fi."
         bluetooth.sendBrainAIPrompt(url: server, model: model, key: secret,
-                                    certificate: aiTrustedCA, prompt: prompt)
+                                    prompt: prompt)
     }
 
     // MARK: Message mode

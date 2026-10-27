@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <esp_http_client.h>
+#include <esp_crt_bundle.h>
 #include <cJSON.h>
 #include <time.h>
 #include <freertos/FreeRTOS.h>
@@ -97,20 +98,19 @@ static esp_err_t event(esp_http_client_event_t *e){
  return ESP_OK;
 }
 inline void run(void*){
- Preferences prefs;String url,model,key,ca,prompt;
+ Preferences prefs;String url,model,key,prompt;
  if(prefs.begin("brain-ai",true)){
   url=prefs.getString("url","");
   model=prefs.getString("model","");
   key=prefs.getString("key","");
-  ca=prefs.getString("ca","");
   prompt=prefs.getString("prompt","");
   prefs.end();
  }
  if(WiFi.status()!=WL_CONNECTED || !url.startsWith("https://") ||
     url.indexOf('@')>=0 || url.indexOf('#')>=0 ||
-    model.isEmpty() || key.isEmpty() || ca.indexOf("BEGIN CERTIFICATE")<0 ||
+    model.isEmpty() || key.isEmpty() ||
     prompt.isEmpty()){
-  Serial.println("[AI] HTTPS, CA, WiFi or saved configuration missing");
+  Serial.println("[AI] HTTPS, WiFi or saved configuration missing");
   sendPacket("AI_END","");
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
@@ -143,7 +143,7 @@ inline void run(void*){
  if(json){
   esp_http_client_config_t cfg={};
   cfg.url=address.c_str();
-  cfg.cert_pem=ca.c_str();
+  cfg.crt_bundle_attach=esp_crt_bundle_attach;
   cfg.event_handler=event;
   cfg.timeout_ms=60000;
   cfg.buffer_size=4096;
