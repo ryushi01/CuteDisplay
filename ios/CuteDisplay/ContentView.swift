@@ -118,6 +118,7 @@ struct ContentView: View {
     @State private var aiResponse = ""
     @State private var aiStatus = "Not configured"
     @State private var aiBusy = false
+    @State private var aiDisplayTask: Task<Void, Never>?
     @State private var aiSendToKitty = true
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
     @State private var wifiPassword = ""
@@ -829,15 +830,47 @@ struct ContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
-    private func kittySnippet(_ text: String) -> String {
-        // C5 message limit is 96 UTF-8 bytes, not 96 characters.
-        var result = ""
-        for char in text {
-            let next = result + String(char)
-            if next.utf8.count > 96 { break }
-            result = next
+    private func kittyPages(_ text: String) -> [String] {
+        // Each page respects the S3/C5 96-byte UTF-8 command limit.
+        // Iterate by Swift Character so Japanese and emoji remain intact.
+        var pages: [String] = []
+        var page = ""
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for character in normalized {
+            let part = String(character)
+            if (page + part).utf8.count > 96 {
+                if !page.isEmpty { pages.append(page) }
+                page = part.utf8.count <= 96 ? part : ""
+            } else {
+                page += part
+            }
         }
-        return result
+        if !page.isEmpty { pages.append(page) }
+        return pages
+    }
+
+    @MainActor private func showKittyAIPages(_ answer: String) {
+        aiDisplayTask?.cancel()
+        let pages = kittyPages(answer)
+        guard !pages.isEmpty else { return }
+        aiDisplayTask = Task { @MainActor in
+            for (index, page) in pages.enumerated() {
+                guard !Task.isCancelled else { return }
+                guard bluetooth.isConnected else {
+                    aiStatus = "Kitty disconnected; AI answer remains on iPhone"
+                    return
+                }
+                bluetooth.sendMessage(page)
+                aiStatus = "Showing AI answer on Kitty: page \(index + 1)/\(pages.count)"
+                if index + 1 < pages.count {
+                    // Allow BLE glyph transfers and enough reading time.
+                    try? await Task.sleep(for: .seconds(12))
+                }
+            }
+            if !Task.isCancelled {
+                aiStatus = "AI answer displayed on Kitty (\(pages.count) pages)"
+            }
+        }
     }
 
     @MainActor private func askKittyAI() async {
@@ -851,6 +884,7 @@ struct ContentView: View {
             aiStatus = "Enter HTTPS Open WebUI URL, model ID and API key"
             return
         }
+        aiDisplayTask?.cancel()
         aiBusy = true
         aiStatus = "Contacting AI-SERVER..."
         defer { aiBusy = false }
@@ -952,8 +986,7 @@ struct ContentView: View {
             aiStatus = "AI response received"
             if aiSendToKitty {
                 if bluetooth.isConnected {
-                    bluetooth.sendMessage(kittySnippet(answer))
-                    aiStatus = "AI response received; sending short text to Kitty"
+                    showKittyAIPages(answer)
                 } else {
                     aiStatus = "AI response received; connect Kitty to display it"
                 }
