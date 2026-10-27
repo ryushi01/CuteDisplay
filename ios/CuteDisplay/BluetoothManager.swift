@@ -280,6 +280,12 @@ final class BluetoothManager: NSObject, ObservableObject {
         adoptPeripheral(restored)
     }
 
+    // iOS may notify the user about a background connection/disconnection.
+    // These options do not replace local low-battery notifications.
+    private var brainConnectionOptions: [String: Any] {
+        [CBConnectPeripheralOptionNotifyOnConnectionKey: true,
+         CBConnectPeripheralOptionNotifyOnDisconnectionKey: true]
+    }
     private func adoptPeripheral(_ device: CBPeripheral) {
         peripheral = device
         bleConnectStarted = Date()
@@ -290,7 +296,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             discoverOrRestoreServices(on: device)
         } else if autoReconnect && !intentionalDisconnect {
             status = "Reconnecting to saved CuteDisplay..."
-            central?.connect(device, options: nil)
+            central?.connect(device, options: brainConnectionOptions)
         }
     }
 
@@ -525,12 +531,11 @@ final class BluetoothManager: NSObject, ObservableObject {
                 return
             }
             if current.state == .connecting {
-                // iOS may legitimately hold a pending connect for an out-of-
-                // range device; give it a generous window before rescan.
-                if now.timeIntervalSince(bleConnectStarted) < 35 { return }
-                status = "Bluetooth connection timed out; searching again..."
-                central.cancelPeripheralConnection(current)
-                clearConnection()
+                // IMPORTANT: leave the OS-level pending connection alive.
+                // CoreBluetooth can complete it after a long period out of
+                // range, including when iOS has suspended the app. A
+                // foreground timer must never cancel this background path.
+                return
             } else {
                 clearConnection()
             }
@@ -897,7 +902,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
         bleRecoveryAttempts = 0
         found.delegate = self
         status = "Connecting..."
-        central.connect(found, options: nil)
+        central.connect(found, options: brainConnectionOptions)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect device: CBPeripheral) {
