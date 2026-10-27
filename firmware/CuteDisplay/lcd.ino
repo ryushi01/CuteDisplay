@@ -53,7 +53,8 @@
 #define PIN_BL 25
 #define BAT_SDA 2
 #define BAT_SCL 3
-#define PIN_VOICE_BUTTON 28 // separate BOOT button (active LOW)\n#define PIN_USER_BUTTON 0 // LILYGO T-Display-C5 user button (GPIO0, active LOW)
+#define PIN_VOICE_BUTTON 28 // separate BOOT button (active LOW)
+#define PIN_USER_BUTTON 0 // LILYGO T-Display-C5 user button (GPIO0, active LOW)
 #define LCD_W 320
 #define LCD_H 170
 #define MAX_CMD 96
@@ -481,7 +482,8 @@ uint16_t fullMinutes = 0xFFFF;
 bool userButtonLastRaw = HIGH;
 bool userButtonStable = HIGH;
 unsigned long userButtonChangedAt = 0;
-unsigned long userButtonPressedAt = 0;\nbool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false;\nunsigned long voiceButtonChangedAt=0,voiceButtonHeldAt=0;
+unsigned long userButtonPressedAt = 0;\nbool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false;
+unsigned long voiceButtonChangedAt=0,voiceButtonHeldAt=0;
 bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
 unsigned long wifiToastUntil = 0;
