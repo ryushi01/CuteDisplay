@@ -173,3 +173,10 @@ This is a **user-confirmed hardware acceptance checkpoint**, not an independentl
 - S3 scheduler defers speaker playback while microphone, local audio test, C5 OTA or AI generation is active, and refuses voice/audio start while speaker is running to avoid I2S hardware contention.
 - Important: TTS is not yet synchronized word-by-word with animated text. Speech begins after the full text answer is generated; C5 still shows the reply. No C5 firmware change. CI build and end-to-end server test are NOT established.
 - Audio settings/privacy: TTS response is sent to the Open WebUI server, which can retain its own speech cache. No new API key is exposed to C5. Tested rollback branch unchanged.
+
+## C5 v13 speech UX — needs combined CI + device test
+- Physical C5 BOOT GPIO28: debounced press sends VOICE_INTERRUPT immediately to cancel speech; tap/release under 320ms sends VOICE_CANCEL and stops in-progress AI generation too; hold >=320ms sends VOICE_START, release sends VOICE_STOP. GPIO0 retains battery info / Wi-Fi behavior.
+- S3 BrainTTS now supports cancellation of active HTTPS download, WAV playback loop and MP3 decode loop, resets queued speech. Waits until TTS task tears down I2S before allowing a held-button recording; cancels pending start if released first. Short tap should leave the current C5 text visible, but AI streaming may be cancelled.
+- C5 v13 bottom-left HUD (font scale 1, similar to clock) displays LISTENING, UPLOADING, THINKING, SPEAKING, or clears, based on S3 ACTIVITY UART events. No persistent changes to the normal text view.
+- Spoken output begins once AI's full answer is ready and enqueued, not after screen text animation. This phase doesn't implement incremental sentence TTS or voice/text lip sync.
+- IMPORTANT: CI and real hardware not verified. Rebuild combined S3 sketch so OTA deploys C5 v13. Never use this development revision as tested/stable until confirmed on physical C5 and S3.
