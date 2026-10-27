@@ -603,6 +603,10 @@ static void pollBLECommands(){
   proxyResult("ERR:DISPLAY_UPDATING");return;
  }
  String incoming(item);
+ if(incoming.startsWith("TIME:")){
+  proxyResult(BrainClock::configure(incoming)?"ACK:TIME_ZONE":"ERR:TIME_ZONE");
+  return;
+ }
  if(incoming.startsWith("AI:")){
   String result;
   if(BrainAI::provision(incoming,result)){
@@ -898,6 +902,7 @@ void setup(){
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
  BrainAI::init();
+ BrainClock::init();
  BrainAudioTest::loadLevels();
  Serial.printf("[S3] UART TX=%d RX=%d baud=%d\n",
     BrainPinPlan::UART_TX,BrainPinPlan::UART_RX,BrainPinPlan::UART_BAUD);
@@ -988,6 +993,7 @@ void loop(){
  pollUSB();
  updateBrainWiFi();
  BrainClock::tick(brainWiFiOnline());
+ BrainClock::sendDisplay(Serial1,faceOnline && !BrainC5OTA::updating() && !BrainAI::pending && !activeSeq);
  pollBrainLAN();
  if(connectPending){
   connectPending=false;clientConnected=true;

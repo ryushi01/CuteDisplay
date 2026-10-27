@@ -111,6 +111,9 @@ struct ContentView: View {
     @State private var audioTestRunning = false
     @State private var micGain = UserDefaults.standard.object(forKey: "cuteMicGain") as? Double ?? 150
     @State private var speakerVolume = UserDefaults.standard.object(forKey: "cuteSpeakerVolume") as? Double ?? 65
+    @State private var clockTimezone = UserDefaults.standard.integer(forKey: "cuteClockZone")
+    private let clockZones = ["Japan (JST)", "UTC", "Central Europe (CET/CEST)",
+                              "US Eastern", "US Pacific", "United Kingdom", "Australia Sydney"]
     @State private var aiServer = UserDefaults.standard.string(forKey: "cuteAIServer") ?? ""
     @State private var aiModel = UserDefaults.standard.string(forKey: "cuteAIModel") ?? ""
     @State private var aiAPIKey = CuteAISecret.load()
@@ -296,6 +299,21 @@ struct ContentView: View {
     private var wifiSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle("S3 BRAIN — WI-FI & IP")
+            Picker("Kitty clock timezone", selection: $clockTimezone) {
+                ForEach(0..<clockZones.count, id: \.self) { index in
+                    Text(clockZones[index]).tag(index)
+                }
+            }
+            .onChange(of: clockTimezone) { _, newValue in
+                UserDefaults.standard.set(newValue, forKey: "cuteClockZone")
+                if bluetooth.bluetoothBrainConnected {
+                    bluetooth.sendControlCommand("TIME:ZONE:\(newValue)")
+                }
+            }
+            Button("Apply clock timezone to S3") {
+                bluetooth.sendControlCommand("TIME:ZONE:\(clockTimezone)")
+            }
+            .disabled(!bluetooth.bluetoothBrainConnected)
             HStack(spacing: 8) {
                 Image(systemName: bluetooth.wifiConnected ? "wifi" : "wifi.slash")
                     .foregroundStyle(bluetooth.wifiConnected ? .green : .orange)

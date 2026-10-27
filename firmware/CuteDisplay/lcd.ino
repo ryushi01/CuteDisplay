@@ -176,6 +176,7 @@ static bool lastDisplayedBrainLink=false;
 // No "fallback to C5 radio" when the brain link drops.
 static bool brainBleClient=false,brainWifiConnected=false;
 static uint32_t brainRadioSeen=0;
+static String brainClockHHMM="";
 static String brainIP="-";
 static bool brainRadioFresh(){
  return brainLinkConnected() && brainRadioSeen &&
@@ -598,6 +599,9 @@ void drawConnectivityHUD(){
  // Fixed tiny status HUD. Draw over the existing upper-right mascot area,
  // with no changes to character geometry or text-area margins.
  const int x=261,y=2;
+ // Compact clock to the left of the Bluetooth glyph, same scale as SOC.
+ rect(221,0,38,16,BLACK);
+ if(brainClockHHMM.length()==5)textAt(brainClockHHMM,223,y+2,1,WHITE);
  rect(x-2,0,61,16,BLACK);
  const uint16_t bt=displayBleConnected()?0x07FF:0x7BEF;
  line(x+5,y,x+5,y+10,bt);
@@ -2735,6 +2739,15 @@ static void serviceBrain() {
   else if(f.type=="HEARTBEAT") {
    // Silent liveness signal; lastS3 updated on every valid inbound frame.
    // No ACK needed: C5 already sends independent STATUS every 5 seconds.
+  }
+  else if(f.type=="CLOCK"){
+   String v=f.payload;
+   if(v.length()==5 && v[2]==':' && v[0]>='0'&&v[0]<='2' &&
+      v[1]>='0'&&v[1]<='9'&&v[3]>='0'&&v[3]<='5' &&
+      v[4]>='0'&&v[4]<='9' &&
+      v.substring(0,2).toInt()<24 && v.substring(3).toInt()<60){
+    if(v!=brainClockHHMM){brainClockHHMM=v;if(lcdReady)redrawCurrent();}
+   }
   }
   else if(f.type=="RADIO")handleRadioFrame(f.payload);
   else if(f.type=="WIFI_STATE"){
