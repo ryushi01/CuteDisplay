@@ -32,6 +32,8 @@ static constexpr size_t HISTORY_RESPONSE_LIMIT=1600;
 static ConversationTurn history[HISTORY_TURNS];
 static size_t historyCount=0;
 static String currentAnswer;
+static String voicePrompt;
+static bool voicePromptPending=false;
 static constexpr uint64_t CONVERSATION_LIFETIME_SECONDS=86400ULL;
 static uint64_t conversationStarted=0;
 static bool historyLoaded=false;
@@ -215,6 +217,7 @@ inline void run(void*){
   key=prefs.getString("key","");
   prompt=prefs.getString("prompt","");
   prefs.end();
+ if(voicePromptPending){prompt=voicePrompt;voicePrompt="";voicePromptPending=false;}
  }
  if(WiFi.status()!=WL_CONNECTED || !url.startsWith("https://") ||
     url.indexOf('@')>=0 || url.indexOf('#')>=0 ||
@@ -321,6 +324,12 @@ inline bool start(){
  if(xTaskCreatePinnedToCore(run,"brain_ai",16384,nullptr,1,&worker,0)!=pdPASS){
   busy=false;worker=nullptr;return false;
  }
+ return true;
+}
+inline bool startWithPrompt(const String &prompt){
+ if(busy || prompt.isEmpty() || prompt.length()>1024)return false;
+ voicePrompt=prompt;voicePromptPending=true;
+ if(!start()){voicePrompt="";voicePromptPending=false;return false;}
  return true;
 }
 inline bool provision(const String &cmd,String &reply){
