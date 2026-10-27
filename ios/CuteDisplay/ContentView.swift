@@ -885,39 +885,68 @@ struct ContentView: View {
                               userInfo: [NSLocalizedDescriptionKey:
                                 "Open WebUI HTTP \(statusCode): \(detail)"])
             }
-            // Open WebUI should return an OpenAI-compatible JSON object when
-            // stream=false. A reverse proxy can instead return HTML or SSE.
-            guard let object = try? JSONSerialization.jsonObject(with: data),
-                  let result = object as? [String: Any] else {
-                throw NSError(domain: "CuteDisplayAI", code: 2,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                "Unexpected response (\(mime)): \(bodyExcerpt). Check the Open WebUI base URL and reverse proxy."])
-            }
-            if let error = result["error"] {
-                throw NSError(domain: "CuteDisplayAI", code: 3,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                "Open WebUI error: \(String(describing: error).prefix(480))"])
-            }
-            guard let choices = result["choices"] as? [[String: Any]],
-                  let message = choices.first?["message"] as? [String: Any] else {
-                let keys = result.keys.sorted().joined(separator: ", ")
-                throw NSError(domain: "CuteDisplayAI", code: 4,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                "No chat choices in JSON (fields: \(keys)). Response: \(bodyExcerpt)"])
-            }
-            let content = message["content"]
-            let answer: String
-            if let plainText = content as? String {
-                answer = plainText
-            } else if let parts = content as? [[String: Any]] {
-                answer = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
+            // Some Open WebUI pipelines return SSE despite stream=false.
+            // Decode both standard OpenAI JSON and completed SSE chunks.
+            var answer = ""
+            if mime.lowercased().contains("text/event-stream") ||
+               String(decoding: data.prefix(6), as: UTF8.self).hasPrefix("data:") {
+                let rawStream = String(decoding: data, as: UTF8.self)
+                // SSE events are separated by blank lines; a data field can
+                // contain multiple lines. This also handles CRLF.
+                let events = rawStream.replacingOccurrences(of: "\r\n", with: "\n")
+                    .components(separatedBy: "\n\n")
+                for event in events {
+                    let payload = event.split(separator: "\n", omittingEmptySubsequences: false)
+                        .filter { $0.hasPrefix("data:") }
+                        .map { String($0.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+                        .joined(separator: "\n")
+                    if payload.isEmpty || payload == "[DONE]" { continue }
+                    guard let bytes = payload.data(using: .utf8),
+                          let chunk = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+                    else { continue }
+                    if let error = chunk["error"] {
+                        throw NSError(domain: "CuteDisplayAI", code: 6,
+                                      userInfo: [NSLocalizedDescriptionKey:
+                                        "Open WebUI stream error: \(String(describing: error).prefix(240))"])
+                    }
+                    if let choices = chunk["choices"] as? [[String: Any]],
+                       let choice = choices.first {
+                        if let delta = choice["delta"] as? [String: Any] {
+                            if let token = delta["content"] as? String { answer += token }
+                        } else if let message = choice["message"] as? [String: Any],
+                                  let text = message["content"] as? String {
+                            answer = text
+                        }
+                    }
+                }
             } else {
-                answer = ""
+                guard let object = try? JSONSerialization.jsonObject(with: data),
+                      let result = object as? [String: Any] else {
+                    throw NSError(domain: "CuteDisplayAI", code: 2,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                                    "Unexpected response (\(mime)): \(bodyExcerpt). Check Open WebUI base URL."])
+                }
+                if let error = result["error"] {
+                    throw NSError(domain: "CuteDisplayAI", code: 3,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                                    "Open WebUI error: \(String(describing: error).prefix(240))"])
+                }
+                guard let choices = result["choices"] as? [[String: Any]],
+                      let message = choices.first?["message"] as? [String: Any] else {
+                    throw NSError(domain: "CuteDisplayAI", code: 4,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                                    "No chat choices in response: \(bodyExcerpt)"])
+                }
+                if let text = message["content"] as? String {
+                    answer = text
+                } else if let parts = message["content"] as? [[String: Any]] {
+                    answer = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
+                }
             }
             guard !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw NSError(domain: "CuteDisplayAI", code: 5,
                               userInfo: [NSLocalizedDescriptionKey:
-                                "Model returned no visible text. Finish reason: \(String(describing: choices.first?["finish_reason"] ?? "unknown"))"])
+                                "Open WebUI returned no visible answer (\(mime))."])
             }
             aiResponse = answer
             aiStatus = "AI response received"
