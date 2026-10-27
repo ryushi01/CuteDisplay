@@ -118,6 +118,7 @@ struct ContentView: View {
     @State private var aiModel = UserDefaults.standard.string(forKey: "cuteAIModel") ?? ""
     @State private var aiAPIKey = CuteAISecret.load()
     @State private var aiQuestion = ""
+    @State private var lastSubmittedAIQuestion = ""
     @State private var aiResponse = ""
     @State private var aiStatus = "Not configured"
     @State private var aiBusy = false
@@ -868,6 +869,26 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(aiBusy || aiQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            HStack(spacing: 12) {
+                Button {
+                    bluetooth.sendControlCommand("AI:STOP")
+                    aiStatus = "Stop requested. Waiting for S3 confirmation."
+                } label: {
+                    Label("Stop AI", systemImage: "stop.fill")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!bluetooth.bluetoothBrainConnected ||
+                    !["Sending prompt", "Queued", "Connecting to AI server", "Kitty is responding"].contains(bluetooth.aiLiveStatus))
+                Button {
+                    aiQuestion = lastSubmittedAIQuestion
+                    Task { await askKittyAI() }
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!bluetooth.bluetoothBrainConnected || lastSubmittedAIQuestion.isEmpty ||
+                    ["Sending prompt", "Queued", "Connecting to AI server", "Kitty is responding", "Stopping"].contains(bluetooth.aiLiveStatus))
+            }
             if !aiResponse.isEmpty {
                 Text(aiResponse).font(.subheadline).textSelection(.enabled)
             }
@@ -955,6 +976,7 @@ struct ContentView: View {
             aiStatus = "Enter HTTPS URL, model and API key"
             return
         }
+        lastSubmittedAIQuestion = prompt
         aiResponse = ""
         aiStatus = "Prompt queued on S3 Brain. The S3 will contact Open WebUI over Wi-Fi."
         bluetooth.sendBrainAIPrompt(url: server, model: model, key: secret,
