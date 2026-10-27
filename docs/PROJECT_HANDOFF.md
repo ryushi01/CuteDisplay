@@ -2,6 +2,8 @@
 
 The user's actual speaker is the Amazon Japan item **ASIN B0D4LHNLJ4**: https://www.amazon.co.jp/dp/B0D4LHNLJ4 . The Amazon listing could not be retrieved reliably in this session, so **impedance, rated power and model remain unverified**. Do not assume 4 Ω, 8 Ω or a particular wattage until reading its label/listing.
 
+**Speaker specification confirmed by user:** 15 mm diameter, 8 Ω impedance, 1 W rated power (Amazon Japan ASIN B0D4LHNLJ4). Small speaker acoustic output may be limited, but both quiet startup beep and recorded playback warrant checking I²S DAC amplitude and MAX98357A GAIN/SD/VIN before changing microphone gain. Treat 1 W as speaker power rating, not guaranteed amplifier output; avoid prolonged overdrive.
+
 Hardware observation: **both recorded voice and the short S3 startup beep are very quiet**, despite the beep being generated locally without microphone capture. This is important evidence that microphone capture level is not the sole explanation. Prior recorded left-channel peak was already large and auto_gain=1.00x, even with mic gain=300% and speaker volume=100%. The startup beep also bypasses the adjustable recorded-voice gain controls in the present firmware. Prioritize checking MAX98357A I²S signal amplitude and sample representation, amplifier SD enable/Gain pin defaults, the actual VIN supply during playback, speaker impedance/power/sensitivity and solder/wiring, before increasing mic digital gain or replacing the speaker.
 
 Keep the hardware-tested `stable/2026-10-27-audio-tested` branch untouched; audio output volume is an open issue.
