@@ -180,3 +180,9 @@ This is a **user-confirmed hardware acceptance checkpoint**, not an independentl
 - C5 v13 bottom-left HUD (font scale 1, similar to clock) displays LISTENING, UPLOADING, THINKING, SPEAKING, or clears, based on S3 ACTIVITY UART events. No persistent changes to the normal text view.
 - Spoken output begins once AI's full answer is ready and enqueued, not after screen text animation. This phase doesn't implement incremental sentence TTS or voice/text lip sync.
 - IMPORTANT: CI and real hardware not verified. Rebuild combined S3 sketch so OTA deploys C5 v13. Never use this development revision as tested/stable until confirmed on physical C5 and S3.
+
+## Fix: MP3/Opus linker duplicate symbols
+- GitHub CI at S3 link stage failed with duplicate libopus CELT/SILK symbols from `ESP8266Audio@2.4.1` and `esp32_opus@1.0.3` (e.g. `hysteresis_decision`, `opus_strerror`). This was a *link-time dependency collision*, not an Opus code syntax error.
+- Replaced ESP8266Audio's MP3 decoder with **vendored `minimp3.h`** from `lieff/minimp3` (CC0), decoded MP3 frames into 16-bit stereo I2S on MAX98357A. WAV playback, cancel/short-tap and Opus encoder remain, while no second Opus library is linked.
+- Removed ESP8266Audio installation from GitHub Actions and from bundled build instructions. A local Mac may retain ESP8266Audio installed; the sketch no longer includes it, so Arduino CLI should not auto-compile/link it. `esp32_opus` library still required.
+- CI build and device speech output remain unverified after these source changes; review fresh CI logs before flashing.
