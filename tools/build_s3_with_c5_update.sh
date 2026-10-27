@@ -100,7 +100,7 @@ NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
    partition scheme (included partitions.csv); select S3 USB port.
 3. Before compiling in Arduino IDE, install:
    - esp32_opus from https://github.com/sh123/esp32_opus_arduino\n     (Code > Download ZIP, then Sketch > Include Library > Add .ZIP Library).\n     Confirm Serial Monitor prints Opus compiled=1 in [VOICE] logs; if 0,\n     the library was not found by the local Arduino IDE build.
-   - ESP8266Audio 2.4.1 (for Open WebUI MP3 text-to-speech playback).
+   - MP3 playback uses bundled minimp3.h; no ESP8266Audio library needed.
    The combined GitHub Actions build installs these dependencies.
 4. Upload ONLY the S3 sketch, then open Serial Monitor at 115200.
 5. S3 upgrades C5 automatically ONLY if bundled version is newer.
