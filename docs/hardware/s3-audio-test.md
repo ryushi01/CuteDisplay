@@ -1,0 +1,7 @@
+# S3 Brain local audio test
+
+Wiring for INMP441: VDD=3V3, GND=GND, SCK=GPIO41, WS=GPIO42, SD=GPIO1, L/R=GND. MAX98357A: VIN=3V3 if regulator headroom permits, GND=GND, BCLK=GPIO41, LRC=GPIO42, DIN=GPIO2, speaker across SPK+ and SPK- (neither to GND). The amplifier is tested at reduced playback level. Module pins SD/GAIN use default breakout pull resistors; verify if silent. Do not exceed the regulator's rated current.
+
+Download successful GitHub Actions artifact `CuteDisplay-S3-with-C5-update`; upload the **generated** `CuteDisplayBrain/CuteDisplayBrain.ino` to Freenove ESP32-S3 (16MB flash, OPI PSRAM, Custom partition, Arduino ESP32 core 3.3.12). Preserve the S3↔C5 UART wires and C5 OTA. Connect Arduino Serial Monitor, 115200 baud, Newline, type `audio test` and send. The S3 records 2 seconds (16kHz, stereo-slot I2S 32-bit capture, left-slot mic samples), then plays it through MAX98357A at roughly -18dB. Watch `[AUDIO]` lines. No microphone audio goes over BLE/WiFi or is persisted. Runs only on USB command, in a separate FreeRTOS task so the main UART/BLE polling loop stays active. Test physically for volume, input and any audio artifacts. No change to C5 version or app.
+
+This code has not yet been hardware validated. GPIO41/42 I2S routing and shared clock use require testing with actual board (GPIO41/42 potentially shared with external JTAG). Test with a quiet low-power speaker and do not tie SPK- to GND.

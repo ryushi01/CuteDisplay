@@ -28,6 +28,7 @@
 #include "BrainPinPlan.h"
 #include "CuteLink.h"
 #include "BrainC5OTA.h"
+#include "BrainAudioTest.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr char S3_FW_VERSION[]="Phase6-UART-C5-OTA-20261027";
@@ -601,7 +602,13 @@ static void pollBLECommands(){
 static void consoleCommand(String cmd){
  cmd.trim();
  if(cmd=="help"){
+  Serial.println("[S3] audio test — record two seconds then play through speaker");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
+  return;
+ }
+ if(cmd=="audio test"){
+  if(BrainC5OTA::updating())Serial.println("[AUDIO] Wait until C5 OTA completes");
+  else BrainAudioTest::start();
   return;
  }
  if(cmd=="ble bonds clear"){
