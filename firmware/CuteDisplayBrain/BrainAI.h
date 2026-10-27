@@ -10,6 +10,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "CuteLink.h"
+#include "BrainTTS.h"
 
 namespace BrainAI {
 struct Packet { char kind[12]; char text[81]; };
@@ -304,7 +305,10 @@ inline void run(void*){
   pending=0;
   report("CANCELLED");
  }else releaseText(true);
- if(!failed && doneSeen && !cancelRequested)rememberTurn(prompt,currentAnswer);
+ if(!failed && doneSeen && !cancelRequested){
+  rememberTurn(prompt,currentAnswer);
+  if(!BrainTTS::enqueue(currentAnswer))Serial.println("[TTS] Queue unavailable; text delivered");
+ }
  currentAnswer="";
  sendPacket("AI_END","");
  Serial.printf("[AI PERF] Generated UART bytes=%lu acked=%lu packets=%lu total=%lums\n",
