@@ -10,10 +10,10 @@ User hardware-tested `feature/wav-only-baseline-candidate` and confirmed "the ba
 - C5 v13: tap-to-stop/hold-to-talk, and bottom-left LISTENING/THINKING/SPEAKING indications.
 - Arduino IDE: ESP32S3 Dev Module; Arduino runs on CPU1; events on CPU0; 16MB flash; OPI PSRAM; custom partition table; erase flash **off**.
 
-## After-upload link problem (unverified fix)
-On the tested build, Arduino's upload-end S3 reset can leave C5 showing BRAIN DISCONNECTED and the iPhone app without current Brain status until the physical S3 RESET is pressed. Cause has **not** yet been established. Do not claim it is fixed in the stable branch.
+## After-upload link problem (fixed and hardware-tested)
+The WAV-only baseline initially exhibited BRAIN DISCONNECTED after Arduino USB upload auto-reset, requiring physical S3 RESET. User subsequently tested the UART self-recovery fix and confirmed it works. The exact electrical/software root cause has not been independently proven.
 
-Experimental fix: `feature/post-flash-uart-recovery` reinitializes S3 UART1 (not the whole CPU) after 12s if no C5 frame was ever received and retries at most 4 times. It also logs `[S3 UART] No C5 frames since boot...`. Does **not** reset Wi-Fi config, audio tasks, or NVS. Firmware remains untested; if startup hangs before Arduino `loop()`, this mechanism cannot recover and the S3 serial boot log is required.
+Hardware-tested fix (now in `main`): `feature/post-flash-uart-recovery` introduced code that reinitializes S3 UART1 (not the whole CPU) after 12s if no C5 frame was ever received and retries at most 4 times. It also logs `[S3 UART] No C5 frames since boot...`. Does **not** reset Wi-Fi config, audio tasks, or NVS. User confirmed successful hardware behavior. If startup hangs before Arduino `loop()`, this mechanism cannot recover and S3 serial boot logs are still needed.
 
 ### Verification
-Flash the experimental branch through the combined GitHub Actions artifact. On first USB auto-restart, inspect S3 Serial at 115200 and ensure C5 automatically recovers, iPhone status updates, WAV transcription succeeds, and Kitty speaks. Repeat one more firmware upload; physical S3 RESET should no longer be required. If it fails, restore the stable branch.
+Confirmed functional by user on the experimental branch. Main now includes the fix. Permanent working snapshot: `stable/2026-10-28-wav-uart-autorecovery-hardware-tested`. Next project milestone documented in `docs/NEXT_CHAT_HANDOFF_REALTIME_VOICE_2026-10-28.md`.
