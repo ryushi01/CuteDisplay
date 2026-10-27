@@ -877,6 +877,13 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!bluetooth.bluetoothBrainConnected)
+            HStack(spacing: 8) {
+                Image(systemName: bluetooth.aiLiveStatus.hasPrefix("Failed:") ? "exclamationmark.triangle" :
+                      bluetooth.aiLiveStatus == "Complete" ? "checkmark.circle" : "waveform")
+                Text("AI status: " + bluetooth.aiLiveStatus)
+                    .font(.subheadline)
+            }
+            .foregroundStyle(bluetooth.aiLiveStatus.hasPrefix("Failed:") ? .orange : .primary)
             Text("Bluetooth transport: " + bluetooth.status)
                 .font(.caption2).foregroundStyle(.secondary)
             Text(aiStatus).font(.caption2).foregroundStyle(.secondary)
