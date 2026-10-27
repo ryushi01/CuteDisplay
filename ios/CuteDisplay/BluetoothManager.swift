@@ -1265,7 +1265,12 @@ extension BluetoothManager: CBPeripheralDelegate {
     }
 
     private func maintainLAN() {
-        guard !intentionalDisconnect, !bleReady(),
+        // BLE is the primary transport. Never race it with LAN while the
+        // paired peripheral is scanning, connecting, or in GATT/security setup.
+        // The Brain LAN server deliberately rejects other subnets.
+        let bleInProgress = autoReconnect && (isScanning ||
+            peripheral?.state == .connecting || peripheral?.state == .connected)
+        guard !intentionalDisconnect, !bleReady(), !bleInProgress,
               authorizedIdentifier() != nil, lanToken?.count == 64 else {
             if lanConnection != nil || lanBrowser != nil { stopLANFallback() }
             return
@@ -1428,7 +1433,9 @@ extension BluetoothManager: CBPeripheralDelegate {
         stopLANFallback()
         if !bleReady() {
             isConnected = false
-            status = "Brain Wi-Fi fallback: " + reason
+            if !autoReconnect || (peripheral == nil && !isScanning) {
+                status = "Brain Wi-Fi fallback: " + reason
+            }
         }
         if waitingForWrite && !bleReady() {
             waitingForWrite = false
