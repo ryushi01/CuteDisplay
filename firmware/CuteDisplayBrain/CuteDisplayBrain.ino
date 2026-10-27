@@ -604,7 +604,16 @@ static void pollBLECommands(){
  String incoming(item);
  if(incoming.startsWith("AI:")){
   String result;
-  if(BrainAI::provision(incoming,result)){proxyResult(result);return;}
+  if(BrainAI::provision(incoming,result)){
+   // Do not expose AI:DATA hex, key, or prompt in serial logs.
+   if(incoming.startsWith("AI:BEGIN:"))
+    Serial.printf("[AI CTRL] Provisioning field %c (%s)\n",
+                  incoming.length()>9?incoming[9]:'?',result.c_str());
+   else if(incoming=="AI:END" || incoming=="AI:GO")
+    Serial.printf("[AI CTRL] %s: %s\n",
+                  incoming=="AI:GO"?"Start":"Field complete",result.c_str());
+   proxyResult(result);return;
+  }
  }
  if(incoming=="A:TEST"){
   if(BrainAudioTest::running){proxyResult("ERR:AUDIO_BUSY");return;}
