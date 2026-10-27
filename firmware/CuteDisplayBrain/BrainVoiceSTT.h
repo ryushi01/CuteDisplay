@@ -50,7 +50,7 @@ static size_t makeOpus(const uint8_t *wav,size_t frames,uint8_t *out,size_t capa
  opus_encoder_ctl(enc,OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
  opus_int32 delaySamples=0;
  if(opus_encoder_ctl(enc,OPUS_GET_LOOKAHEAD(&delaySamples))!=OPUS_OK || delaySamples<0)delaySamples=0;
- const uint16_t preSkip=(uint16_t)min(65535,delaySamples*3);
+ const uint16_t preSkip=(uint16_t)std::min<opus_int32>(65535L,delaySamples*3L);
  BrainOggOpus::Writer writer;
  if(!writer.begin(out,capacity,(uint32_t)esp_random(),preSkip)){opus_encoder_destroy(enc);return 0;}
  int16_t input[320]={};
