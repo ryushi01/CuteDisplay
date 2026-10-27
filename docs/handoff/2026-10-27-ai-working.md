@@ -103,3 +103,9 @@
 This is a **user-confirmed hardware acceptance checkpoint**, not an independently verified GitHub Actions build: connector commit checks did not return Actions evidence. The reported checks do not independently establish that expiration occurs exactly at 24 hours, nor long-run stability. Do not modify the new stable branch; continue enhancements on `feature/s3-ai-streaming`.
 
 **Next phases requested:** (2) AI error/status reporting; (3) Stop/Retry; (4) memory/streaming-limit hardening; then microphone/voice AI. Preserve UART/wiring, NTP, Japanese font, OTA and the working AI streaming implementation.
+
+## Step 2 — S3 AI progress/error status (development)
+- New S3 `BrainAI.h` status queue emits `AI:STATUS:QUEUED`, `CONNECTING`, `STREAMING`, `COMPLETE`, and granular failures (`WIFI_ERROR`, `CLOCK_ERROR`, `CONFIG_ERROR`, `NETWORK_ERROR`, `AUTH_ERROR`, `MODEL_OR_URL_ERROR`, `RATE_LIMIT`, `SERVER_ERROR`, `STREAM_INCOMPLETE`, `FAILED`).
+- Existing encrypted BLE control notifications carry these asynchronously; this does not change C5 UART text frames. iOS BluetoothManager handles statuses separately from ACK processing, and ContentView shows user-friendly status/error text.
+- **S3-only firmware change:** C5 firmware version stays v11; no pin or electrical changes. No new stable branch until physical regression test confirms working behavior.
+- GitHub Actions and iOS/Xcode builds must be validated; connector commit-status endpoint does not expose all push-triggered workflow runs.
