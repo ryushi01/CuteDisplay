@@ -85,3 +85,9 @@
 - Context is **volatile**: an S3 reboot clears it. The C5 v11 two-minute return to regular Message Mode does **not** clear conversation context.
 - Updated development files: `firmware/CuteDisplayBrain/BrainAI.h` and `ios/CuteDisplay/ContentView.swift`. No S3/C5 pins changed, C5 version stays v11. Do not change `stable/2026-10-27-s3-ai-japanese-working`.
 - **Verification pending:** GitHub connector did not expose a firmware Actions run for the latest commits, and Xcode compilation/hardware testing are not verified. Check the combined workflow run before flashing.
+
+## Continuation — 24-hour conversation expiration
+- S3 saves up to 4 completed turns in a separate `brain-chat` NVS namespace; the lifetime is 86,400 seconds from the first successful completed exchange (not a sliding window). NTP/valid system time is needed before loading context. The original 24-hour deadline survives S3 reboot. Check for expiry every minute while idle and before subsequent prompts.
+- `AI:NEW` clears conversation history and its persisted slots; failed requests are not saved. Normal C5 message timeout remains 2 minutes after `AI_END`.
+- This is not a server-side Open WebUI chat creation workflow: S3 supplies the messages array on each direct completion request without `chat_id`. Other Open WebUI logging/filter persistence policies must be checked separately.
+- Latest development is **not confirmed by firmware CI or a hardware test**. Build and inspect artifacts before flashing. Stable branch remains untouched.
