@@ -130,7 +130,7 @@ static void task(void *) {
     (targetPeak*1024ULL)/max((uint32_t)1,speechPeak));
   // Never attenuate during normalization; speakerVolume remains attenuation.
   if(autoGainQ10<1024)autoGainQ10=1024;
-  Serial.printf("[AUDIO] Playback raw_peak=%lu auto_gain=%.2fx mic_gain=%u%% speaker_volume=%u%%\\n",
+  Serial.printf("[AUDIO] Playback raw_peak=%lu auto_gain=%.2fx mic_gain=%u%% speaker_volume=%u%%\n",
     (unsigned long)speechPeak,autoGainQ10/1024.0f,micGain,speakerVolume);
   {
     int32_t stereo[BLOCK*2];
