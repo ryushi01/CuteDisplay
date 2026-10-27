@@ -3,7 +3,7 @@ name: Build combined S3 + C5 firmware
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/s3-ai-streaming, feature/wav-only-baseline-candidate]
+    branches: [main, feature/s3-ai-streaming, feature/wav-only-baseline-candidate, feature/post-flash-uart-recovery]
     paths:
       - ".github/workflows/build-s3-with-c5-update.yml"
       - "tools/build_s3_with_c5_update.sh"
