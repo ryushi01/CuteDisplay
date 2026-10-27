@@ -132,7 +132,9 @@ struct ContentView: View {
     @State private var staticGateway = ""
     @State private var staticDNS = ""
     @State private var showWiFiPassword = false
-    @State private var previewOnly = false
+    // Settings apply directly; the redundant preview-before-sending mode was removed.
+    private let previewOnly = false
+    @State private var selectedPage = 0
     @State private var displayProfiles: [CuteDisplayProfile] = {
         guard let d=UserDefaults.standard.data(forKey: "cuteSavedProfiles"),
               let v=try? JSONDecoder().decode([CuteDisplayProfile].self,from:d) else { return [] }
@@ -217,29 +219,33 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     deviceStatusSection
-                    wifiSection
-                    themeSection
-                    displayPreview
-                    Toggle("Preview changes before sending", isOn: $previewOnly)
-                        .tint(themeColor)
-                    if previewOnly {
-                        Button("Apply Preview to Device") {
-                            if bluetooth.isConnected { restoreAfterConnection() }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!bluetooth.isConnected)
+                    Picker("Controls", selection: $selectedPage) {
+                        Text("Home").tag(0)
+                        Text("Kitty").tag(1)
+                        Text("Settings").tag(2)
                     }
-                    messageSection
-                    aiSection
-                    characterSection
-                    moodSection
-                    mascotCustomizationSection
-                    displayProfilesSection
-                    appearanceSection
-                    brightnessSection
-                    powerSection
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("CuteDisplay sections")
+
+                    switch selectedPage {
+                    case 0:
+                        messageSection
+                        aiSection
+                        displayPreview
+                    case 1:
+                        characterSection
+                        moodSection
+                        mascotCustomizationSection
+                        appearanceSection
+                        themeSection
+                    default:
+                        wifiSection
+                        brightnessSection
+                        displayProfilesSection
+                        powerSection
+                    }
                     if !appNotice.isEmpty {
                         Text(appNotice)
                             .font(.caption)
@@ -799,8 +805,7 @@ struct ContentView: View {
     }
 
     // MARK: - Open WebUI (AI-SERVER) text integration
-    // Intentionally phone -> Open WebUI over HTTPS. The S3 never receives API
-    // credentials; the MacBook-hosted Ollama/voice stack stays unchanged.
+    // The iPhone provisions the S3 securely over BLE; S3 owns HTTPS AI streaming.
     private var aiSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("KITTY AI — OPEN WEBUI")
@@ -1174,8 +1179,7 @@ struct ContentView: View {
     }
 
     private func loadProfile(_ profile: CuteDisplayProfile) {
-        // Apply settings locally first; the optional preview mode prevents
-        // changing the hardware until the user explicitly taps Apply.
+        // A loaded profile applies immediately when connected.
         message=profile.message
         selectedTheme=max(0,min(24,profile.theme))
         selectedCharacter=CuteCharacter(rawValue:profile.character) ?? .kitty
@@ -1237,7 +1241,7 @@ struct ContentView: View {
                         .buttonStyle(.borderless)
                 }
             }
-            Text("Save up to 12 profiles on your iPhone. Load applies immediately unless Preview changes before sending is enabled.")
+            Text("Save up to 12 profiles on your iPhone. Loading a profile applies it immediately when connected.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding()
