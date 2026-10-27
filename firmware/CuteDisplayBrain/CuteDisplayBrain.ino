@@ -295,8 +295,14 @@ static void processFace(const CuteLink::Frame &f){
 }
 // Brain is the ONLY enabled radio endpoint in Phase 3.
 // Secrets are stored on the S3 (not logged or sent to the C5).
+static bool usableStationIP(IPAddress ip){
+ return ip!=IPAddress(0,0,0,0) && ip!=IPAddress(255,255,255,255) &&
+        ip[0]!=0 && ip[0]!=127 && ip[0]!=169 &&
+        ip[0]<224 && ip[0]!=255;
+}
 static bool brainWiFiOnline(){
- return wifiEnabled && WiFi.status()==WL_CONNECTED;
+ return wifiEnabled && WiFi.status()==WL_CONNECTED &&
+        usableStationIP(WiFi.localIP());
 }
 // Arduino Wi-Fi callbacks execute on a separate task: only record the
 // numeric disconnect reason here, then process/log/notify from loop().
@@ -492,6 +498,27 @@ static void toggleBrainWiFiByButton(){
 }
 static void updateBrainWiFi(){
  uint32_t now=millis();
+ static uint32_t badIPSince=0,lastBadIPLog=0;
+ // Radio association is not proof of a valid DHCP lease or static IP.
+ if(wifiEnabled && WiFi.status()==WL_CONNECTED &&
+    !usableStationIP(WiFi.localIP())){
+  if(!badIPSince)badIPSince=now;
+  if((uint32_t)(now-lastBadIPLog)>5000UL){
+   lastBadIPLog=now;
+   Serial.printf("[S3 WIFI] Associated but INVALID IP=%s GW=%s DNS=%s mode=%s\\n",
+       WiFi.localIP().toString().c_str(),
+       WiFi.gatewayIP().toString().c_str(),
+       WiFi.dnsIP().toString().c_str(),wifiDHCP?"DHCP":"STATIC");
+  }
+  if((uint32_t)(now-badIPSince)>15000UL){
+   Serial.println("[S3 WIFI] Invalid address persisted; restarting STA DHCP/connect");
+   badIPSince=0;wifiConnecting=false;
+   WiFi.disconnect(false,false);
+   nextWiFiAttempt=now+2500UL;
+   pushNetwork("N:STATE:RETRYING");
+   pushNetwork("N:IP:-");
+  }
+ }else badIPSince=0;
  if((uint32_t)(now-lastWiFiPoll)<500UL)return;
  lastWiFiPoll=now;
  if(wifiDisconnectPending){
