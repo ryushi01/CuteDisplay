@@ -38,12 +38,15 @@ static bool historyLoaded=false;
 static void saveHistory(){
  Preferences p;
  if(!p.begin("brain-chat",false))return;
- p.putULong64("started",conversationStarted);
- p.putUChar("count",(uint8_t)historyCount);
+ // Skip unchanged values to reduce wear during frequent conversations.
+ if(p.getULong64("started",0)!=conversationStarted)p.putULong64("started",conversationStarted);
+ if(p.getUChar("count",0)!=(uint8_t)historyCount)p.putUChar("count",(uint8_t)historyCount);
  for(size_t i=0;i<HISTORY_TURNS;i++){
   String uk="u"+String(i),ak="a"+String(i);
-  p.putString(uk.c_str(),i<historyCount?history[i].user:String(""));
-  p.putString(ak.c_str(),i<historyCount?history[i].assistant:String(""));
+  String user=i<historyCount?history[i].user:String("");
+  String assistant=i<historyCount?history[i].assistant:String("");
+  if(p.getString(uk.c_str(),"")!=user)p.putString(uk.c_str(),user);
+  if(p.getString(ak.c_str(),"")!=assistant)p.putString(ak.c_str(),assistant);
  }
  p.end();
 }
@@ -164,9 +167,22 @@ inline void processSSELine(String line){
    report("STREAMING");
    Serial.printf("[AI PERF] First token in %lums\n",(unsigned long)(firstTokenAt-requestStarted));
   }
-  if(staged.length()+chunk.length()<=512)staged+=chunk;
-  else failed=true;
-  releaseText(false);
+  // A single SSE delta can exceed 512 bytes, especially in multilingual output.
+  // Keep buffering bounded without treating a large, valid delta as an error.
+  size_t offset=0;
+  while(offset<chunk.length() && !failed && !cancelRequested){
+   if(staged.length()>=384)releaseText(true);
+   if(failed||cancelRequested)break;
+   size_t available=512-staged.length();
+   size_t take=min(available,chunk.length()-offset);
+   if(offset+take<chunk.length()){
+    while(take>0 && (((uint8_t)chunk[offset+take]&0xC0)==0x80))--take;
+   }
+   if(!take){failed=true;break;}
+   staged+=chunk.substring(offset,offset+take);
+   offset+=take;
+   releaseText(false);
+  }
   // First phrase appears immediately rather than waiting for 64 bytes.
   if(emittedBytes==0 && staged.length()>=12)releaseText(true);
  }
