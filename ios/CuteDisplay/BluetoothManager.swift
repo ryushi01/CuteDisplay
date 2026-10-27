@@ -34,6 +34,7 @@ final class BluetoothManager: NSObject, ObservableObject {
     private var brainBLEReady = false
     @Published var isScanning = false
     @Published var status = "Starting Bluetooth..."
+    @Published var aiLiveStatus = "Idle"
     @Published var brightness = 75
     @Published var batteryLevel: Int? = nil
     @Published var batteryVoltage: Double?
@@ -654,6 +655,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             commands.append("AI:END")
         }
         commands.append("AI:GO")
+        aiLiveStatus = "Sending prompt"
         enqueue(commands)
         status = "Sending AI prompt to S3 Brain (\(commands.count) commands)"
     }
@@ -1088,6 +1090,27 @@ extension BluetoothManager: CBPeripheralDelegate {
             } else if awaitingBrainAck,
                       let data = characteristic.value,
                       let response = String(data: data, encoding: .utf8) {
+                if response.hasPrefix("AI:STATUS:") {
+                    let state = String(response.dropFirst("AI:STATUS:".count))
+                    switch state {
+                    case "QUEUED": aiLiveStatus = "Queued"
+                    case "CONNECTING": aiLiveStatus = "Connecting to AI server"
+                    case "STREAMING": aiLiveStatus = "Kitty is responding"
+                    case "COMPLETE": aiLiveStatus = "Complete"
+                    case "WIFI_ERROR": aiLiveStatus = "Failed: S3 Wi-Fi disconnected"
+                    case "CONFIG_ERROR": aiLiveStatus = "Failed: check HTTPS URL, model and API key"
+                    case "CLOCK_ERROR": aiLiveStatus = "Failed: S3 clock not synchronized"
+                    case "NETWORK_ERROR": aiLiveStatus = "Failed: network or TLS connection"
+                    case "AUTH_ERROR": aiLiveStatus = "Failed: invalid or unauthorized API key"
+                    case "MODEL_OR_URL_ERROR": aiLiveStatus = "Failed: check model ID or endpoint"
+                    case "RATE_LIMIT": aiLiveStatus = "Failed: server rate limit"
+                    case "SERVER_ERROR": aiLiveStatus = "Failed: AI server returned an error"
+                    case "STREAM_INCOMPLETE": aiLiveStatus = "Failed: incomplete AI stream"
+                    case "FAILED": if !aiLiveStatus.hasPrefix("Failed:") { aiLiveStatus = "Failed: generation interrupted" }
+                    default: aiLiveStatus = "AI: " + state
+                    }
+                    return
+                }
                 if response.hasPrefix("ACK:") ||
                    response.hasPrefix("ERR:") ||
                    response.hasPrefix("NACK:") {
