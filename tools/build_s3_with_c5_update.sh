@@ -67,10 +67,10 @@ cp "$PARTITIONS" "$WORK/CuteDisplayBrain/partitions.csv"
 python3 "$ROOT/tools/package_c5_firmware.py" \
   --bin "$WORK/build-c5/lcd.ino.bin" --version "$VERSION" \
   --version-header "$WORK/lcd/C5FirmwareVersion.h" \
-  --output "$WORK/CuteDisplayBrain/C5FirmwareImage.h"
+  --output "$WORK/CuteDisplayBrain/CombinedFirmwareImage.h"
 # A missing or empty image must NEVER produce a seemingly valid release artifact.
-grep -Eq "inline constexpr uint32_t version=${VERSION}(UL)?;" "$WORK/CuteDisplayBrain/C5FirmwareImage.h" || { echo "Bundled image version mismatch" >&2; exit 1; }
-if grep -Eq 'inline constexpr size_t length=0(UL)?;' "$WORK/CuteDisplayBrain/C5FirmwareImage.h"; then
+grep -Eq "inline constexpr uint32_t version=${VERSION}(UL)?;" "$WORK/CuteDisplayBrain/CombinedFirmwareImage.h" || { echo "Bundled image version mismatch" >&2; exit 1; }
+if grep -Eq 'inline constexpr size_t length=0(UL)?;' "$WORK/CuteDisplayBrain/CombinedFirmwareImage.h"; then
   echo "ERROR: bundled C5 image is empty" >&2; exit 1
 fi
 
@@ -80,6 +80,8 @@ arduino-cli compile --clean --fqbn "$S3_FQBN" \
 test -s "$WORK/build-s3/CuteDisplayBrain.ino.bin"
 mkdir -p "$OUT/CuteDisplayBrain"
 cp -R "$WORK/CuteDisplayBrain/." "$OUT/CuteDisplayBrain/"
+cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
+  "$OUT/CuteDisplay-CombinedFirmware.bin"
 cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
   "$OUT/S3-Brain-includes-C5-v${VERSION}-application.bin"
 
@@ -97,7 +99,7 @@ NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
 4. S3 upgrades C5 automatically ONLY if bundled version is newer.
    Expect: [S3 OTA] SUCCESS: new display firmware confirmed after reboot
 
-The C5FirmwareImage.h from the normal repository is deliberately EMPTY.
+The CombinedFirmwareImage.h from the normal repository is deliberately EMPTY.
 Never upload the repository's S3 sketch as a combined firmware release;
 always use the generated CuteDisplayBrain folder from this artifact.
 Never overwrite the generated header with the repository placeholder.
@@ -108,7 +110,7 @@ with ESP32C5 Dev Module, 16 MB flash, enabled PSRAM, Custom partition.
 Future upgrades need only the S3 USB. Keep direct C5 USB recovery available.
 Avoid powering two USB sources with a shared 5V bridge connected.
 
-The .bin files are APPLICATION images, NOT complete factory images.
+CuteDisplay-CombinedFirmware.bin is the SINGLE compiled S3 application that embeds the C5 firmware.\nIt already contains all S3 .ino/.h/.cpp changes and the C5 firmware update.\nThe .bin files are APPLICATION images, NOT complete factory images.
 Do not flash app-only binaries to offset 0x0.
 EOF
 echo "[5/5] Combined firmware available at: $OUT"

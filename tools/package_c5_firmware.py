@@ -3,7 +3,7 @@
 
 One-time bootstrap: flash OTA-capable C5 sketch by its own USB.
 Future upgrades: change C5FirmwareVersion.h, compile C5 to .bin, run
-this script, and upload the S3 sketch containing C5FirmwareImage.h.
+this script, and upload the S3 sketch containing CombinedFirmwareImage.h.
 Only Python standard library is needed.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_HEADER = ROOT / "firmware/CuteDisplay/C5FirmwareVersion.h"
-DEST = ROOT / "firmware/CuteDisplayBrain/C5FirmwareImage.h"
+DEST = ROOT / "firmware/CuteDisplayBrain/CombinedFirmwareImage.h"
 MAX_SLOT = 0x640000  # default_16MB.csv inactive OTA slot, 6.25 MiB
 
 def main() -> int:

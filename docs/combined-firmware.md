@@ -1,0 +1,9 @@
+# CuteDisplay one-file firmware release
+
+The GitHub Actions artifact **CuteDisplay-CombinedFirmware** contains **CuteDisplay-CombinedFirmware.bin** (the single compiled ESP32-S3 application), plus an Arduino IDE fallback project. The binary contains *all* S3 source changes, including BLE/Wi-Fi, microphone recording test and startup/manual two-note beep, and an embedded C5 firmware image. When S3 boots it checks the attached C5 version and pushes a newer firmware over the existing UART link. No separate C5 USB flash or manual header replacement is required.
+
+**One-file principle:** the user installs the compiled S3 application image. S3 then installs C5 only when its version increases. Individual .ino/.h/.cpp source files are compiled at CI build time; they are never copied to ESP32 filesystem as source. The source-side generated header is called **CombinedFirmwareImage.h**, containing the C5 binary *within* the compiled S3 image. Its GitHub checkout placeholder is deliberately empty; do not copy that placeholder over the generated artifact.
+
+**Current installation path (safe, verified):** Upload the generated `CuteDisplayBrain/CuteDisplayBrain.ino` via Arduino IDE (ESP32S3 Dev Module, 16 MB flash, OPI PSRAM, Custom partition scheme). That performs the same update without requiring a second C5 USB connection. The compiled `.bin` is a partition application image, **not** a standalone factory flasher: do not write it at address 0x0. Direct binary installation requires the correct bootloader, partitions and active OTA slot. Full unattended S3 USB/OTA installer and rollback checks are **not yet implemented**; do not use the single binary with an unverified flash offset.
+
+Audio tests retained in S3: startup two-tone chime after approximately 4.5 seconds, `audio beep` and `audio test` commands at 115200 baud USB Serial Monitor. Speaker silent after first record/play test, still investigating. Mic recorded peak 2147483647 (suspicious saturation).

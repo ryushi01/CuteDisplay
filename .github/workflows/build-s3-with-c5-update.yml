@@ -46,7 +46,7 @@ jobs:
       - name: Publish ready-to-upload S3 project and binaries
         uses: actions/upload-artifact@v4
         with:
-          name: CuteDisplay-S3-with-C5-update
+          name: CuteDisplay-CombinedFirmware
           path: release/
           if-no-files-found: error
           retention-days: 90

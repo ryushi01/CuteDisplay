@@ -3,7 +3,7 @@
 // the proven GPIO47/21 ↔ GPIO1/6 UART. Never uses the C5 ROM downloader.
 #include <Arduino.h>
 #include "CuteLink.h"
-#include "C5FirmwareImage.h"
+#include "CombinedFirmwareImage.h"
 namespace BrainC5OTA {
 enum Stage :uint8_t { IDLE, QUERY, READY, BEGIN, DATA, END, WAIT_BOOT, DONE, FAILED };
 static Stage stage=IDLE;
