@@ -181,6 +181,7 @@ inline bool start(){
  return true;
 }
 inline bool provision(const String &cmd,String &reply){
+ if(cmd=="AI:PING"){reply="ACK:AI_PONG";return true;}
  if(cmd.startsWith("AI:BEGIN:")){
   int cut=cmd.indexOf(':',9);
   if(cut<0){reply="ERR:AI_FORMAT";return true;}

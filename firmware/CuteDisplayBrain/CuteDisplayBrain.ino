@@ -609,9 +609,9 @@ static void pollBLECommands(){
    if(incoming.startsWith("AI:BEGIN:"))
     Serial.printf("[AI CTRL] Provisioning field %c (%s)\n",
                   incoming.length()>9?incoming[9]:'?',result.c_str());
-   else if(incoming=="AI:END" || incoming=="AI:GO")
+   else if(incoming=="AI:END" || incoming=="AI:GO" || incoming=="AI:PING")
     Serial.printf("[AI CTRL] %s: %s\n",
-                  incoming=="AI:GO"?"Start":"Field complete",result.c_str());
+                  incoming=="AI:GO"?"Start":incoming=="AI:PING"?"Ping":"Field complete",result.c_str());
    proxyResult(result);return;
   }
  }

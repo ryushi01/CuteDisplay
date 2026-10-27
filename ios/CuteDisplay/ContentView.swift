@@ -821,6 +821,14 @@ struct ContentView: View {
             if !aiResponse.isEmpty {
                 Text(aiResponse).font(.subheadline).textSelection(.enabled)
             }
+            Button("Test S3 AI command connection") {
+                bluetooth.sendControlCommand("AI:PING")
+                aiStatus = "AI:PING queued; check Bluetooth status and S3 Serial Monitor"
+            }
+            .buttonStyle(.bordered)
+            .disabled(!bluetooth.bluetoothBrainConnected)
+            Text("Bluetooth transport: " + bluetooth.status)
+                .font(.caption2).foregroundStyle(.secondary)
             Text(aiStatus).font(.caption2).foregroundStyle(.secondary)
             Text("Phase 1: text via Open WebUI on AI-SERVER. Ollama and voice services stay on your MacBook. Use HTTPS to protect the API key; voice streaming is not enabled yet.")
                 .font(.caption2).foregroundStyle(.secondary)
