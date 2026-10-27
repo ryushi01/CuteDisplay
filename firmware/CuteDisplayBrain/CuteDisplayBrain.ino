@@ -262,7 +262,7 @@ static void processFace(const CuteLink::Frame &f){
  } else if(f.type=="BATTERY"){
   Serial.printf("[C5] BATTERY %s\n",f.payload.c_str());
  } else if(f.type=="VOICE_START"){
-  if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy){
+  if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy && !BrainTTS::running){
    if(BrainVoiceSTT::start())Serial.println("[VOICE] C5 button started recording");
   }else Serial.println("[VOICE] C5 button rejected: busy");
  } else if(f.type=="VOICE_STOP"){
@@ -665,14 +665,14 @@ static void pollBLECommands(){
   return;
  }
  if(incoming=="A:VOICE"){
-  if(BrainC5OTA::updating() || BrainAudioTest::running || BrainVoiceSTT::running || BrainAI::busy){
+  if(BrainC5OTA::updating() || BrainAudioTest::running || BrainVoiceSTT::running || BrainAI::busy || BrainTTS::running){
    proxyResult("ERR:AUDIO_BUSY");return;
   }
   proxyResult(BrainVoiceSTT::start()?"ACK:VOICE_STARTED":"ERR:VOICE_START");
   return;
  }
  if(incoming=="A:TEST"){
-  if(BrainAudioTest::running){proxyResult("ERR:AUDIO_BUSY");return;}
+  if(BrainAudioTest::running || BrainVoiceSTT::running || BrainTTS::running){proxyResult("ERR:AUDIO_BUSY");return;}
   if(BrainC5OTA::updating()){proxyResult("ERR:DISPLAY_UPDATING");return;}
   BrainAudioTest::start();
   proxyResult("ACK:AUDIO_TEST");
