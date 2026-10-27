@@ -949,6 +949,11 @@ void setup(){
  else WiFi.mode(WIFI_OFF);
 }
 void loop(){
+ static bool bootChirpDone=false;
+ if(!bootChirpDone && millis()>4500 && !BrainAudioTest::running && !BrainC5OTA::updating()){
+  bootChirpDone=true;
+  BrainAudioTest::beep(false);
+ }
  BrainC5OTA::permitUpdate=!activeSeq && !lanAwaitingCommand &&
     incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
