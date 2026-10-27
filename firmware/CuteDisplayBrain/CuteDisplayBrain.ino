@@ -261,6 +261,12 @@ static void processFace(const CuteLink::Frame &f){
   // C5 radios are disabled; ignore any stale C5 radio telemetry.
  } else if(f.type=="BATTERY"){
   Serial.printf("[C5] BATTERY %s\n",f.payload.c_str());
+ } else if(f.type=="VOICE_START"){
+  if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy){
+   if(BrainVoiceSTT::start())Serial.println("[VOICE] C5 button started recording");
+  }else Serial.println("[VOICE] C5 button rejected: busy");
+ } else if(f.type=="VOICE_STOP"){
+  if(BrainVoiceSTT::stop())Serial.println("[VOICE] C5 button released: send recording");
  } else if(f.type=="WIFI_TOGGLE"){
   // Physical GPIO0 long-press request from the C5, not an untrusted BLE write.
   toggleBrainWiFiByButton();
