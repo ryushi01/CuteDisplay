@@ -2985,16 +2985,17 @@ void loop(){
   if(!scrolling)redrawCurrent();
  }
  // Advance AI text vertically like a page, without changing font scale.
- if(aiScrollMode && now-aiScrollStarted>=2200UL &&
-    now-aiLastScrollStep>=1700UL){
+ if(aiScrollMode && now-aiScrollStarted>=450UL &&
+    now-aiLastScrollStep>=400UL){
   aiLastScrollStep=now;
   // Count actual wrapped lines using the same metrics as drawSpeechBubble.
   const int right=contentRight(), innerLeft=17, innerRight=right-29;
   const int lineH=max(14,16)+7;
   const int visibleLines=max(1,(116-24)/lineH);
   int lines=1,x=innerLeft;
-  for(int i=0;i<(int)message.length();){
-   uint32_t cp=decodeUTF8(message,i);
+  String visibleAI=bubblePrefix(message,revealedCharacters);
+  for(int i=0;i<(int)visibleAI.length();){
+   uint32_t cp=decodeUTF8(visibleAI,i);
    if(cp=='\r')continue;
    if(cp=='\n'){lines++;x=innerLeft;continue;}
    int w=utfWidth(cp,2,1);
