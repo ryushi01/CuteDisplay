@@ -29,6 +29,7 @@
 #include "CuteLink.h"
 #include "BrainC5OTA.h"
 #include "BrainAudioTest.h"
+#include "BrainAI.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr char S3_FW_VERSION[]="Phase6-UART-C5-OTA-20261027";
@@ -266,6 +267,7 @@ static void processFace(const CuteLink::Frame &f){
  } else if(f.type=="LOG"){
   Serial.printf("[C5] LOG %s\n",f.payload.c_str());
  } else if(f.type=="ACK"||f.type=="NACK"){
+  BrainAI::onAck(f.seq,f.type,f.payload);
   // Check exact sequence before advancing the BLE command transaction.
   if(activeSeq && f.seq==activeSeq){
    if(f.type=="NACK"){
@@ -600,6 +602,10 @@ static void pollBLECommands(){
   proxyResult("ERR:DISPLAY_UPDATING");return;
  }
  String incoming(item);
+ if(incoming.startsWith("AI:")){
+  String result;
+  if(BrainAI::provision(incoming,result)){proxyResult(result);return;}
+ }
  if(incoming=="A:TEST"){
   if(BrainAudioTest::running){proxyResult("ERR:AUDIO_BUSY");return;}
   if(BrainC5OTA::updating()){proxyResult("ERR:DISPLAY_UPDATING");return;}
@@ -879,6 +885,7 @@ void setup(){
  Serial1.setRxBufferSize(2048);
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
+ BrainAI::init();
  BrainAudioTest::loadLevels();
  Serial.printf("[S3] UART TX=%d RX=%d baud=%d\n",
     BrainPinPlan::UART_TX,BrainPinPlan::UART_RX,BrainPinPlan::UART_BAUD);
@@ -965,6 +972,7 @@ void loop(){
     incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
  BrainC5OTA::tick(Serial1,faceOnline);
+ BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
  pollUSB();
  updateBrainWiFi();
  pollBrainLAN();
