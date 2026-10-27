@@ -125,8 +125,8 @@ static void task(void *) {
     int64_t m=recorded[i]<0?-(int64_t)recorded[i]:(int64_t)recorded[i];
     if(m>speechPeak)speechPeak=(uint32_t)m;
   }
-  const uint64_t targetPeak=0x28000000ULL;
-  uint32_t autoGainQ10=(uint32_t)min(24576ULL,
+  const uint64_t targetPeak=0x48000000ULL;
+  uint32_t autoGainQ10=(uint32_t)min(81920ULL,
     (targetPeak*1024ULL)/max((uint32_t)1,speechPeak));
   // Never attenuate during normalization; speakerVolume remains attenuation.
   if(autoGainQ10<1024)autoGainQ10=1024;
@@ -142,7 +142,7 @@ static void task(void *) {
         if(sample<-(int32_t)0x18000000)sample=-(int32_t)0x18000000;
         // Fixed-point gain adjustment with wide intermediate, no overflow.
         int64_t scaled=((int64_t)sample*autoGainQ10*micGain*speakerVolume)/(1024LL*10000LL);
-        const int64_t ceiling=0x30000000LL;
+        const int64_t ceiling=0x58000000LL;
         if(scaled>ceiling)scaled=ceiling;
         if(scaled<-ceiling)scaled=-ceiling;
         stereo[2*i]=(int32_t)scaled;stereo[2*i+1]=(int32_t)scaled;
@@ -165,7 +165,7 @@ done:
 }
 
 static void beepTask(void *arg) {
- if((uintptr_t)arg)vTaskDelay(pdMS_TO_TICKS(4500));
+ if((uintptr_t)arg)vTaskDelay(pdMS_TO_TICKS(2200));
  i2s_chan_handle_t tx=nullptr;
  const char *error=nullptr;
  {
@@ -184,14 +184,14 @@ static void beepTask(void *arg) {
   if(i2s_channel_init_std_mode(tx,&cfg)!=ESP_OK){error="init TX";goto doneBeep;}
   if(i2s_channel_enable(tx)!=ESP_OK){error="enable TX";goto doneBeep;}
  }
- Serial.println("[AUDIO] BEEP: testing speaker with two tones");
+ Serial.println("[AUDIO] BEEP: short startup/test chirp");
  {
   int32_t samples[BLOCK*2];
   uint32_t phase=0;
-  const uint32_t notes[]={660,880};
-  for(int n=0;n<2;++n){
+  const uint32_t notes[]={880};
+  for(int n=0;n<1;++n){
    uint32_t step=(uint32_t)(((uint64_t)notes[n]*4294967296ULL)/RATE);
-   for(int chunk=0;chunk<40;++chunk){
+   for(int chunk=0;chunk<14;++chunk){
     for(size_t i=0;i<BLOCK;++i){
      phase+=step;
      uint32_t p=phase>>16;

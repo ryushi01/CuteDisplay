@@ -593,6 +593,13 @@ static void pollBLECommands(){
   proxyResult("ERR:DISPLAY_UPDATING");return;
  }
  String incoming(item);
+ if(incoming=="A:TEST"){
+  if(BrainAudioTest::running){proxyResult("ERR:AUDIO_BUSY");return;}
+  if(BrainC5OTA::updating()){proxyResult("ERR:DISPLAY_UPDATING");return;}
+  BrainAudioTest::start();
+  proxyResult("ACK:AUDIO_TEST");
+  return;
+ }
  if(incoming.startsWith("A:MIC:")||incoming.startsWith("A:SPK:")){
   bool ok=BrainAudioTest::setLevel(incoming);
   proxyResult(ok?"ACK:AUDIO":"ERR:AUDIO");

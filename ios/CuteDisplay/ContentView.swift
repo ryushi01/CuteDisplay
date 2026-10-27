@@ -83,6 +83,8 @@ struct ContentView: View {
     @StateObject private var bluetooth = BluetoothManager()
     @State private var message = UserDefaults.standard.string(forKey: "savedMessage") ?? "こんにちわ"
     @State private var brightness = 75.0
+    @State private var audioTestPhase = "Ready"
+    @State private var audioTestRunning = false
     @State private var micGain = UserDefaults.standard.object(forKey: "cuteMicGain") as? Double ?? 150
     @State private var speakerVolume = UserDefaults.standard.object(forKey: "cuteSpeakerVolume") as? Double ?? 65
     @State private var wifiName = UserDefaults.standard.string(forKey: "cuteWiFiName") ?? ""
@@ -523,6 +525,28 @@ struct ContentView: View {
                         }
                     }
                     Text("\(Int(speakerVolume))%").monospacedDigit().frame(width: 52)
+                }
+                Button {
+                    guard bluetooth.bluetoothBrainConnected, !audioTestRunning else { return }
+                    audioTestRunning = true
+                    audioTestPhase = "Please talk"
+                    bluetooth.sendControlCommand("A:TEST")
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(2))
+                        audioTestPhase = "Playing"
+                        try? await Task.sleep(for: .seconds(3))
+                        audioTestPhase = "Ready"
+                        audioTestRunning = false
+                    }
+                } label: {
+                    Label(audioTestRunning ? audioTestPhase : "Test microphone & speaker", systemImage: "waveform")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!bluetooth.bluetoothBrainConnected || audioTestRunning)
+                if audioTestRunning {
+                    Text(audioTestPhase == "Please talk" ? "Speak into Kitty's microphone for two seconds." : "Listen to your recording.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Button("Apply audio levels") {
                     UserDefaults.standard.set(micGain, forKey: "cuteMicGain")
