@@ -654,6 +654,10 @@ static void pollBLECommands(){
   Serial.println("[AI CTRL] Unsupported AI command rejected");
   proxyResult("ERR:AI_UNKNOWN");return;
  }
+ if(incoming=="A:VOICE:STOP"){
+  proxyResult(BrainVoiceSTT::stop()?"ACK:VOICE_STOPPING":"ERR:VOICE_NOT_RECORDING");
+  return;
+ }
  if(incoming=="A:VOICE"){
   if(BrainC5OTA::updating() || BrainAudioTest::running || BrainVoiceSTT::running || BrainAI::busy){
    proxyResult("ERR:AUDIO_BUSY");return;
