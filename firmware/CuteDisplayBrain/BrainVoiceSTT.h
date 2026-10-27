@@ -104,7 +104,7 @@ static void task(void*){
   responseBuffer=(uint8_t*)heap_caps_malloc(4096,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!responseBuffer){strcpy(result.error,"NO_PSRAM");break;}
   const char *boundary="CuteDisplayAudioBoundary";
-  String prefix=String("--")+boundary+"\r\nContent-Disposition: form-data; name=\\"file\\"; filename=\\"kitty.wav\\"\r\nContent-Type: audio/wav\r\n\r\n";
+  String prefix=String("--")+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"kitty.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
   String suffix=String("\r\n--")+boundary+"--\r\n";
   const size_t pcm8Bytes=44+captured;
   const size_t largest=prefix.length()+actualWavBytes+suffix.length();
@@ -180,7 +180,7 @@ inline bool start(){
  }
  return true;
 }
-inline bool stop(){if(!running || !capturing)return false;stopRequested=true;return true;}
+inline bool stop(){if(!running)return false;stopRequested=true;return true;}
 inline void init(){if(!results)results=xQueueCreate(2,sizeof(Result));}
 inline bool take(Result &r){return results&&xQueueReceive(results,&r,0)==pdTRUE;}
 }
