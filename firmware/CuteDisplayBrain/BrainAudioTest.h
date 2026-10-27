@@ -118,17 +118,30 @@ static void task(void *) {
       goto done;
     }
   }
-  Serial.printf("[AUDIO] Playing recording mic_gain=%u%% speaker_volume=%u%%\n",micGain,speakerVolume);
+  // INMP441 speech is naturally quiet in 32-bit I2S slots. Auto-scale
+  // the recorded voice to a safe peak, bounded to 24x to avoid noise blow-up.
+  uint32_t speechPeak=0;
+  for(size_t i=0;i<FRAMES;i++){
+    int64_t m=recorded[i]<0?-(int64_t)recorded[i]:(int64_t)recorded[i];
+    if(m>speechPeak)speechPeak=(uint32_t)m;
+  }
+  const uint64_t targetPeak=0x28000000ULL;
+  uint32_t autoGainQ10=(uint32_t)min(24576ULL,
+    (targetPeak*1024ULL)/max((uint32_t)1,speechPeak));
+  // Never attenuate during normalization; speakerVolume remains attenuation.
+  if(autoGainQ10<1024)autoGainQ10=1024;
+  Serial.printf("[AUDIO] Playback raw_peak=%lu auto_gain=%.2fx mic_gain=%u%% speaker_volume=%u%%\\n",
+    (unsigned long)speechPeak,autoGainQ10/1024.0f,micGain,speakerVolume);
   {
     int32_t stereo[BLOCK*2];
     for(size_t start=0;start<FRAMES;start+=BLOCK){
       for(size_t i=0;i<BLOCK;++i){
-        // Clamp suspicious transients, then attenuate approximately -18 dB.
+        // Clamp suspicious transients, then apply bounded digital normalization.
         int32_t sample=recorded[start+i];
         if(sample>0x18000000)sample=0x18000000;
         if(sample<-(int32_t)0x18000000)sample=-(int32_t)0x18000000;
         // Fixed-point gain adjustment with wide intermediate, no overflow.
-        int64_t scaled=((int64_t)sample*micGain*speakerVolume)/10000LL;
+        int64_t scaled=((int64_t)sample*autoGainQ10*micGain*speakerVolume)/(1024LL*10000LL);
         const int64_t ceiling=0x30000000LL;
         if(scaled>ceiling)scaled=ceiling;
         if(scaled<-ceiling)scaled=-ceiling;
