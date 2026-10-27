@@ -29,6 +29,7 @@
 #include "CuteLink.h"
 #include "BrainC5OTA.h"
 #include "BrainAudioTest.h"
+#include "BrainVoiceSTT.h"
 #include "BrainClock.h"
 #include "BrainAI.h"
 
@@ -653,6 +654,13 @@ static void pollBLECommands(){
   Serial.println("[AI CTRL] Unsupported AI command rejected");
   proxyResult("ERR:AI_UNKNOWN");return;
  }
+ if(incoming=="A:VOICE"){
+  if(BrainC5OTA::updating() || BrainAudioTest::running || BrainVoiceSTT::running || BrainAI::busy){
+   proxyResult("ERR:AUDIO_BUSY");return;
+  }
+  proxyResult(BrainVoiceSTT::start()?"ACK:VOICE_STARTED":"ERR:VOICE_START");
+  return;
+ }
  if(incoming=="A:TEST"){
   if(BrainAudioTest::running){proxyResult("ERR:AUDIO_BUSY");return;}
   if(BrainC5OTA::updating()){proxyResult("ERR:DISPLAY_UPDATING");return;}
@@ -1020,6 +1028,7 @@ void loop(){
     incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
  BrainC5OTA::tick(Serial1,faceOnline);
+ BrainVoiceSTT::tick();
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
  // Status notifications are separate from command acknowledgements.
  String aiEvent;
