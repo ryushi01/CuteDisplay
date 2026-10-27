@@ -11,15 +11,10 @@
 #include <cJSON.h>
 #include "BrainPinPlan.h"
 #include "BrainOggOpus.h"
-#if __has_include(<opus.h>)
+// Opus is mandatory for this development build. Do not silently ship WAV-only
+// when Arduino IDE has not discovered the dependency.
 #include <opus.h>
 #define CUTE_HAS_OPUS 1
-#else
-#define CUTE_HAS_OPUS 0
-#endif
-#if defined(CUTE_REQUIRE_OPUS) && CUTE_REQUIRE_OPUS && !CUTE_HAS_OPUS
-#error "CuteDisplay: Opus library is missing. Install esp32_opus in Arduino libraries before compiling."
-#endif
 
 namespace BrainVoiceSTT {
 static volatile bool running=false;
