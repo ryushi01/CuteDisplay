@@ -53,7 +53,7 @@
 #define PIN_BL 25
 #define BAT_SDA 2
 #define BAT_SCL 3
-#define PIN_USER_BUTTON 0 // LILYGO T-Display-C5 user button (GPIO0, active LOW)
+#define PIN_VOICE_BUTTON 28 // separate BOOT button (active LOW)\n#define PIN_USER_BUTTON 0 // LILYGO T-Display-C5 user button (GPIO0, active LOW)
 #define LCD_W 320
 #define LCD_H 170
 #define MAX_CMD 96
@@ -481,7 +481,7 @@ uint16_t fullMinutes = 0xFFFF;
 bool userButtonLastRaw = HIGH;
 bool userButtonStable = HIGH;
 unsigned long userButtonChangedAt = 0;
-unsigned long userButtonPressedAt = 0;
+unsigned long userButtonPressedAt = 0;\nbool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false;\nunsigned long voiceButtonChangedAt=0,voiceButtonHeldAt=0;
 bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
 unsigned long wifiToastUntil = 0;
@@ -2857,7 +2857,7 @@ void setup(){
  }
  commandQueue=xQueueCreate(32,MAX_CMD+1);
  if(!commandQueue)Serial.println("[BLE] Queue creation failed");
- pinMode(PIN_USER_BUTTON,INPUT_PULLUP);
+ pinMode(PIN_USER_BUTTON,INPUT_PULLUP);\n pinMode(PIN_VOICE_BUTTON,INPUT_PULLUP);\n voiceButtonLastRaw=digitalRead(PIN_VOICE_BUTTON);voiceButtonStable=voiceButtonLastRaw;
 
  userButtonLastRaw=digitalRead(PIN_USER_BUTTON);
  userButtonStable=userButtonLastRaw;
@@ -2940,30 +2940,67 @@ void loop(){
   showMessage(normalDisplayMessage);
  }
  if(stateDirty && now-stateDirtyAt>=3500UL)saveDisplayState();
- // GPIO0 user button: hold to record through S3, release to transcribe.
-// GPIO0 previously toggled Brain Wi-Fi on long press; Wi-Fi remains controllable from iPhone.
  bool raw=digitalRead(PIN_USER_BUTTON);
  if(raw!=userButtonLastRaw){userButtonChangedAt=now;userButtonLastRaw=raw;}
  if(now-userButtonChangedAt>=35 && raw!=userButtonStable){
   userButtonStable=raw;
   if(raw==LOW){
    userButtonPressedAt=now;
-   if(s3Online){
+   userButtonLongHandled=false;
+  }else{
+   // The long-press action already fired while held; do not toggle again.
+   if(userButtonPressedAt && !userButtonLongHandled){
+    wifiToastUntil=0;
+    batteryOverlayUntil=now+BATTERY_CARD_MS;
+    chargeNoticeUntil=0;
+    redrawCurrent();
+   }
+   userButtonPressedAt=0;
+   userButtonLongHandled=false;
+  }
+ }
+ // Act at 1.4 s while GPIO0 is still LOW, not when the finger releases.
+ if(userButtonStable==LOW && userButtonPressedAt && !userButtonLongHandled &&
+    (unsigned long)(now-userButtonPressedAt)>=WIFI_HOLD_MS){
+  userButtonLongHandled=true;  // exactly one toggle per physical hold
+  // LILYGO's own Wi-Fi stays OFF. Toggle only the Brain over UART.
+  if(s3Online){
+   brainWifiToastLabel="S3 WIFI...";
+   wifiToastEnabled=false;
+   wifiToastUntil=millis()+3000UL;
+   toS3("WIFI_TOGGLE");
+  }else{
+   brainWifiToastLabel="BRAIN OFFLINE";
+   wifiToastEnabled=false;
+   wifiToastUntil=millis()+2300UL;
+  }
+  if(lcdReady)redrawCurrent();
+ }
+ // Dedicated C5 BOOT button (GPIO28): hold to record, release to send.
+ bool voiceRaw=digitalRead(PIN_VOICE_BUTTON);
+ if(voiceRaw!=voiceButtonLastRaw){voiceButtonChangedAt=now;voiceButtonLastRaw=voiceRaw;}
+ if(now-voiceButtonChangedAt>=35 && voiceRaw!=voiceButtonStable){
+  voiceButtonStable=voiceRaw;
+  if(voiceRaw==LOW){
+   voiceButtonHeldAt=now;
+   voiceButtonSession=s3Online;
+   if(voiceButtonSession){
     toS3("VOICE_START");
     brainWifiToastLabel="KITTY LISTENING";
    }else brainWifiToastLabel="BRAIN OFFLINE";
    wifiToastUntil=now+1600;
    if(lcdReady)redrawCurrent();
   }else{
-   if(userButtonPressedAt && s3Online){
-    toS3("VOICE_STOP");
-    brainWifiToastLabel="VOICE SENDING";
-    wifiToastUntil=now+1800;
-    if(lcdReady)redrawCurrent();
-   }
-   userButtonPressedAt=0;
+   if(voiceButtonSession && s3Online)toS3("VOICE_STOP");
+   voiceButtonSession=false;voiceButtonHeldAt=0;
+   brainWifiToastLabel="VOICE SENDING";
+   wifiToastUntil=now+1600;
+   if(lcdReady)redrawCurrent();
   }
  }
+ // On 30-second cutoff S3 submits automatically; do not start another capture.
+ if(voiceButtonHeldAt && (uint32_t)(now-voiceButtonHeldAt)>=30000UL)
+  voiceButtonSession=false;
  if(now-lastBatteryRead>=BATTERY_SAMPLE_MS){
   lastBatteryRead=now;
   readBattery();
