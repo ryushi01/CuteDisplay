@@ -15,12 +15,14 @@
 #include <AudioOutputI2S.h>
 namespace BrainTTS {
 static volatile bool running=false;
+static volatile bool cancelRequested=false;
 static QueueHandle_t requests=nullptr;
 struct Text { char value[769]; };
 static uint8_t *audio=nullptr;
 static size_t audioUsed=0;
 static constexpr size_t AUDIO_CAP=1536*1024;
 static esp_err_t onData(esp_http_client_event_t*event){
+ if(cancelRequested)return ESP_FAIL;
  if(event->event_id==HTTP_EVENT_ON_DATA && event->data && event->data_len>0){
   if(!audio || audioUsed+(size_t)event->data_len>AUDIO_CAP)return ESP_FAIL;
   memcpy(audio+audioUsed,event->data,event->data_len);
@@ -65,7 +67,7 @@ static bool playback(){
   size_t frames=dataSize/frameBytes;
   int16_t output[256];
   good=true;
-  for(size_t pos=0;pos<frames;pos+=128){
+  for(size_t pos=0;pos<frames && !cancelRequested;pos+=128){
    size_t count=min((size_t)128,frames-pos);
    for(size_t i=0;i<count;i++){
     const uint8_t *frame=audio+dataStart+(pos+i)*frameBytes;
@@ -95,7 +97,7 @@ static bool playbackMP3(){
  if(ok)ok=decoder->begin(file,output);
  if(ok){
   Serial.println("[TTS] MP3 playback started");
-  while(decoder->isRunning()){
+  while(decoder->isRunning() && !cancelRequested){
    if(!decoder->loop()){decoder->stop();break;}
    vTaskDelay(1);
   }
@@ -116,6 +118,7 @@ static void task(void *){
  if(!requests || xQueueReceive(requests,&text,0)!=pdTRUE){running=false;vTaskDelete(nullptr);return;}
  const char *failure="UNKNOWN";
  do{
+  if(cancelRequested){failure="CANCELLED";break;}
   if(WiFi.status()!=WL_CONNECTED){failure="WIFI_OFFLINE";break;}
   Preferences p;String url,key;
   if(p.begin("brain-ai",true)){url=p.getString("url","");key=p.getString("key","");p.end();}
@@ -147,6 +150,7 @@ static void task(void *){
   int code=esp_http_client_get_status_code(http);
   esp_http_client_cleanup(http);free(body);
   Serial.printf("[TTS] HTTP=%d transport=%d bytes=%lu\n",code,(int)err,(unsigned long)audioUsed);
+  if(cancelRequested){failure="CANCELLED";break;}
   if(err!=ESP_OK||code!=200){failure="HTTP_ERROR";break;}
   if(audioUsed>=12 && memcmp(audio,"RIFF",4)==0 && memcmp(audio+8,"WAVE",4)==0){
    Serial.println("[TTS] Format: WAV");
@@ -160,8 +164,13 @@ static void task(void *){
  if(failure)Serial.printf("[TTS] SKIPPED: %s (text remains visible)\n",failure);
  else Serial.println("[TTS] PLAYBACK_COMPLETE");
  if(audio){heap_caps_free(audio);audio=nullptr;}audioUsed=0;
- running=false;vTaskDelete(nullptr);
+ running=false;cancelRequested=false;vTaskDelete(nullptr);
 }
+inline void interrupt(){
+ cancelRequested=true;
+ if(requests)xQueueReset(requests);
+}
+inline bool active(){return running;}
 inline void init(){if(!requests)requests=xQueueCreate(2,sizeof(Text));}
 inline bool enqueue(const String &answer){
  if(!requests || answer.isEmpty())return false;
@@ -170,7 +179,7 @@ inline bool enqueue(const String &answer){
 }
 inline void tick(bool audioBusy){
  if(running||audioBusy||!requests||uxQueueMessagesWaiting(requests)==0)return;
- running=true;
+ cancelRequested=false;running=true;
  if(xTaskCreatePinnedToCore(task,"brain_tts",16384,nullptr,1,nullptr,0)!=pdPASS)running=false;
 }
 }
