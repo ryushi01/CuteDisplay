@@ -25,7 +25,7 @@ CuteDisplay's ESP32-S3 brain must connect **directly to the user's existing Open
 5. The iPhone still provisions only the standard `url`, `model`, and `sk-` key. No user password, session JWT, TOTP seed or 6-digit code is saved in S3.
 6. Implement bounded 24kHz I2S mic/speaker streaming and WebUI event protocol on S3 after server auth path is proven. Keep manual PTT as fallback; C5 v21 source and font are immutable.
 
-A server-side modification must be version-pinned, reviewed, tested with positive/negative API-key tests and revocation, and installed as a persistent container image/update mechanism. **Not implemented or deployed as of this checkpoint.** Do not put the normal human JWT in S3 NVS as a workaround; it expires, could bypass intended 2FA boundaries, and does not satisfy always-on availability.
+A version-guarded source patch is now **prepared in** `server/patch_openwebui_realtime_api_key.py`. It reuses Open WebUI's existing `get_current_user_by_api_key` permission and endpoint-allowlist checker for the *same* `/api/v1/audio/realtime` WSS route, and performs periodic API-key revocation checks. It keeps existing JWT behavior. **It is not installed, and has not yet been verified against the exact running Ubuntu Docker image.** The patch must be reviewed, checked against the deployed version, tested with positive/negative API keys and revocation, and baked into a persistent custom container image rather than manually changing a running ephemeral container. Do not put the normal human JWT in S3 NVS as a workaround; it expires, could bypass intended 2FA boundaries, and does not satisfy always-on availability.
 
 ## Security limits
 
