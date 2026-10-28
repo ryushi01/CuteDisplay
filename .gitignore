@@ -10,3 +10,8 @@ DerivedData/
 
 # Combined firmware build outputs (download artifacts instead)
 release/
+
+# Realtime gateway persistent API keys and device pairing secrets
+gateway/private-config.json
+gateway/private-*.json
+gateway/.venv/
