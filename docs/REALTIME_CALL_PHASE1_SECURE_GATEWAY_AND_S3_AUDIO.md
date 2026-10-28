@@ -1,6 +1,6 @@
 # CuteDisplay — Phase 1: secure realtime device transport and I2S plan
 
-Status: DESIGN ONLY. **Not deployed, not hardware-tested, no flashed firmware**.
+Status: **Phase 1 secure persistent gateway and iPhone/S3 pairing code implemented; not deployed or hardware-tested; realtime S3 audio still pending.**
 Date: 2026-10-28
 Baseline: `stable/2026-10-28-c5-v21-french-font-hardware-tested` — immutable reference; development only on `feature/realtime-call-c5v21`.
 
@@ -72,3 +72,28 @@ States: `OFF -> CONNECTING -> LISTENING -> USER_SPEAKING -> THINKING -> SPEAKING
 - Full speaker+microphone full-duplex requires I2S arbitration plus acoustic echo control. Accept short alternating turns before promising arbitrary simultaneous speaking.
 
 No network services, user settings, C5 or S3 source have been changed in this phase; this document is a design gate only.
+
+## Phase 1 source implementation checkpoint — 2026-10-28
+
+The user explicitly requires **NO password, TOTP code or repeated login on board startup**. Open WebUI's browser Realtime bridge expects a user JWT and is therefore unsuitable for unattended S3 sessions; independent **sk- API keys** are supported for noninteractive HTTP chat completions with global MFA enabled. To avoid storing user-session JWT or TOTP on the board, the new gateway connects **directly to the configured Mac OpenAI-Realtime-compatible provider** for audio and calls Open WebUI's selected `cutedisplay-ai` via a dedicated scoped service API key over verified HTTPS. This gateway is **not** an adaptation of the WebUI JWT bridge; it maintains an independent call session and limited context.
+
+**Committed source (branch `feature/realtime-call-c5v21`):**
+- `gateway/cute_realtime_gateway.py`: WSS listener with mode-0600 config; 256-bit per-device HMAC challenge using fresh random nonce; verified upstream transport; 24 kHz bidirectional binary PCM; provider VAD/STT, tool-call delegation to WebUI `cutedisplay-ai` via stable `sk-` API key, bounded outputs and disconnect handling. Plaintext upstream allowed **only on localhost loopback** for the Mac realtime provider; no unauthenticated LAN gateway.
+- `gateway/configure.py`: Mac interactive one-time service API key and provider settings; generates random device key for iOS app, never puts human password or 2FA code in firmware.
+- `gateway/create_lan_cert.py`: one-time two-year, DNS-SAN signed RSA certificate, private key mode 0600, public cert for S3 CA pinning.
+- `gateway/install_launchd.py`: run gateway at Mac user login without another manual sign-in (Mac must remain awake).
+- `gateway/verify_backend.py`: no-login API-key model test; `gateway/test_device_connect.py`: simulated S3 CA-verified HMAC and provider session readiness probe.
+- `gateway/test_gateway.py`, `gateway/test_voice_session.py`: automated local authentication, direct provider 24k PCM, transcription→selected-model function delegation→binary spoken output simulation.
+- `firmware/CuteDisplayBrain/BrainRealtime.h`: WebSockets 2.7.2 CA-validated WSS client and device HMAC; persistent S3 NVS gateway URL, CA PEM, device-only key, and explicit boot auto-join option; reconnect after Wi-Fi loss; **status-only; no S3 mic/speaker I2S active**.
+- `firmware/CuteDisplayBrain/CuteDisplayBrain.ino`: new encrypted BLE `RT:` command handler, initializes/ticks secure gateway client alongside untouched manual PTT and C5 transport.
+- `ios/CuteDisplay/ContentView.swift`: new Realtime Call setup UI, URL, Keychain-backed per-device secret, public CA certificate and explicit auto-join toggle, connect/disconnect/status/forget.
+- `ios/CuteDisplay/BluetoothManager.swift`: sends segmented credential and CA provisioning via existing sequential ACK-checked, encrypted BLE control characteristic FFF1.
+- `gateway/README.md`: comprehensive Mac Terminal and iPhone configuration workflow. Follow this guide for exact commands.
+
+**Current validation:**
+- Gateway Python syntax, offline HMAC tests and simulated upstream audio/model flow: PASS in GitHub Actions. iOS Swift parser: PASS (**not an Xcode build**).
+- Arduino combined S3/C5 firmware earlier compile for secure status client: PASS on commit `8f08df4738`. Subsequent reconnect/READY refinements may require a newer build; GitHub Actions may still be running. **No hardware tests or uploads.**
+- Existing hardware-tested immutable C5 v21 base untouched. Previous Mac French 1-turn, 2-turn and delegated model voice tests all PASS.
+- Full realtime S3 microphone/speaker, simultaneous I2S RX/TX and echo cancellation, C5 streaming captions, production privacy indicators, multi-turn model context and 24h history parity are not implemented / verified yet.
+
+**Next acceptance:** Setup Mac provider/gateway once, run `gateway/verify_backend.py` and `gateway/test_device_connect.py` without interactive Open WebUI login, then rebuild/flash **S3 experimental firmware only after a current-branch compile passes**, and validate WSS HMAC status/reconnect using the iPhone pairing UI. Continue manual PTT as fallback. After that, enable shared-clock 24k I2S duplex in a separate guarded hardware milestone. Do not claim true hands-free calls before that physical validation.
