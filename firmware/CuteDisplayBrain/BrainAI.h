@@ -35,6 +35,11 @@ static size_t historyCount=0;
 static String currentAnswer;
 static String voicePrompt;
 static bool voicePromptPending=false;
+// Single bounded result from a voice call's chat-model delegation (no extra TTS).
+static volatile bool callResultReady=false;
+static volatile bool callDelegated=false;
+static bool callResultOK=false;
+static String callResultText;
 static constexpr uint64_t CONVERSATION_LIFETIME_SECONDS=86400ULL;
 static uint64_t conversationStarted=0;
 static bool historyLoaded=false;
@@ -211,6 +216,7 @@ static esp_err_t event(esp_http_client_event_t *e){
  return ESP_OK;
 }
 inline void run(void*){
+ const bool delegated=callDelegated;
  Preferences prefs;String url,model,key,prompt;
  if(prefs.begin("brain-ai",true)){
   url=prefs.getString("url","");
@@ -226,6 +232,8 @@ inline void run(void*){
     prompt.isEmpty()){
   Serial.println("[AI] HTTPS, WiFi or saved configuration missing");
   report(WiFi.status()!=WL_CONNECTED?"WIFI_ERROR":"CONFIG_ERROR");
+  if(delegated){callResultText="";callResultOK=false;callResultReady=true;callDelegated=false;}
+  if(delegated){callResultText="";callResultOK=false;callResultReady=true;callDelegated=false;}
   sendPacket("AI_END","");
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
@@ -307,7 +315,14 @@ inline void run(void*){
  }else releaseText(true);
  if(!failed && doneSeen && !cancelRequested){
   rememberTurn(prompt,currentAnswer);
-  if(!BrainTTS::enqueue(currentAnswer))Serial.println("[TTS] Queue unavailable; text delivered");
+  if(!delegated && !BrainTTS::enqueue(currentAnswer))
+   Serial.println("[TTS] Queue unavailable; text delivered");
+ }
+ if(delegated){
+  callResultText=(!failed && doneSeen && !cancelRequested)?currentAnswer:String("");
+  callResultOK=!callResultText.isEmpty();
+  callResultReady=true;
+  callDelegated=false;
  }
  currentAnswer="";
  sendPacket("AI_END","");
@@ -329,6 +344,28 @@ inline bool start(){
   busy=false;worker=nullptr;return false;
  }
  return true;
+}
+// Only the Arduino websocket loop calls this. Never called from I2S.
+inline bool startCallDelegation(const String &prompt){
+ if(busy || callResultReady || prompt.isEmpty() || prompt.length()>1024)return false;
+ voicePrompt=prompt;voicePromptPending=true;
+ callResultText="";callResultOK=false;
+ callDelegated=true;
+ if(!start()){
+  voicePrompt="";voicePromptPending=false;callDelegated=false;
+  return false;
+ }
+ return true;
+}
+inline bool takeCallDelegation(String &answer,bool &success){
+ if(!callResultReady || busy)return false;
+ answer=callResultText;success=callResultOK;
+ callResultText="";callResultOK=false;callResultReady=false;
+ return true;
+}
+inline void cancelCallDelegation(){
+ if(callDelegated && busy)cancelRequested=true;
+ if(!busy){callResultReady=false;callResultText="";callDelegated=false;}
 }
 inline bool startWithPrompt(const String &prompt){
  if(busy || prompt.isEmpty() || prompt.length()>1024)return false;
