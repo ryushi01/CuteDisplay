@@ -51,7 +51,28 @@ jobs:
       - name: Compile direct WebUI realtime auth patch
         run: python -m py_compile server/patch_openwebui_realtime_api_key.py
       - name: Validate existing-Compose safe deployment and rollback script shell syntax
-        run: bash -n server/deploy_existing_openwebui.sh
+        run: |
+          bash -n server/deploy_existing_openwebui.sh
+          bash -n server/create_verified_openwebui_backup.sh
+      - name: Regression — never trust or restore a truncated gzip archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          printf 'valid known user data' > "$scratch/user-data.txt"
+          tar -czf "$scratch/valid.tar.gz" -C "$scratch" user-data.txt
+          gzip -t "$scratch/valid.tar.gz"
+          tar -tzf "$scratch/valid.tar.gz" >/dev/null
+          size="$(stat -c %s "$scratch/valid.tar.gz")"
+          head -c "$(( size - 4 ))" "$scratch/valid.tar.gz" > "$scratch/incomplete.tar.gz"
+          if gzip -t "$scratch/incomplete.tar.gz" >/dev/null 2>&1; then
+            echo "ERROR: truncated gzip passed integrity verification"
+            exit 1
+          fi
+          grep -Fq 'gzip -t "$BACKUP/openwebui-data.tar.gz.partial"' server/create_verified_openwebui_backup.sh
+          grep -Fq 'sudo sha256sum -c SHA256SUMS' server/deploy_existing_openwebui.sh
+          ! grep -Fq 'tar -czf "$BACKUP/openwebui-data.tar.gz"' server/deploy_existing_openwebui.sh
       - name: Regression — root-owned Compose backup must not block unprivileged chmod
         shell: bash
         run: |
