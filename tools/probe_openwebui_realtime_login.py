@@ -64,6 +64,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True, help="HTTPS Open WebUI public URL")
     parser.add_argument("--model", required=True, help="Server-configured chat model ID")
+    parser.add_argument("--audio-smoke", action="store_true", help="After 2FA, run a one-turn Mac mic/speaker test instead of ping-only probe")
     args = parser.parse_args()
     p = urlsplit(args.url.strip())
     if p.scheme != "https" or not p.hostname or p.username or p.password or p.query or p.fragment:
@@ -120,8 +121,8 @@ def main():
         return 1
     env = dict(os.environ)
     env["OPENWEBUI_SESSION_JWT"] = token
-    script = Path(__file__).with_name("probe_openwebui_realtime.py")
-    print("Authenticated; running WebSocket handshake test (no microphone/audio/LLM messages).", flush=True)
+    script = Path(__file__).with_name("realtime_audio_smoke.py" if args.audio_smoke else "probe_openwebui_realtime.py")
+    print("Authenticated; running " + ("one-turn microphone/speaker voice test" if args.audio_smoke else "WebSocket handshake test (no microphone/audio/LLM messages)") + ".", flush=True)
     return subprocess.run([sys.executable, str(script), "--url", base, "--model", args.model],
                           env=env, check=False).returncode
 
