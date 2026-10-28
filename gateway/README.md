@@ -1,3 +1,5 @@
+> **SUPERSEDED — NOT THE ACTIVE CUTEDISPLAY SETUP.** The user chose direct S3 → one existing Open WebUI HTTPS/WSS origin, with URL/model/API key configured once in the iPhone app. Do **not** follow this gateway setup for the current build. See [the single-URL architecture](../docs/REALTIME_SINGLE_OPENWEBUI_ENDPOINT.md). This directory is retained only as an experimental/reference prototype.
+
 # CuteDisplay Realtime Gateway — Phase 1 (experimental)
 
 **Status 2026-10-28: gateway source, iPhone encrypted BLE provisioning and S3 WSS pairing/status client committed.** The **S3 microphone/speaker are not yet streaming realtime PCM**: the prototype reports `RT:STATUS=READY` when the transport is connected; this does not mean microphone capture is active. These sources require hardware validation. Existing manual PTT/WAV/MP3, C5 v21 accents, UART OTA and BLE remain unchanged.
