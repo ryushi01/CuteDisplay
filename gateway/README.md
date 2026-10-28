@@ -1,6 +1,6 @@
 # CuteDisplay Realtime Gateway — Phase 1 (experimental)
 
-**Status 2026-10-28: gateway source, iPhone encrypted BLE provisioning and S3 WSS pairing/status client committed.** The **S3 microphone/speaker are not yet streaming realtime PCM**: do not mistake `RT:STATUS=LISTENING` for an active microphone. These sources require hardware validation. Existing manual PTT/WAV/MP3, C5 v21 accents, UART OTA and BLE remain unchanged.
+**Status 2026-10-28: gateway source, iPhone encrypted BLE provisioning and S3 WSS pairing/status client committed.** The **S3 microphone/speaker are not yet streaming realtime PCM**: the prototype reports `RT:STATUS=READY` when the transport is connected; this does not mean microphone capture is active. These sources require hardware validation. Existing manual PTT/WAV/MP3, C5 v21 accents, UART OTA and BLE remain unchanged.
 
 ## Why no Open WebUI password or 2FA for each call?
 
@@ -53,7 +53,18 @@ python gateway/configure.py \
 
 When prompted, enter the certificate path and private-key path created in step 2 and choose the gateway hostname and port **8766**. For S3 LAN reachability, explicitly use listen address `0.0.0.0` **only on a trusted private network**, with host firewall rules restricting access. The config file is created with mode **0600**; it contains the Open WebUI API key, upstream provider secret and the random S3 device key. It is ignored by Git. The wizard prints the distinct **64-character hex device pairing key** *once*. Enter that **device** key in the iPhone UI, never the WebUI API key.
 
-6. Start the gateway from **Mac Terminal** for the initial test:
+6. **Verify the dedicated API key** from Mac Terminal before starting the gateway. This performs one small French text query using `cutedisplay-ai` and proves unattended HTTP model access without a human login:
+
+```bash
+cd "$HOME/CuteDisplay-realtime-v21"
+source .venv-realtime/bin/activate
+python gateway/verify_backend.py \
+  --config "$HOME/.config/cutedisplay-gateway/private-config.json"
+```
+
+It should print `PASS: dedicated API key authenticated`. If you see 401/403 or a model access failure, grant the dedicated service account access to `cutedisplay-ai` in Open WebUI; do not disable MFA.
+
+7. Start the gateway from **Mac Terminal** for the initial test:
 
 ```bash
 cd "$HOME/CuteDisplay-realtime-v21"
@@ -64,7 +75,7 @@ python gateway/cute_realtime_gateway.py \
 
 The gateway listens with TLS and **rejects every client without a valid HMAC challenge response**. It uses the persistent service API key and does not request human 2FA. Leave this Terminal session running during the test.
 
-7. In a **second Mac Terminal**, run the same TLS/device authentication that the S3 firmware will use, before flashing:
+8. In a **second Mac Terminal**, run the same TLS/device authentication that the S3 firmware will use, before flashing:
 
 ```bash
 cd "$HOME/CuteDisplay-realtime-v21"
@@ -76,7 +87,7 @@ python gateway/test_device_connect.py \
 
 Success: `auth.ok`, `session.ready` at 24 kHz and `call.pong`. If it fails, the certificate/DNS/provider configuration must be repaired; **do not weaken TLS validation**.
 
-8. After the above succeeds, optional **LaunchAgent** (start gateway automatically when this Mac user logs in; no prompts):
+9. After the above succeeds, optional **LaunchAgent** (start gateway automatically when this Mac user logs in; no prompts):
 
 ```bash
 cd "$HOME/CuteDisplay-realtime-v21"
@@ -100,7 +111,7 @@ Open **Kitty AI → Realtime Call — One-Time Pairing** while connected to S3 o
 
 Tap **Pair realtime gateway to S3**, let the BLE queue complete, then **Connect gateway** and **Status**. The S3 connects WSS with hostname verification and proves the device key through HMAC. The credentials remain after S3 restart, and no human password/2FA needs to be reentered. Use **Forget gateway pairing on S3** to revoke the local key; for **full server revocation**, generate a different key on the Mac and reconfigure/restart the gateway.
 
-**Current hardware firmware is status-only:** on connected gateway it can display/report `LISTENING` although the actual I2S microphone is **not** started. Audio transport will be enabled only after shared-clock I2S RX/TX and echo-control bench tests. Until then, continue using manual PTT.
+**Current hardware firmware is status-only:** on connected gateway it can display/report `READY` when authenticated, but the actual I2S microphone is **not** started. Audio transport will be enabled only after shared-clock I2S RX/TX and echo-control bench tests. Until then, continue using manual PTT.
 
 ## What this design does not promise yet
 
