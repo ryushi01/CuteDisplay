@@ -117,7 +117,7 @@ sudo mv "$BACKUP/openwebui-data.tar.gz.partial" "$BACKUP/openwebui-data.tar.gz"
 sudo chmod 600 "$BACKUP/openwebui-data.tar.gz"
 (cd "$BACKUP" && sudo sha256sum openwebui-data.tar.gz) > "$BACKUP/SHA256SUMS"
 chmod 600 "$BACKUP/SHA256SUMS"
-(cd "$BACKUP" && sha256sum -c SHA256SUMS >/dev/null)
+(cd "$BACKUP" && sudo sha256sum -c SHA256SUMS >/dev/null)
 printf '%s\n' "verified: gzip, tar, SHA256" > "$BACKUP/BACKUP_VERIFIED"
 chmod 600 "$BACKUP/BACKUP_VERIFIED"
 
