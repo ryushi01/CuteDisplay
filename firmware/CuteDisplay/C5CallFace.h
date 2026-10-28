@@ -180,7 +180,8 @@ static void drawFullScreenKittyFace(){
  String label=listening?"LISTENING":thinking?"THINKING":
               speaking?"SPEAKING":connecting?"CONNECTING":"CALL";
  int width=label.length()*6+24;
- int x=(LCD_W-width)/2;
+ // Lower-left capsule, deliberately away from the center lip-sync mouth.
+ int x=11;
  oval(x+8,160,8,8,CF_INK);oval(x+width-8,160,8,8,CF_INK);
  rect(x+8,152,width-16,17,CF_INK);
  textAt(label,x+12,155,1,CF_WHITE);
