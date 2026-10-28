@@ -53,8 +53,13 @@ No camera/SD integration is enabled in this experiment.
 2. With Call Mode OFF, run existing 'audio diagnose' and 'audio test' over S3 USB
    serial to confirm both microphone and speaker channels already work.
 3. Configure modest audio levels, e.g. mic=100%, speaker=25%, before the call.
-4. Flash dev S3 and C5 v22 as one matched pair ONLY after reviewing CI artifacts.
-5. Short-tap left button; expect Connecting -> Listening. Talk briefly, then
+4. Safer first bench test: flash ONLY the experimental S3 firmware while keeping
+   stable C5 v21 unchanged; over USB Serial Monitor at 115200 baud use 'call start',
+   'call status', then 'call stop'. The USB commands never expose the saved key.
+   The C5 v21 button must not be used to toggle Call Mode in this interim test.
+5. For the button milestone, flash dev S3 and C5 v22 as one matched pair ONLY
+   after reviewing CI artifacts and confirming a tested v21 recovery path.
+   Short-tap left button; expect Connecting -> Listening. Talk briefly, then
    expect Thinking -> Speaking and audible response. Short tap ends immediately.
 6. Retest original PTT long-hold outside Call Mode; test Wi-Fi loss and reconnect.
 7. Verify that the iPhone app login still uses its usual 2FA only when needed;
