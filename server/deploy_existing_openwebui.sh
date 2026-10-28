@@ -18,19 +18,12 @@ sudo docker info >/dev/null
 sudo docker compose version >/dev/null
 sudo docker image inspect "$ORIGINAL" >/dev/null
 sudo docker image inspect "$CANDIDATE" >/dev/null
-# Do not print resolved Compose config: it may contain passwords.
-sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" config --format json | python3 -c '
-import json,sys
-cfg=json.load(sys.stdin)
-s=cfg["services"]["open-webui"]
-assert s.get("image")=="ghcr.io/open-webui/open-webui:main", "Original Compose image differs"
-vols=[v for v in s.get("volumes",[]) if v.get("target")=="/app/backend/data"]
-assert len(vols)==1 and vols[0].get("type")=="volume", "Unexpected data mount"
-source=vols[0]["source"]
-assert cfg.get("volumes",{}).get(source,{}).get("name",source)=="open-webui", "Unexpected volume name"
-assert any(str(v.get("published"))=="8080" and int(v.get("target",0))==8080 for v in s.get("ports",[])), "Unexpected port"
-print("PASS: same project, same WebUI port 8080, same open-webui persistent volume")
-'
+# Do not print resolved Compose config: it can contain passwords.
+# Map logical Compose volume aliases to the effective Docker volume name.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" config --format json |
+  python3 "$SCRIPT_DIR/check_openwebui_compose_config.py" \
+    --expected-image ghcr.io/open-webui/open-webui:main
 IMAGE="$(sudo docker inspect "$SERVICE" --format '{{.Config.Image}}')"
 STATE="$(sudo docker inspect "$SERVICE" --format '{{.State.Status}}')"
 VOLUME="$(sudo docker inspect "$SERVICE" --format '{{range .Mounts}}{{if eq .Destination "/app/backend/data"}}{{.Name}}{{end}}{{end}}')"
@@ -67,13 +60,11 @@ OVERRIDE
 # docker-compose.yaml was copied with sudo install and is root-owned mode 600.
 # Only chmod override files written by the unprivileged ryushi account.
 chmod 600 "$BACKUP/candidate.yaml" "$BACKUP/rollback.yaml"
-# Verify replacement keeps exactly the same persistent data mapping.
-sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" -f "$BACKUP/candidate.yaml" config --format json | python3 -c '
-import json,sys
-svc=json.load(sys.stdin)["services"]["open-webui"]
-assert svc["image"]=="cutedisplay/openwebui:realtime-apikey-candidate"
-assert any(v.get("source")=="open-webui" and v.get("target")=="/app/backend/data" for v in svc["volumes"])
-'
+# Verify the effective Docker data volume, original port and candidate
+# image before stopping anything. A Compose volume alias is not its Docker name.
+sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" -f "$BACKUP/candidate.yaml" config --format json |
+  python3 "$SCRIPT_DIR/check_openwebui_compose_config.py" \
+    --expected-image "$CANDIDATE"
 AVAILABLE="$(df -Pk "$BACKUP" | awk 'NR==2{print $4}')"
 SIZE="$(sudo du -sk "$DATA" | awk '{print $1}')"
 if (( AVAILABLE < SIZE + 102400 )); then
