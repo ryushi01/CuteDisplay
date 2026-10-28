@@ -1,4 +1,4 @@
-# CuteDisplay — realtime update package (S3 + iPhone; C5 v21 protected)
+# CuteDisplay — realtime update package (iPhone + S3 + automatic C5 v22 OTA)
 
 **Release status:** S3 and iPhone source compile in CI. Real board-level
 realtime audio remains unverified until the single acceptance session below.
@@ -6,11 +6,11 @@ realtime audio remains unverified until the single acceptance session below.
 ## What the package contains
 
 - `CuteDisplayBrain/`: generated upload-ready S3 Arduino sketch and headers,
-  including its embedded C5 v22 image. **The embedded image is NOT automatically applied.**
+  including its embedded C5 v22 image. **The S3 automatically applies the C5 update when newer.**
 - `S3-Brain-includes-C5-v22-application.bin`: compiled S3 app binary. Application
   only; do not flash at address 0x0. Prefer Arduino IDE Upload.
-- `C5-v22-application.bin`: OPTIONAL C5 development application for later;
-  **do not upload for the first test**.
+- `C5-v22-application.bin`: C5 app also embedded for automatic UART OTA;
+  a direct C5 USB flash is unnecessary when your C5 already has OTA.
 - `iPhone-app/ContentView.swift` and `iPhone-app/BluetoothManager.swift`:
   replace the corresponding source files in the *existing* Xcode project.
 - `REALTIME_I2S_AUDIO_EXPERIMENT.md`: hardware wiring and technical limitations.
@@ -37,10 +37,11 @@ realtime audio remains unverified until the single acceptance session below.
    only after the actual S3 nonvolatile-storage ACK arrives.
    For future key rotations use **Update API Key on S3**; URL/model stay intact.
 
-## 2. Install ONLY the S3 firmware
+## 2. Upload S3; C5 updates automatically
 
-1. Back up your stable hardware-tested v21 recovery files and current S3
-   sketch/binary before changing anything. Do not upload the C5 v22 image.
+1. Back up your stable hardware-tested C5 v21 recovery files and current S3
+   sketch/binary. S3 automatically upgrades a connected C5 v21 to bundled
+   experimental v22 after upload, as with your previous combined releases.
 2. Connect the **Freenove ESP32-S3** to Mac USB. If a separate 5V power
    bridge also connects the boards, avoid unintended dual-source power.
 3. In Arduino IDE, install ESP32 board core **3.3.12**, **ESP8266Audio 2.4.1**
@@ -53,7 +54,9 @@ realtime audio remains unverified until the single acceptance session below.
    Use your existing known-good USB/CDC and upload-port configuration.
 6. Do not enable **Erase All Flash Before Sketch Upload**: that would
    remove stored Wi-Fi/Open WebUI credentials. Click **Upload** to the S3.
-7. If your iPhone app was connected, reconnect to S3 BLE after the reboot.
+7. Monitor S3 serial output for automatic version-checked C5 OTA, then
+   `SUCCESS: new display firmware confirmed after reboot`. Reconnect iPhone
+   to S3 BLE after reboot. Do not start a call during an OTA update.
 
 ## 3. ONE acceptance session: S3 audio + server + selected chat model
 
@@ -65,7 +68,7 @@ Use these commands **in this order**:
     call start
     call status
 
-Expected: `approved=0` (C5 v21 protected), `PREFLIGHT_PASS`,
+Expected: C5 reports v22 and OTA is complete, `PREFLIGHT_PASS`,
 `CALL_CONNECTING`, a `[CALL] I2S 24kHz duplex active` line, then
 `CALL_LISTENING`.
 
@@ -90,24 +93,20 @@ Copy the S3 Serial Monitor log (without any credentials) including
 `call diagnose`, `call status`, and error lines. The cause should then be
 isolated to local config, network/provider, I2S wiring/timing, or audio queue.
 
-## 4. Optional: enable short-press Call Mode on the C5
+## 4. C5 left-button Call Mode
 
-Only AFTER the above S3 session succeeds and you have v21 recovery:
-
-    c5 ota enable
-
-This single USB-only command permits the **embedded experimental C5 v22**
-UART OTA when idle. The approval resets on every S3 restart. Verify
-the OTA completes and C5 reports v22 before testing buttons.
-The C5 v22 left-button short tap then toggles Call Mode; long-hold
-manual PTT still works while Call Mode is OFF. Do not use this for stage 3.
+The matching C5 v22 update is applied **automatically** when newer than
+the installed C5 firmware and the S3/C5 are idle. The C5 v22 left-button
+short tap toggles Call Mode; long-hold manual PTT still works while
+Call Mode is OFF. There is NO manual OTA enable command.
 
 ## Safety and limitations
 
 - Existing Open WebUI HTTPS host/port and login/2FA are unchanged.
 - No new gateway, password/OTP or server deployment is required.
-- C5 update is explicitly disabled by default. Do not use `c5 ota enable`
-  during the first hardware test.
+- Automatic C5 OTA is restored as requested, with version comparison,
+  image verification, and post-reboot version confirmation. Save a C5 v21
+  recovery image before uploading S3, because C5 v22 is experimental.
 - No echo cancellation or barge-in; mic is muted during speaker playback.
 - iOS app source was syntax-checked, **not** installed on your personal phone.
 - Arduino CI verifies compilation, not real-world audio correctness.
@@ -118,8 +117,8 @@ manual PTT still works while Call Mode is OFF. Do not use this for stage 3.
 
 Stop any live call with `call stop`. If the S3 firmware misbehaves,
 re-upload your previously saved stable S3 sketch/build with Arduino IDE
-without erasing flash. C5 remains v21 unless you explicitly opted into
-`c5 ota enable`. If you opted in, use your saved C5 v21 recovery route.
+without erasing flash. C5 may already be v22 after automatic OTA; use
+saved C5 v21 recovery through direct C5 USB flashing if needed.
 
 ## Pinout check (unchanged)
 
