@@ -607,6 +607,9 @@ final class BluetoothManager: NSObject, ObservableObject {
         awaitingBrainAck = false
         brainWriteComplete = false
         brainResponse = nil
+        aiProvisioningField = nil
+        activeKeyCommit = false
+        brainAIKeyStatus = "Not verified on S3 in this session"
         brainReadyReadAttempts = 0
         bleCommandGeneration += 1  // Invalidate any pending ACK timeout.
         peripheral = nil
