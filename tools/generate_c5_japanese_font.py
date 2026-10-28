@@ -8,6 +8,8 @@ from PIL import Image, ImageFont, ImageDraw
 
 def repertoire():
     chars=set()
+    # Render chat ASCII from the SAME face as accented Latin, not 5x7.
+    chars.update(range(0x20, 0x7F))
     # JIS X 0208: hiragana, katakana, punctuation and all standard kanji.
     for hi in list(range(0x81,0xA0))+list(range(0xE0,0xF0)):
         for lo in range(0x40,0xFD):
@@ -66,11 +68,13 @@ def main():
             img=Image.new("L",(16,16),0)
             d=ImageDraw.Draw(img)
             # Anchor glyph to top/left with consistent 16px CJK advances.
-            d.text((0,0),chr(cp),fill=255,font=font,anchor="lt")
+            d.text((0,0),chr(cp),fill=255,font=font,anchor="lt",
+                   stroke_width=1 if (0x21 <= cp <= 0x024F or 0x1E00 <= cp <= 0x1EFF) else 0,
+                   stroke_fill=255)
             # Western Latin bitmaps occupy less ink than the native 5x7
             # uppercase font enlarged 2x. Normalize ink height, including
             # accents, to make É/À/Ç/Œ visually consistent with ASCII.
-            if (0x00A0 <= cp <= 0x024F) or (0x1E00 <= cp <= 0x1EFF):
+            if (0x21 <= cp <= 0x024F) or (0x1E00 <= cp <= 0x1EFF):
                 bbox=img.getbbox()
                 if bbox:
                     crop=img.crop(bbox)
