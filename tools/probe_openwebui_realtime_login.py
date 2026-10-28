@@ -65,6 +65,7 @@ def main():
     parser.add_argument("--url", required=True, help="HTTPS Open WebUI public URL")
     parser.add_argument("--model", required=True, help="Server-configured chat model ID")
     parser.add_argument("--audio-smoke", action="store_true", help="After 2FA, run a one-turn Mac mic/speaker test instead of ping-only probe")
+    parser.add_argument("--two-turn", action="store_true", help="After 2FA, test two sequential speech turns on one WebSocket")
     args = parser.parse_args()
     p = urlsplit(args.url.strip())
     if p.scheme != "https" or not p.hostname or p.username or p.password or p.query or p.fragment:
@@ -121,8 +122,16 @@ def main():
         return 1
     env = dict(os.environ)
     env["OPENWEBUI_SESSION_JWT"] = token
-    script = Path(__file__).with_name("realtime_audio_smoke.py" if args.audio_smoke else "probe_openwebui_realtime.py")
-    print("Authenticated; running " + ("one-turn microphone/speaker voice test" if args.audio_smoke else "WebSocket handshake test (no microphone/audio/LLM messages)") + ".", flush=True)
+    if args.audio_smoke and args.two_turn:
+        parser.error("--audio-smoke and --two-turn cannot be combined")
+    script_name = ("realtime_two_turn_smoke.py" if args.two_turn else
+                   "realtime_audio_smoke.py" if args.audio_smoke else
+                   "probe_openwebui_realtime.py")
+    script = Path(__file__).with_name(script_name)
+    task_label = ("two-turn realtime speech test" if args.two_turn else
+                  "one-turn microphone/speaker voice test" if args.audio_smoke else
+                  "WebSocket handshake test (no microphone/audio/LLM messages)")
+    print("Authenticated; running " + task_label + ".", flush=True)
     return subprocess.run([sys.executable, str(script), "--url", base, "--model", args.model],
                           env=env, check=False).returncode
 
