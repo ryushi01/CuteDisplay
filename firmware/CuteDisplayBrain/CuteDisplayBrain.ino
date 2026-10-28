@@ -32,6 +32,7 @@
 #include "BrainVoiceSTT.h"
 #include "BrainClock.h"
 #include "BrainAI.h"
+#include "BrainRealtime.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr char S3_FW_VERSION[]="Phase7-S3-AI-STREAM-BLE-DIAGNOSTIC";
@@ -677,6 +678,17 @@ static void pollBLECommands(){
   proxyResult(BrainClock::configure(incoming)?"ACK:TIME_ZONE":"ERR:TIME_ZONE");
   return;
  }
+ if(incoming.startsWith("RT:")){
+  String reply;
+  if(incoming=="RT:START" && (BrainVoiceSTT::running || BrainTTS::running || BrainAudioTest::running || BrainC5OTA::updating())){
+   proxyResult("ERR:RT_AUDIO_BUSY");return;
+  }
+  if(BrainRealtime::provision(incoming,reply)){
+   // Never print RT:DATA (device key or PEM), or any RT provisioning payload.
+   proxyResult(reply);return;
+  }
+  proxyResult("ERR:RT_UNKNOWN");return;
+ }
  if(incoming.startsWith("AI:")){
   String result;
   if(BrainAI::provision(incoming,result)){
@@ -983,6 +995,7 @@ void setup(){
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
  BrainAI::init();
+ BrainRealtime::init();
  BrainTTS::init();
  BrainVoiceSTT::init();
  BrainClock::init();
@@ -1090,6 +1103,9 @@ void loop(){
   }
  }
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
+ // TLS/WebSocket device auth only. No realtime mic/speaker I2S ownership yet.
+ BrainRealtime::tick(BrainVoiceSTT::running || BrainTTS::running ||
+                     BrainAudioTest::running || BrainC5OTA::updating());
  if(pendingC5VoiceStart && !BrainTTS::running){
   pendingC5VoiceStart=false;
   if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy)
