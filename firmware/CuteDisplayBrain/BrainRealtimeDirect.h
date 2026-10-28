@@ -18,6 +18,7 @@
 #include "BrainClock.h"
 #include "BrainAudioTest.h"
 #include "BrainRealtimeAudio.h"
+#include "BrainAI.h"
 
 namespace BrainRealtimeDirect {
 extern const uint8_t ca_bundle_start[] asm("_binary_x509_crt_bundle_start");
@@ -25,6 +26,8 @@ extern const uint8_t ca_bundle_end[] asm("_binary_x509_crt_bundle_end");
 static WebSocketsClient ws;
 static bool requested=false, started=false, connected=false, ready=false;
 static bool remoteResponse=false, streamedSpeech=false;
+static String delegatedCallId, animationResponseId;
+// C5 does not have to implement any new server protocol; only S3 owns it.
 static constexpr size_t MAX_EVENT_BYTES=65536;
 static uint32_t lastAttempt=0, lastPing=0;
 static String url, model, key;
@@ -32,6 +35,34 @@ static String state="CALL_OFF";
 static constexpr uint32_t RECONNECT_DELAY=10000;
 static constexpr uint32_t PING_INTERVAL=20000;
 
+// JSON sent only from the Arduino loop and WebSocket callback (same core).
+inline bool sendEvent(cJSON *obj){
+ if(!obj)return false;
+ char *body=cJSON_PrintUnformatted(obj);
+ cJSON_Delete(obj);
+ if(!body)return false;
+ const bool ok=ws.sendTXT(body);
+ free(body);
+ return ok;
+}
+inline bool bridgeRespond(const char *which,const String &id){
+ if(id.isEmpty()||id.length()>160)return false;
+ cJSON *event=cJSON_CreateObject();
+ if(!event)return false;
+ cJSON_AddStringToObject(event,"type","bridge.respond");
+ cJSON_AddStringToObject(event,which,id.c_str());
+ return sendEvent(event);
+}
+inline bool bridgeResult(const String &id,const char *outcome,const String &answer){
+ if(id.isEmpty()||id.length()>160 || answer.length()>1600)return false;
+ cJSON *event=cJSON_CreateObject();
+ if(!event)return false;
+ cJSON_AddStringToObject(event,"type","bridge.result");
+ cJSON_AddStringToObject(event,"call_id",id.c_str());
+ cJSON_AddStringToObject(event,"status",outcome);
+ cJSON_AddStringToObject(event,"answer",answer.c_str());
+ return sendEvent(event);
+}
 inline bool active(){return requested;}
 inline bool isReady(){return requested&&ready;}
 inline String activity(){return state;}
@@ -79,6 +110,7 @@ inline void diagnose(bool audioBusy){
 inline void stop(){
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
+ delegatedCallId="";animationResponseId="";BrainAI::cancelCallDelegation();
  BrainRealtimeAudio::stop();
  ws.disconnect();
  status("CALL_OFF");
@@ -88,6 +120,7 @@ inline void fail(const char *why){
  // Stop retries on rejected credentials, unexpected PCM or incompatible server.
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
+ delegatedCallId="";animationResponseId="";BrainAI::cancelCallDelegation();
  BrainRealtimeAudio::stop();
  ws.disconnect();
  status("CALL_ERROR");
@@ -95,6 +128,7 @@ inline void fail(const char *why){
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
+  delegatedCallId="";animationResponseId="";BrainAI::cancelCallDelegation();
   BrainRealtimeAudio::stop();
   if(requested)status("CALL_CONNECTING");
   return;
@@ -146,10 +180,69 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  }else if(strcmp(type,"response.done")==0){
   remoteResponse=false;
   BrainRealtimeAudio::setRemoteReply(false);
+  if(!animationResponseId.isEmpty()){
+   cJSON *response=cJSON_GetObjectItem(json,"response");
+   cJSON *rid=cJSON_GetObjectItem(response,"id");
+   if(cJSON_IsString(rid) && animationResponseId==rid->valuestring){
+    if(!bridgeRespond("response_id",animationResponseId))
+      failure="ANIMATION_CONTINUE";
+    animationResponseId="";
+   }
+  }
  }else if(strcmp(type,"input_audio_buffer.speech_started")==0){
   if(!remoteResponse)status("CALL_LISTENING");
  }else if(strcmp(type,"input_audio_buffer.speech_stopped")==0){
   status("CALL_THINKING");
+ }else if(strcmp(type,"conversation.item.input_audio_transcription.completed")==0){
+  cJSON *id=cJSON_GetObjectItem(json,"item_id");
+  cJSON *transcript=cJSON_GetObjectItem(json,"transcript");
+  if(cJSON_IsString(id) && cJSON_IsString(transcript) &&
+     transcript->valuestring && transcript->valuestring[0] &&
+     !remoteResponse && delegatedCallId.isEmpty()){
+   // Open WebUI turn_detection explicitly sets create_response=false.
+   // Without bridge.respond the user would never get a spoken answer.
+   if(!bridgeRespond("item_id",String(id->valuestring)))
+    failure="VOICE_TURN_REQUEST";
+   else status("CALL_THINKING");
+  }
+ }else if(strcmp(type,"conversation.item.input_audio_transcription.failed")==0){
+  status("CALL_LISTENING");
+ }else if(strcmp(type,"response.output_item.done")==0){
+  cJSON *item=cJSON_GetObjectItem(json,"item");
+  cJSON *kind=cJSON_GetObjectItem(item,"type");
+  cJSON *name=cJSON_GetObjectItem(item,"name");
+  cJSON *state=cJSON_GetObjectItem(item,"status");
+  cJSON *id=cJSON_GetObjectItem(item,"call_id");
+  if(cJSON_IsString(kind)&&strcmp(kind->valuestring,"function_call")==0 &&
+     cJSON_IsString(name)&&cJSON_IsString(state)&&
+     strcmp(state->valuestring,"completed")==0 && cJSON_IsString(id)){
+   String callId(id->valuestring);
+   if(strcmp(name->valuestring,"generate_chat_completion")==0){
+    cJSON *arg=cJSON_GetObjectItem(item,"arguments");
+    cJSON *args=cJSON_IsString(arg)?cJSON_Parse(arg->valuestring):nullptr;
+    cJSON *request=cJSON_GetObjectItem(args,"request");
+    String prompt=cJSON_IsString(request)?String(request->valuestring):String("");
+    if(args)cJSON_Delete(args);
+    // The realtime voice engine delegates substantive questions to the
+    // SAME saved Open WebUI chat model. No second server or key.
+    if(!delegatedCallId.isEmpty() || prompt.isEmpty() ||
+       !BrainAI::startCallDelegation(prompt)){
+     if(!bridgeResult(callId,"failed","I could not start the chat model. Please try again.")||
+        !bridgeRespond("call_id",callId))failure="DELEGATION_REJECTED";
+    }else{
+     delegatedCallId=callId;
+     status("CALL_THINKING");
+    }
+   }else if(strcmp(name->valuestring,"play_animation")==0){
+    cJSON *out=cJSON_CreateObject();
+    cJSON_AddStringToObject(out,"type","bridge.animation.result");
+    cJSON_AddStringToObject(out,"call_id",callId.c_str());
+    cJSON_AddStringToObject(out,"status","unavailable");
+    cJSON *rid=cJSON_GetObjectItem(json,"response_id");
+    if(cJSON_IsString(rid))animationResponseId=rid->valuestring;
+    if(!sendEvent(out))failure="ANIMATION_RESULT";
+   }
+  }
  }else if(strcmp(type,"response.output_audio.delta")==0 ||
           strcmp(type,"response.audio.delta")==0){
   cJSON *delta=cJSON_GetObjectItem(json,"delta");
@@ -219,7 +312,7 @@ inline bool connect(){
 }
 inline void init(){
  requested=false;started=false;connected=false;ready=false;
- remoteResponse=false;streamedSpeech=false;
+ remoteResponse=false;streamedSpeech=false;delegatedCallId="";animationResponseId="";
  status("CALL_OFF");
 }
 inline bool toggle(bool audioBusy){
@@ -252,6 +345,19 @@ inline void tick(bool audioBusy){
  }
  ws.loop();
  if(!requested)return; // A callback may have rejected the session.
+ if(!delegatedCallId.isEmpty()){
+  String answer;
+  bool ok=false;
+  if(BrainAI::takeCallDelegation(answer,ok)){
+   String doneId=delegatedCallId;
+   delegatedCallId="";
+   if(!bridgeResult(doneId,ok?"completed":"failed",answer)||
+      !bridgeRespond("call_id",doneId)){
+    fail("DELEGATION_RESULT_SEND");return;
+   }
+   status("CALL_THINKING");
+  }
+ }
  if(ready){
   if(BrainRealtimeAudio::failed()){fail("I2S_RUNTIME");return;}
   if(BrainRealtimeAudio::initialized()){
