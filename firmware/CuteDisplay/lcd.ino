@@ -2081,8 +2081,17 @@ void drawMessage() {
  drawConnectivityHUD();
  // Bottom-left unobtrusive activity label at HUD font scale.
  if(!kittyActivity.isEmpty()){
+  // The CALL_ prefix is retained internally for button state, but the HUD
+  // shows a readable short word in the existing narrow bottom-left region.
+  String label=kittyActivity;
+  if(label=="CALL_LISTENING")label="Listening";
+  else if(label=="CALL_THINKING")label="Thinking";
+  else if(label=="CALL_SPEAKING")label="Speaking";
+  else if(label=="CALL_CONNECTING")label="Connecting";
+  else if(label=="CALL_READY")label="Call ready";
+  else if(label=="CALL_ERROR")label="Call error";
   rect(0,LCD_H-13,104,13,BLACK);
-  textAt(kittyActivity,3,LCD_H-11,1,0x07FF);
+  textAt(label,3,LCD_H-11,1,0x07FF);
  }
  // Must be LAST so the warning cannot be covered by any other overlay,
  // including battery/charging popups or mascot animations.
