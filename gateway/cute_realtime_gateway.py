@@ -133,7 +133,11 @@ class Settings:
                all(c in "0123456789abcdefABCDEF" for c in self.device_key),
                "Require a random 32-byte device key")
         validate_url(self.webui_url, schemes={"https"})
-        validate_url(self.upstream_url, schemes={"wss"})
+        upstream = validate_url(self.upstream_url, schemes={"wss", "ws"})
+        # Plaintext is only acceptable on the exact same machine for the
+        # private local provider; never over Mac/Ubuntu LAN or the internet.
+        demand(upstream.scheme != "ws" or upstream.hostname in {"127.0.0.1", "localhost", "::1"},
+               "Plaintext upstream WS is loopback-only; use WSS for network peers")
         demand(self.webui_api_key.startswith("sk-") and len(self.webui_api_key) > 20,
                "Provide a dedicated Open WebUI sk- API key")
         demand(self.voice and self.transcription_model and self.webui_model,
@@ -347,12 +351,14 @@ async def voice_session(device_ws, settings):
                         }))
                 elif kind == "response.output_audio.delta":
                     pcm = base64.b64decode(event.get("delta", ""), validate=True)
-                    demand(len(pcm) <= FRAME_LIMIT and len(pcm) % 2 == 0,
+                    demand(bool(pcm) and len(pcm) % 2 == 0,
                            "Invalid speaker audio")
                     current_audio_bytes += len(pcm)
                     demand(current_audio_bytes <= RATE * 2 * 180,
                            "Response exceeded 3 minutes")
-                    await device_ws.send(pcm)
+                    # Bound every outbound binary frame to 100ms of PCM.
+                    for offset in range(0, len(pcm), 4800):
+                        await device_ws.send(pcm[offset:offset + 4800])
                     await device_ws.send(json.dumps({"type": "state", "value": "SPEAKING"}))
                 elif kind == "response.output_item.done":
                     item = event.get("item") or {}
