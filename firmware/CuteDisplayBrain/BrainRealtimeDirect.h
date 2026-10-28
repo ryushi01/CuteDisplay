@@ -401,7 +401,8 @@ inline void tick(bool audioBusy){
    }
    if(BrainRealtimeAudio::hasSpeakerAudio() || (streamedSpeech&&remoteResponse)){
     status("CALL_SPEAKING");
-   }else if(remoteResponse){
+   }else if(remoteResponse || !delegatedCallId.isEmpty() ||
+             !failedCallId.isEmpty()){
     status("CALL_THINKING");
    }else{
     streamedSpeech=false;
