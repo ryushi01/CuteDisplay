@@ -52,3 +52,14 @@ jobs:
         run: python -m py_compile server/patch_openwebui_realtime_api_key.py
       - name: Test version guard and API-key permission delegation
         run: python -m unittest discover -s server -p 'test_*.py' -v
+      - name: Compile patch against actual upstream Open WebUI source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/owui-src/backend/open_webui/routers/audio
+          curl --fail --show-error --silent --location \
+            https://raw.githubusercontent.com/open-webui/open-webui/main/backend/open_webui/routers/audio/realtime.py \
+            -o /tmp/owui-src/backend/open_webui/routers/audio/realtime.py
+          python server/patch_openwebui_realtime_api_key.py --source-root /tmp/owui-src --check
+          python server/patch_openwebui_realtime_api_key.py --source-root /tmp/owui-src --apply
+          python -m py_compile /tmp/owui-src/backend/open_webui/routers/audio/realtime.py
