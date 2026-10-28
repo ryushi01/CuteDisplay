@@ -69,9 +69,9 @@ inline void diagnose(bool audioBusy){
  reload();
  const char *err=preflightError();
  if(audioBusy)Serial.println("[CALL] DIAG: AUDIO_BUSY");
- else if(err)Serial.printf("[CALL] DIAG: %s\\n",err);
+ else if(err)Serial.printf("[CALL] DIAG: %s\n",err);
  else Serial.println("[CALL] DIAG: PREFLIGHT_PASS");
- Serial.printf("[CALL] DIAG: wifi_connected=%d clock_valid=%d url_configured=%d model_configured=%d sk_key_format=%d audio_busy=%d\\n",
+ Serial.printf("[CALL] DIAG: wifi_connected=%d clock_valid=%d url_configured=%d model_configured=%d sk_key_format=%d audio_busy=%d\n",
   WiFi.status()==WL_CONNECTED?1:0,BrainClock::valid()?1:0,
   !url.isEmpty()?1:0,!model.isEmpty()?1:0,
   key.startsWith("sk-")&&key.length()>20?1:0,audioBusy?1:0);
@@ -182,7 +182,7 @@ inline bool connect(){
  reload();
  if(!valid()){
   const char *reason=preflightError();
-  Serial.printf("[CALL] PREFLIGHT REFUSED: %s\\n",reason?reason:"UNKNOWN");
+  Serial.printf("[CALL] PREFLIGHT REFUSED: %s\n",reason?reason:"UNKNOWN");
   status("CALL_ERROR");return false;
  }
  int end=url.indexOf('/',8);
