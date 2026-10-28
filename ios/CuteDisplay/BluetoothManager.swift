@@ -663,44 +663,40 @@ final class BluetoothManager: NSObject, ObservableObject {
         status = "Sending AI prompt to S3 Brain (\(commands.count) commands)"
     }
 
-    // One-time realtime gateway pairing. Only a device-scoped secret is sent
-    // across the existing encrypted Brain BLE transport, never WebUI login/MFA.
-    // This command path deliberately refuses LAN fallback for secret provisioning.
-    func provisionRealtimeGateway(url: String, deviceSecret: String,
-                                  caCertificate: String, autoJoin: Bool) {
+    // Save the ONE Open WebUI server URL, selected model and revocable API key
+    // to S3 NVS over the existing encrypted BLE command channel.
+    // No AI:GO here: provisioning must not start a chat or speak.
+    func saveBrainAIConnection(url: String, model: String, key: String) {
         guard bleReady() else {
-            status = "Realtime setup requires Brain encrypted Bluetooth"
+            status = "Open WebUI settings require connected Brain Bluetooth"
             return
         }
-        let urlValue = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        let keyValue = deviceSecret.trimmingCharacters(in: .whitespacesAndNewlines)
-        let caValue = caCertificate.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-        guard urlValue.hasPrefix("wss://"), !urlValue.contains("@"),
-              !urlValue.contains("#"), !urlValue.contains("?"),
-              urlValue.utf8.count <= 256,
-              keyValue.utf8.count == 64 && keyValue.allSatisfy({ $0.isHexDigit }),
-              caValue.contains("-----BEGIN CERTIFICATE-----"),
-              caValue.contains("-----END CERTIFICATE-----"),
-              caValue.utf8.count <= 4096 else {
-            status = "Enter valid WSS hostname, 64-hex device secret and public CA PEM"
+        let server = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelID = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secret = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard server.hasPrefix("https://"), !server.contains("@"),
+              !server.contains("#"), !server.contains("?"),
+              server.utf8.count <= 256, modelID.utf8.count <= 128,
+              !modelID.isEmpty, secret.hasPrefix("sk-"),
+              secret.utf8.count <= 8192 else {
+            status = "Enter valid HTTPS Open WebUI URL, model and sk- API key"
             return
         }
-        let fields = [("U", urlValue), ("S", keyValue), ("C", caValue)]
+        let fields = [("U", server), ("M", modelID), ("K", secret)]
         var commands: [String] = []
-        for (name, value) in fields {
+        for (field, value) in fields {
             let bytes = Array(value.utf8)
-            commands.append("RT:BEGIN:\(name):\(bytes.count)")
+            commands.append("AI:BEGIN:\(field):\(bytes.count)")
             for offset in stride(from: 0, to: bytes.count, by: 40) {
-                let fragment = bytes[offset..<min(bytes.count, offset + 40)]
-                commands.append("RT:DATA:" + fragment.map {
+                let part = bytes[offset..<min(bytes.count, offset + 40)]
+                commands.append("AI:DATA:" + part.map {
                     String(format: "%02X", $0)
                 }.joined())
             }
-            commands.append("RT:END")
+            commands.append("AI:END")
         }
-        commands.append("RT:AUTO:\(autoJoin ? 1 : 0)")
         enqueue(commands)
-        status = "Sending one-time Realtime pairing to S3 (\(commands.count) steps)"
+        status = "Saving one Open WebUI connection to S3 (\(commands.count) BLE commands)"
     }
 
     // Wi-Fi credentials are provisioned over the connected BLE link.
