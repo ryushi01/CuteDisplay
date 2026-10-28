@@ -10,6 +10,7 @@ on:
       - 'tools/realtime_audio_smoke.py'
       - 'tools/realtime_two_turn_smoke.py'
       - 'tools/realtime_model_delegation_smoke.py'
+      - 'tools/probe_openwebui_realtime_key.py'
       - '.github/workflows/validate-realtime-tools.yml'
   workflow_dispatch:
 
@@ -29,7 +30,8 @@ jobs:
             tools/probe_openwebui_realtime_login.py \
             tools/realtime_audio_smoke.py \
             tools/realtime_two_turn_smoke.py \
-            tools/realtime_model_delegation_smoke.py
+            tools/realtime_model_delegation_smoke.py \
+            tools/probe_openwebui_realtime_key.py
       - name: Verify no credentials baked into diagnostics
         run: |
           ! grep -R -E 'shana\.deroose@gmail\.com|sk-[A-Za-z0-9]{16,}' \
@@ -37,4 +39,5 @@ jobs:
              tools/probe_openwebui_realtime_login.py \
              tools/realtime_audio_smoke.py \
              tools/realtime_two_turn_smoke.py \
-             tools/realtime_model_delegation_smoke.py
+             tools/realtime_model_delegation_smoke.py \
+             tools/probe_openwebui_realtime_key.py
