@@ -1045,7 +1045,6 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
       // Show a visible fallback until a dedicated glyph is supplied.
       int markWidth=6*ascScale;
       glyph(x+max(0,(width-markWidth)/2),y,'?',ascScale,color);
-     }
     }
    }
   }
