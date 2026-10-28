@@ -143,7 +143,7 @@ PASS: two sequential voice turns over one authenticated realtime WebSocket.
 **Next gate:** exercise `cutedisplay-ai` model delegation with a substantive spoken question (instead of provider-only small talk), then design/review narrowly scoped gateway authentication that does not store the user's password, 2FA secret or session JWT on ESP32.
 
 
-## Phase 0.7 — verify selected chat-model delegation (source committed, user test pending)
+## Phase 0.7 — selected chat-model delegation **user-verified PASS**
 
 The two-turn call worked using the **Realtime provider** and no `generate_chat_completion` function call, which does not yet prove that substantive requests reach the selected `cutedisplay-ai` model.
 
@@ -175,3 +175,29 @@ INCOMPLETE: provider answered without delegating to cutedisplay-ai.
 **New diagnostic:** `tools/realtime_model_delegation_smoke.py` now suggests the stronger spoken phrase **`Quels outils sont disponibles dans mon modèle de chat ?`**, a case explicitly identified in Open WebUI's default prompt as requiring model delegation. If no tool call occurs, the script prints response status/output types and independently calls `POST /api/chat/completions` with the same ephemeral 2FA-verified user JWT and model ID `cutedisplay-ai`. The direct call is a *separate* connectivity check and never counts as a successful realtime tool delegation; the script continues to return nonzero in that case.
 
 **Security:** No credentials in Git; no bypassing 2FA or TLS; no S3 firmware changes. C5 v21 stable remains the immutable baseline. If tool delegation still fails despite the stronger question and the direct model check passes, do not claim native Open WebUI Call Mode is delivering model-backed answers; investigate real-time provider tool-call capability and server-side call prompt or consider a purpose-built gateway with deterministic transcript→selected-chat-model→TTS routing.
+
+
+## Phase 0.7 acceptance — user-verified native function delegation (2026-10-28)
+
+User ran the 2FA-authenticated Mac microphone test against their public Open WebUI HTTPS deployment, selected model `cutedisplay-ai`, on the `feature/realtime-call-c5v21` branch. Relevant exact console output:
+
+```text
+2FA verified.
+Authenticated; running spoken selected-chat-model delegation test.
+Realtime ready. Speak a substantive question in French (not small talk).
+Server VAD detected speech.
+Transcribed: Quels outils sont disponibles dans mon modèle de chat ?
+PASS: realtime provider requested generate_chat_completion.
+Requesting answer from Open WebUI chat model: cutedisplay-ai
+PASS: selected model replied. Text preview: Oh là là, mon chou ! Tu penses que ce petit écran magique possède des super-pouvoirs cachés comme un couteau suisse ? Hé bien, non, chérie. Ici, on a juste une conversation très drôle avec une diva co
+PASS: selected chat model delegation -> realtime spoken reply (7.97s), saved: ~/Downloads/CuteDisplay-model-delegation.wav
+```
+
+**Proven on Mac:** Audio from microphone → 24 kHz WSS → VAD/STT in French → provider `generate_chat_completion` function call → authenticated HTTP completion from selected `cutedisplay-ai` (Kitty persona represented in French reply) → provider spoken result → 7.97 sec of PCM output → playback API and local WAV file. The user's previous French multi-turn VAD/audio test also passed.
+
+**Not yet proven:** the user audibly heard these exact responses, production Open WebUI browser chat/history equivalence, continuous multi-turn **with model delegation**, interruptions/echo suppression, S3 physical I2S full duplex, C5 firmware integration, or device identity/security.
+
+**Baseline:** Preserve hardware-verified `stable/2026-10-28-c5-v21-french-font-hardware-tested` unchanged. Use only `feature/realtime-call-c5v21` for Phase 1. Preserve manual PTT/STT/MP3 TTS and UART OTA as fallback. No firmware flashed at this gate.
+
+**Next implementation:** A dedicated *opt-in* realtime session gateway for S3 must mediate user-session JWT and Open WebUI model delegation. Never persist password, TOTP, or human-session JWT to ESP32. Stream 24 kHz signed-16 mono PCM as bounded chunks. Existing PTT uses an independent I2S RX controller and separate TTS TX controller with the same GPIO41/42 clock pins; enabling both as independent I2S masters concurrently may conflict electrically. Full duplex must be reworked as one shared-clock I2S TX/RX driver or carefully scheduled half duplex first, with hardware pin capability tested. Do not promise spontaneous simultaneous speak/listen before echo cancellation and I2S duplex validation. Maintain the 24-hour conversation retention behavior.
+
