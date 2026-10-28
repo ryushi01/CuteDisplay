@@ -79,7 +79,7 @@ User ran the diagnostic against their actual Open WebUI public HTTPS endpoint fr
 
 This verifies the *control plane* only; do not infer that live PCM audio transport, microphone/speaker playback, conversation persistence or device authentication was tested.
 
-## Phase 0.5 — real audio round-trip on MacBook, implementation committed, test pending
+## Phase 0.5 — MacBook audio round-trip user-verified (one turn)
 - `tools/realtime_audio_smoke.py` runs a one-turn **Mac** microphone capture and speaker playback, connecting to the same authenticated WebSocket using a session JWT held in child-process memory.
 - `tools/probe_openwebui_realtime_login.py --audio-smoke` handles interactive password + TOTP, then launches the one-turn audio test (requires `python -m pip install sounddevice truststore 'websockets>=14,<17'`).
 - Use the same `--url` and `--model cutedisplay-ai` as the passing control-plane probe; run only in the environment that already passed 2FA.
@@ -90,3 +90,24 @@ This verifies the *control plane* only; do not infer that live PCM audio transpo
 
 ## JWT and 2FA architecture warning
 Open WebUI's tested `/api/v1/audio/realtime` bridge expects an authenticated WebUI **session JWT**, rather than the preexisting `sk-` Open WebUI API key. The Mac diagnostic uses a transient JWT after explicit 2FA verification; **do not copy that user JWT, account password, or TOTP secret into ESP32 NVS, firmware or GitHub**. A practical autonomous device requires a narrowly scoped, revocable device identity and a server-side intermediary/session delegation path that respects existing 2FA. Design, secure, and test that gateway before connecting the S3 directly; never disable 2FA or relax TLS verification.
+
+
+## Phase 0.5 user acceptance — 2026-10-28
+User installed `sounddevice==0.5.6` and ran the local 2FA-authenticated audio smoke test on their MacBook with Open WebUI chat model `cutedisplay-ai`. Reported console output:
+
+```text
+Password accepted. Open your authenticator app for a fresh one-time code.
+2FA verified.
+Authenticated; running one-turn microphone/speaker voice test.
+Voice bridge ready at 24 kHz.
+Server detected speech.
+Transcribed: Bonjour
+Requested voice reply.
+Voice response status: completed
+Played and saved 2.85s response audio: ~/Downloads/CuteDisplay-realtime-smoke.wav
+PASS: microphone -> VAD/STT -> realtime voice -> Mac speaker
+```
+
+**Verified:** Actual macOS microphone input, 24 kHz PCM WebSocket upload, server VAD, STT, accepted `bridge.respond`, realtime audio generation, streamed output and macOS speaker API playback. User has **not explicitly confirmed hearing** the reply; the playback API and 2.85-second output file completed without reported errors. The observed transcript was **"Bonjour"**, not the originally suggested Japanese greeting; whether the user spoke French or Japanese is unconfirmed. Therefore the test does **not** validate Japanese speech recognition accuracy, multi-turn context, model delegation, live barge-in or S3 playback.
+
+**Next**: keep stable C5 v21 unchanged. Check what language the user actually spoke. Implement/validate a limited **two-turn test using one WebSocket session** to prove turn rearming and ordered responses, then design opt-in device/gateway authentication that respects account 2FA; only after these gates start the S3 24 kHz firmware implementation. For security never store the user's TOTP/password/JWT in device firmware. Preserve WAV/manual PTT fallback.
