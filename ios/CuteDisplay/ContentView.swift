@@ -864,6 +864,9 @@ struct ContentView: View {
             Text("Changed the key? Connect S3 Bluetooth and tap Update API Key on S3. End any active call first; the new key applies to the next call.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            Text("S3 API key: " + bluetooth.brainAIKeyStatus)
+                .font(.caption2)
+                .foregroundStyle(bluetooth.brainAIKeyStatus.hasPrefix("Confirmed:") ? Color.green : Color.secondary)
             HStack(spacing: 10) {
                 Label("Conversation", systemImage: "bubble.left.and.bubble.right")
                     .font(.subheadline.bold())
