@@ -35,7 +35,7 @@
 #include "BrainRealtimeDirect.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
-static constexpr char S3_FW_VERSION[]="Call24k-EXP-UNTESTED";
+static constexpr char S3_FW_VERSION[]="CallFace-v23-dev";
 static constexpr size_t MAX_CMD=96;
 // Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
 // UART frame payload (one-digit chunk index, total, delimiters).
@@ -741,7 +741,7 @@ static void pollBLECommands(){
 static void consoleCommand(String cmd){
  cmd.trim();
  if(cmd=="help"){
-  Serial.println("[S3] call status / call diagnose / call start / call stop (USB-only experimental realtime)");
+  Serial.println("[S3] call status / call diagnose / call start / call stop / call mood 0..7");
   Serial.println("[S3] c5 ota status (automatic OTA when a newer embedded C5 image is available)");
   Serial.println("[S3] audio beep / audio diagnose / audio test");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
@@ -776,6 +776,18 @@ static void consoleCommand(String cmd){
    BrainAudioTest::running?1:0,BrainTTS::running?1:0,
    BrainC5OTA::updating()?1:0,BrainRealtimeAudio::active()?1:0);
   BrainRealtimeDirect::diagnose(busy);
+  return;
+ }
+ if(cmd.startsWith("call mood ")){
+  // Optional visual check: does not change Open WebUI, AI persona or
+  // persistent C5 mood. Requires an active realtime call.
+  int mood=cmd.substring(10).toInt();
+  if(cmd.length()!=11 || cmd[10]<'0'||cmd[10]>'7' ||
+     !BrainRealtimeDirect::active()){
+   Serial.println("[CALL FACE] Start Call Mode, then use call mood 0..7");return;
+  }
+  BrainRealtimeDirect::chooseMood(mood,true);
+  Serial.printf("[CALL FACE] temporary full-screen expression=%d\n",mood);
   return;
  }
  if(cmd=="call status"){
@@ -1166,6 +1178,26 @@ void loop(){
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
  BrainRealtimeDirect::tick(BrainVoiceSTT::running || BrainTTS::running ||
                            BrainAudioTest::running || BrainC5OTA::updating());
+ // Face Control is a lightweight S3->C5 UART side channel; the 24kHz I2S
+ // Core 0 task never draws, transmits UART, or performs extra network work.
+ if(faceOnline && !BrainC5OTA::updating() && BrainRealtimeDirect::active()){
+  uint8_t emotion=1;
+  if(BrainRealtimeDirect::takeMood(emotion)){
+   CuteLink::send(Serial1,++brainActivitySeq,"CALL_MOOD",String((int)emotion));
+  }
+  static uint32_t lastLipFrame=0;
+  static int previousLip=-1;
+  uint32_t faceNow=millis();
+  if((uint32_t)(faceNow-lastLipFrame)>=125UL){
+   lastLipFrame=faceNow;
+   int next=BrainRealtimeDirect::activity()=="CALL_SPEAKING"?
+            (int)BrainRealtimeAudio::lipLevel():0;
+   if(previousLip!=next){
+    CuteLink::send(Serial1,++brainActivitySeq,"CALL_LIP",String(next));
+    previousLip=next;
+   }
+  }
+ }
  if(pendingC5VoiceStart && !BrainTTS::running &&
     !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active()){
   pendingC5VoiceStart=false;
