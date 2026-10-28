@@ -32,6 +32,7 @@
 #include "BrainVoiceSTT.h"
 #include "BrainClock.h"
 #include "BrainAI.h"
+#include "BrainRealtimeDirect.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr char S3_FW_VERSION[]="Phase7-S3-AI-STREAM-BLE-DIAGNOSTIC";
@@ -263,6 +264,14 @@ static void processFace(const CuteLink::Frame &f){
   // C5 radios are disabled; ignore any stale C5 radio telemetry.
  } else if(f.type=="BATTERY"){
   Serial.printf("[C5] BATTERY %s\n",f.payload.c_str());
+ } else if(f.type=="CALL_TOGGLE"){
+  // C5 left short tap starts or stops native Open WebUI Call Mode.
+  bool turningOn=!BrainRealtimeDirect::active();
+  if(turningOn && BrainTTS::running)BrainTTS::interrupt();
+  bool busy=BrainVoiceSTT::running || BrainAI::busy ||
+            BrainAudioTest::running || BrainC5OTA::updating();
+  if(!BrainRealtimeDirect::toggle(busy))
+   Serial.println("[CALL] Start refused; verify WiFi, saved Open WebUI API key and server auth");
  } else if(f.type=="VOICE_INTERRUPT"){
   pendingC5VoiceStart=false;
   BrainTTS::interrupt();
@@ -271,12 +280,14 @@ static void processFace(const CuteLink::Frame &f){
   BrainTTS::interrupt();
   if(BrainAI::busy){String ignored;BrainAI::provision("AI:STOP",ignored);}
  } else if(f.type=="VOICE_START"){
+  if(BrainRealtimeDirect::active())return;
   // Decoder teardown is asynchronous: queue recording until I2S is free.
   if(BrainTTS::running){BrainTTS::interrupt();pendingC5VoiceStart=true;return;}
   if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy && !BrainTTS::running){
    if(BrainVoiceSTT::start())Serial.println("[VOICE] C5 button started recording");
   }else Serial.println("[VOICE] C5 button rejected: busy");
  } else if(f.type=="VOICE_STOP"){
+  if(BrainRealtimeDirect::active())return;
   pendingC5VoiceStart=false;
   if(BrainVoiceSTT::stop())Serial.println("[VOICE] C5 button released: send recording");
  } else if(f.type=="WIFI_TOGGLE"){
@@ -983,6 +994,7 @@ void setup(){
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
  BrainAI::init();
+ BrainRealtimeDirect::init();
  BrainTTS::init();
  BrainVoiceSTT::init();
  BrainClock::init();
@@ -1090,6 +1102,8 @@ void loop(){
   }
  }
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
+ BrainRealtimeDirect::tick(BrainVoiceSTT::running || BrainTTS::running ||
+                           BrainAudioTest::running || BrainC5OTA::updating());
  if(pendingC5VoiceStart && !BrainTTS::running){
   pendingC5VoiceStart=false;
   if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy)
@@ -1097,7 +1111,10 @@ void loop(){
  }
  BrainTTS::tick(BrainVoiceSTT::running || BrainAudioTest::running || BrainC5OTA::updating() || BrainAI::busy);
  static String priorActivity;
- String activity=BrainVoiceSTT::capturing?"LISTENING":BrainVoiceSTT::running?"UPLOADING":BrainAI::busy?"THINKING":BrainTTS::running?"SPEAKING":"";
+ String activity=BrainRealtimeDirect::active() || BrainRealtimeDirect::activity()=="CALL_ERROR"
+   ?BrainRealtimeDirect::activity()
+   :BrainVoiceSTT::capturing?"LISTENING":BrainVoiceSTT::running?"UPLOADING"
+   :BrainAI::busy?"THINKING":BrainTTS::running?"SPEAKING":"";
  if(activity!=priorActivity && faceOnline && !BrainC5OTA::updating()){
   CuteLink::send(Serial1,++brainActivitySeq,"ACTIVITY",activity);
   priorActivity=activity;
