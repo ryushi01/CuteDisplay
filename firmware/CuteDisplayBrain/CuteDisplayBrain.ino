@@ -231,6 +231,7 @@ static void sendRadioStatus(bool immediate);
 static void toggleBrainWiFiByButton();
 static bool pendingC5VoiceStart=false;
 static uint16_t brainActivitySeq=33000;
+static bool forceActivityResend=false;
 static void processFace(const CuteLink::Frame &f){
  lastFace=millis();
  if(!faceOnline){
@@ -247,6 +248,7 @@ static void processFace(const CuteLink::Frame &f){
   // The C5's warning clears only after it also receives this matching ACK.
   CuteLink::send(Serial1,f.seq,"ACK","PROBE");
  } else if(f.type=="HELLO"){
+  forceActivityResend=true;
   if(activeSeq)cancelCommand("FACE_RESTART");
   // Recovery: C5 rebooted while OTA_END ACK was in flight.
   if(BrainC5OTA::stage==BrainC5OTA::END){
@@ -1111,13 +1113,18 @@ void loop(){
  }
  BrainTTS::tick(BrainVoiceSTT::running || BrainAudioTest::running || BrainC5OTA::updating() || BrainAI::busy);
  static String priorActivity;
+ static uint32_t lastActivitySend=0;
  String activity=BrainRealtimeDirect::active() || BrainRealtimeDirect::activity()=="CALL_ERROR"
    ?BrainRealtimeDirect::activity()
    :BrainVoiceSTT::capturing?"LISTENING":BrainVoiceSTT::running?"UPLOADING"
    :BrainAI::busy?"THINKING":BrainTTS::running?"SPEAKING":"";
- if(activity!=priorActivity && faceOnline && !BrainC5OTA::updating()){
+ if((activity!=priorActivity || forceActivityResend ||
+     millis()-lastActivitySend>=15000UL) &&
+    faceOnline && !BrainC5OTA::updating()){
   CuteLink::send(Serial1,++brainActivitySeq,"ACTIVITY",activity);
   priorActivity=activity;
+  forceActivityResend=false;
+  lastActivitySend=millis();
  }
  // Status notifications are separate from command acknowledgements.
  String aiEvent;
