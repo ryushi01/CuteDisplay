@@ -1031,9 +1031,9 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
    if(smooth>=0){
     int h=cp<128?7*ascScale:16*jpScale;
     drawSmoothGlyph(smoothGlyphs[smooth],x,y,width,h,color,clipRight);
+   }else if(cp < 128) {
+    if(x + width <= clipRight) glyph(x,y,(char)cp,ascScale,color);
    }else {
-    // Chat ASCII and accented Latin use the same generated font face,
-    // pixel height and boldness. Keep the legacy 5x7 as a fallback.
     const uint8_t *bitmap=nullptr;
     for(int k=0;k<glyphCount;k++){
      if(glyphCache[k].code==cp){bitmap=glyphCache[k].bits;break;}
@@ -1054,12 +1054,10 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
       }
      }
     }else{
-      // ASCII fallback still works if generated assets are absent.
-      if(cp<128)glyph(x,y,(char)cp,ascScale,color);
-      else {
-       int markWidth=6*ascScale;
-       glyph(x+max(0,(width-markWidth)/2),y,'?',ascScale,color);
-      }
+      // Never silently hide unsupported Unicode (e.g. emoji outside BMP).
+      // Show a visible fallback until a dedicated glyph is supplied.
+      int markWidth=6*ascScale;
+      glyph(x+max(0,(width-markWidth)/2),y,'?',ascScale,color);
     }
    }
   }
