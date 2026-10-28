@@ -57,7 +57,12 @@ services:
   open-webui:
     image: cutedisplay/openwebui-existing:backup
 YAML
-chmod 600 "$BACKUP/rollback.yaml"
+cat > "$BACKUP/candidate.yaml" <<'YAML'
+services:
+  open-webui:
+    image: cutedisplay/openwebui:realtime-apikey-candidate
+YAML
+chmod 600 "$BACKUP/rollback.yaml" "$BACKUP/candidate.yaml"
 
 STOPPED=0
 COMPLETE=0
