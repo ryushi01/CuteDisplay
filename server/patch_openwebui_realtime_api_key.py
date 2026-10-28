@@ -223,8 +223,14 @@ def main():
         print("PASS: source compatible with existing API-key authentication and opt-in Kitty expressions (no changes made)")
         print("Direct device endpoint remains: wss://YOUR-WEBUI-HOST/api/v1/audio/realtime")
         return 0
-    backup = target.with_suffix(".py.cutedisplay-original")
-    if backup.exists():
+    # When extending an already-auth-patched Open WebUI image, the original
+    # pristine auth backup may already exist from its first Docker build.
+    # Preserve it untouched and create a separate expression rollback copy.
+    backup = target.with_suffix(
+        ".py.cutedisplay-pre-expression" if MARKER in original
+        else ".py.cutedisplay-original"
+    )
+    if backup.exists() and updated != original:
         parser.error(f"Refusing to overwrite source backup: {backup}")
     if updated == original:
         print("PASS: realtime auth and expression capability already installed")
