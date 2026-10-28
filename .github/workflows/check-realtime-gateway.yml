@@ -3,7 +3,7 @@ name: Check Realtime gateway and iPhone pairing source
 on:
   workflow_dispatch:
   push:
-    branches: [feature/realtime-call-c5v21]
+    branches: [feature/realtime-call-c5v21, feature/realtime-kitty-fullscreen-expressions]
     paths:
       - 'gateway/**'
       - 'server/**'
@@ -107,3 +107,20 @@ jobs:
           python server/patch_openwebui_realtime_api_key.py --source-root /tmp/owui-src --check
           python server/patch_openwebui_realtime_api_key.py --source-root /tmp/owui-src --apply
           python -m py_compile /tmp/owui-src/backend/open_webui/routers/audio/realtime.py
+          # Reapplying on an already-auth-patched server must preserve the
+          # exact authenticated endpoint, and must not duplicate the tool.
+          python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          import sys
+          path=Path("server/patch_openwebui_realtime_api_key.py")
+          spec=importlib.util.spec_from_file_location("kitty_patch",path)
+          mod=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          installed=Path("/tmp/owui-src/backend/open_webui/routers/audio/realtime.py").read_text()
+          assert installed.count(mod.MARKER)==1
+          assert installed.count(mod.EXPRESSION_MARKER)==1
+          assert mod.patch(installed)==installed
+          print("PASS: auth + expression patch idempotent")
+          PY
+          CUTEDISPLAY_PATCHED_REALTIME=/tmp/owui-src/backend/open_webui/routers/audio/realtime.py python -m unittest server.test_realtime_expression_contract -v
