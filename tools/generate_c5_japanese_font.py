@@ -67,6 +67,19 @@ def main():
             d=ImageDraw.Draw(img)
             # Anchor glyph to top/left with consistent 16px CJK advances.
             d.text((0,0),chr(cp),fill=255,font=font,anchor="lt")
+            # Western Latin bitmaps occupy less ink than the native 5x7
+            # uppercase font enlarged 2x. Normalize ink height, including
+            # accents, to make É/À/Ç/Œ visually consistent with ASCII.
+            if (0x00A0 <= cp <= 0x024F) or (0x1E00 <= cp <= 0x1EFF):
+                bbox=img.getbbox()
+                if bbox:
+                    crop=img.crop(bbox)
+                    w,h=crop.size
+                    target_h=14
+                    target_w=min(13,max(1,round(w*target_h/h)))
+                    crop=crop.resize((target_w,target_h),Image.Resampling.NEAREST)
+                    img=Image.new("L",(16,16),0)
+                    img.paste(crop,(max(0,(16-target_w)//2),1))
             bits=[]
             for y in range(16):
                 for xbase in (0,8):
