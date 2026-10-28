@@ -8,6 +8,7 @@
 // (Core 1) owns the network and transfers fixed-size frames via queues.
 #include <Arduino.h>
 #include <driver/i2s_std.h>
+#include <esp_err.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -20,6 +21,23 @@ static constexpr size_t SAMPLES=480; // 20ms at 24kHz
 static constexpr uint32_t TAIL_MUTE_MS=300;
 struct Frame { int16_t pcm[SAMPLES]; };
 static QueueHandle_t micQueue=nullptr, speakerQueue=nullptr;
+// ESP-IDF's dynamically created FreeRTOS queues use internal memory.
+// 16+48 audio frames = 60KB; this can exhaust SRAM after Wi-Fi/WSS TLS.
+// Allocate only the queue payload storage in PSRAM, using static queues,
+// while small queue control blocks stay in internal DRAM.
+static StaticQueue_t micQueueControl, speakerQueueControl;
+static uint8_t *micQueueStorage=nullptr, *speakerQueueStorage=nullptr;
+static constexpr UBaseType_t MIC_FRAMES=16, SPEAKER_FRAMES=48;
+static const char *lastError="NOT_STARTED";
+inline const char *issue(){return lastError;}
+inline void reportError(const char *stage,esp_err_t err=ESP_OK){
+ lastError=stage;
+ Serial.printf("[CALL AUDIO] %s: esp=%s(%ld) internal_free=%lu largest_internal=%lu psram_free=%lu\n",
+  stage,esp_err_to_name(err),(long)err,
+  (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+  (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+}
 static volatile bool running=false, ready=false, stopping=false, fault=false;
 static volatile bool remoteReply=false, playing=false;
 static volatile uint32_t lastPlaybackMs=0;
@@ -66,7 +84,8 @@ static void audioTask(void *){
   i2s_chan_config_t channel=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
   channel.dma_desc_num=8;
   channel.dma_frame_num=SAMPLES;
-  if(i2s_new_channel(&channel,&tx,&rx)!=ESP_OK)break;
+  esp_err_t rc=i2s_new_channel(&channel,&tx,&rx);
+  if(rc!=ESP_OK){reportError("CHANNEL_ALLOC",rc);break;}
   i2s_std_config_t config={
    .clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(RATE),
    .slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,I2S_SLOT_MODE_STEREO),
@@ -77,13 +96,17 @@ static void audioTask(void *){
     .din=(gpio_num_t)BrainPinPlan::I2S_DIN,
     .invert_flags={.mclk_inv=false,.bclk_inv=false,.ws_inv=false}}
   };
-  if(i2s_channel_init_std_mode(tx,&config)!=ESP_OK ||
-     i2s_channel_init_std_mode(rx,&config)!=ESP_OK)break;
-  if(i2s_channel_enable(tx)!=ESP_OK)break;
+  rc=i2s_channel_init_std_mode(tx,&config);
+  if(rc!=ESP_OK){reportError("TX_STD_INIT",rc);break;}
+  rc=i2s_channel_init_std_mode(rx,&config);
+  if(rc!=ESP_OK){reportError("RX_STD_INIT",rc);break;}
+  rc=i2s_channel_enable(tx);
+  if(rc!=ESP_OK){reportError("TX_ENABLE",rc);break;}
   txOn=true;
-  if(i2s_channel_enable(rx)!=ESP_OK)break;
+  rc=i2s_channel_enable(rx);
+  if(rc!=ESP_OK){reportError("RX_ENABLE",rc);break;}
   rxOn=true;
-  ready=true;
+  ready=true;lastError="NONE";
   Serial.printf("[CALL] I2S 24kHz duplex active: BCLK=%d WS=%d MIC=%d SPK=%d\n",
    BrainPinPlan::I2S_BCLK,BrainPinPlan::I2S_WS,
    BrainPinPlan::I2S_DIN,BrainPinPlan::I2S_DOUT);
@@ -94,8 +117,10 @@ static void audioTask(void *){
   Frame speaker={};
   while(!stopping){
    size_t read=0;
-   if(i2s_channel_read(rx,capture,sizeof(capture),&read,35)!=ESP_OK ||
-      read!=sizeof(capture))break;
+   esp_err_t readError=i2s_channel_read(rx,capture,sizeof(capture),&read,160);
+   if(readError!=ESP_OK || read!=sizeof(capture)){
+    reportError("MIC_READ",readError);break;
+   }
    bool hasAudio=xQueueReceive(speakerQueue,&speaker,0)==pdTRUE;
    playing=hasAudio;
    if(hasAudio)lastPlaybackMs=millis();
@@ -127,8 +152,10 @@ static void audioTask(void *){
     droppedMic++;
    }
    size_t written=0;
-   if(i2s_channel_write(tx,output,sizeof(output),&written,35)!=ESP_OK ||
-      written!=sizeof(output))break;
+   esp_err_t writeError=i2s_channel_write(tx,output,sizeof(output),&written,160);
+   if(writeError!=ESP_OK || written!=sizeof(output)){
+    reportError("SPEAKER_WRITE",writeError);break;
+   }
   }
  }while(false);
  if(!stopping)fault=true;
@@ -143,26 +170,44 @@ static void audioTask(void *){
 
 inline bool start(uint16_t gain,uint8_t volume){
  if(running || owner)return false;
- if(!micQueue)micQueue=xQueueCreate(16,sizeof(Frame)); // 320ms uplink
- if(!speakerQueue)speakerQueue=xQueueCreate(48,sizeof(Frame)); // 960ms downlink
- if(!micQueue||!speakerQueue)return false;
+ // Allocate 60KB of queue payloads in PSRAM, not scarce internal SRAM.
+ if(!psramFound()){
+  reportError("NO_PSRAM");return false;
+ }
+ if(!micQueueStorage)
+  micQueueStorage=(uint8_t*)heap_caps_malloc(MIC_FRAMES*sizeof(Frame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!speakerQueueStorage)
+  speakerQueueStorage=(uint8_t*)heap_caps_malloc(SPEAKER_FRAMES*sizeof(Frame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!micQueueStorage||!speakerQueueStorage){
+  reportError("PSRAM_QUEUE_STORAGE");return false;
+ }
+ if(!micQueue)
+  micQueue=xQueueCreateStatic(MIC_FRAMES,sizeof(Frame),micQueueStorage,&micQueueControl);
+ if(!speakerQueue)
+  speakerQueue=xQueueCreateStatic(SPEAKER_FRAMES,sizeof(Frame),speakerQueueStorage,&speakerQueueControl);
+ if(!micQueue||!speakerQueue){
+  reportError("STATIC_QUEUE_CREATE");return false;
+ }
+ Serial.printf("[CALL AUDIO] PSRAM queues ready: uplink=%u downlink=%u frames; internal free=%lu\n",
+   (unsigned)MIC_FRAMES,(unsigned)SPEAKER_FRAMES,
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
  xQueueReset(micQueue);xQueueReset(speakerQueue);
  micGain=constrain((int)gain,0,300);
  speakerVolume=constrain((int)volume,0,100);
  lastPlaybackMs=millis()-TAIL_MUTE_MS;
- droppedMic=0;fault=false;ready=false;stopping=false;
+ droppedMic=0;fault=false;ready=false;stopping=false;lastError="STARTING";
  playing=false;remoteReply=false;running=true;
  if(xTaskCreatePinnedToCore(audioTask,"call_i2s",16384,nullptr,3,&owner,0)!=pdPASS){
-  running=false;owner=nullptr;fault=true;return false;
+  running=false;owner=nullptr;fault=true;reportError("AUDIO_TASK_ALLOC");return false;
  }
  return true;
 }
 inline void stop(){
  stopping=true;
- // Audio task read/write timeouts are <=35ms. Never let a stale I2S owner
- // overlap with manual PTT or TTS immediately after a short button tap.
+ // Bounded I2S timeouts are 160ms; let the task finish and release
+ // its channel before allowing manual PTT or another call to start.
  uint32_t since=millis();
- while(running && (uint32_t)(millis()-since)<250) vTaskDelay(pdMS_TO_TICKS(2));
+ while(running && (uint32_t)(millis()-since)<450) vTaskDelay(pdMS_TO_TICKS(2));
  remoteReply=false;ready=false;
  if(micQueue)xQueueReset(micQueue);
  if(speakerQueue)xQueueReset(speakerQueue);
