@@ -133,6 +133,40 @@ insufficient free internal memory; CHANNEL_ALLOC/TX_STD_INIT/RX_STD_INIT
 indicate I2S driver/channel initialization errors. These are local faults
 and do not require changing Open WebUI or rotating the user API key.
 
+## Voice playback buffering fix: SPEAKER_QUEUE_OVERFLOW (2026-10-29)
+
+When the voice provider sent a burst of TTS audio, the former 960ms speaker
+queue could not hold a complete incoming event and the S3 disconnected with
+`SPEAKER_QUEUE_OVERFLOW`. A voice provider is allowed to generate audio much
+faster than the I2S DAC consumes it, so this is not a microphone/speaker pinout
+problem or an invalid Open WebUI API key.
+
+The S3 now uses a PSRAM-backed bounded PCM16 speaker ring, preferring 24s of
+buffer capacity and falling back to 12s or 6s if fragmented. The websocket
+callback enqueues samples without waiting for I2S playback; the existing
+single-clock INMP441/MAX98357A interface is unchanged. When an exceptionally
+long reply exceeds capacity, the oldest queued samples are skipped instead of
+terminating the session, and counters track any skips.
+
+Only the matching **S3 firmware** needs uploading; Open WebUI, iPhone code,
+and an already-installed C5 v22 do not need updating. Leave automatic C5
+version-checked OTA enabled.
+
+After upload (S3 USB Serial Monitor at 115200 baud):
+
+    call start
+    call status
+
+Speak a short question and listen through the complete reply. Then speak again
+during the same session. The second turn checks that the call did not disconnect.
+End with `call stop`; hold the C5 left button for legacy manual PTT. If audio
+sounds slow/clipped, send the new `call status` counters:
+`playback_buffer_ms`, `playback_peak_ms`, `playback_skipped_ms`,
+`underruns`, and `mic_dropped` (no credentials). A nonzero skipped count
+means that speech was truncated to bound latency, even though the call remains
+connected. This initial implementation still has no acoustic echo cancellation
+or barge-in.
+
 ## Safety and limitations
 
 - Existing Open WebUI HTTPS host/port and login/2FA are unchanged.
