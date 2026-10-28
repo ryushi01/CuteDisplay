@@ -113,10 +113,31 @@ PASS: microphone -> VAD/STT -> realtime voice -> Mac speaker
 **Next**: keep stable C5 v21 unchanged. Add a **two-turn test using one WebSocket session** to prove turn rearming and ordered responses; test selected `cutedisplay-ai` delegated reasoning separately, then design opt-in device/gateway authentication that respects account 2FA. Only after these gates start S3 24 kHz firmware implementation. For security never store the user's TOTP/password/JWT in device firmware. Preserve WAV/manual PTT fallback.
 
 
-## Phase 0.6 — two-turn persistent voice session, source committed / acceptance pending
+## Phase 0.6 — two-turn persistent voice session, **Mac test user-verified PASS**
 - User clarified that uttering **"Bonjour" was intentional**, and the one-turn real-audio pass is thus confirmed **French** speech recognition and 2.85-second output.
 - New diagnostic `tools/realtime_two_turn_smoke.py` uses one 2FA-authenticated 24 kHz Realtime WebSocket for **two consecutive turns**, stopping microphone capture before each `bridge.respond`, draining audio playback before opening the next capture, and writing assistant audio to `~/Downloads/CuteDisplay-realtime-turn1.wav` and `-turn2.wav` (microphone not saved).
 - After `git pull --ff-only` on `feature/realtime-call-c5v21`, run `python tools/probe_openwebui_realtime_login.py --url "$OPENWEBUI_URL" --model cutedisplay-ai --two-turn` in `.venv-realtime`, with `sounddevice`, `truststore` and `websockets` installed. Speak two short simple French phrases on separate prompts (e.g. `Bonjour` then `Ça va ?`); the test does not yet drive chat-model function delegation or chat history.
-- Acceptance is **pending**. A passing Mac test does not mean ESP32-S3 firmware call mode works. C5 v21 source must remain untouched.
+- Acceptance **passed on the Mac**. A passing Mac test does not mean ESP32-S3 firmware call mode works. C5 v21 source must remain untouched.
 
 - CI syntax gate: [Validate realtime voice diagnostic scripts](https://github.com/ryushi01/CuteDisplay/actions/runs/40683113838) **passed** at commit `cc265bc2573c0f528a57e23a2e843d579425636c`. This validates Python compilation only, **not** an executed microphone/WebSocket test; user two-turn hardware acceptance is still pending.
+
+
+## 2026-10-28 user acceptance — two-turn realtime French speech
+User ran `--two-turn` on their MacBook with 2FA and `cutedisplay-ai`; **one authenticated WebSocket remained open for both turns**. Exact relevant output:
+
+```text
+Realtime connection ready. One WebSocket will remain open for two turns.
+Turn 1/2: speak now, then pause for transcription.
+Turn 1: server VAD detected speech.
+Turn 1: transcribed: Coucou, comment ça va ?
+Turn 1: response completed; 2.75s audio played and saved: ~/Downloads/CuteDisplay-realtime-turn1.wav
+Turn 2/2: speak now, then pause for transcription.
+Turn 2: server VAD detected speech.
+Turn 2: transcribed: Moi, je vais bien. Merci.
+Turn 2: response completed; 5.57s audio played and saved: ~/Downloads/CuteDisplay-realtime-turn2.wav
+PASS: two sequential voice turns over one authenticated realtime WebSocket.
+```
+
+**Accepted:** WebSocket persists for two sequential microphone/VAD/transcription/assistant-audio turns; French transcription and audio playback API succeeded. **Not yet explicitly confirmed by user:** personally hearing both saved spoken answers / quality. **Not tested:** model delegation (`generate_chat_completion`), saved Open WebUI chat context, automatic ongoing hands-free loop, speech-triggered barge-in, ESP32 I2S/Wi-Fi, device auth, and C5 v21 regression on a new build. Maintain original hardware-tested v21 rollback unchanged.
+
+**Next gate:** exercise `cutedisplay-ai` model delegation with a substantive spoken question (instead of provider-only small talk), then design/review narrowly scoped gateway authentication that does not store the user's password, 2FA secret or session JWT on ESP32.
