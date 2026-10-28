@@ -24,7 +24,7 @@ class PatchTests(unittest.TestCase):
         )
 
     def test_api_key_path_uses_existing_permissions(self):
-        code = mod.patch(self.mock_source())
+        code = mod.patch_authentication(self.mock_source())
         self.assertIn("get_current_user_by_api_key(ws, token)", code)
         self.assertIn("user.role in", code)
         self.assertIn('{"user", "admin"}', code)
@@ -32,13 +32,14 @@ class PatchTests(unittest.TestCase):
         self.assertIn("current = await _cutedisplay_verified_realtime_user(ws, token, redis)", code)
         compile(code, "<version-guard-test>", "exec")
 
-    def test_second_application_rejected(self):
-        with self.assertRaises(ValueError):
-            mod.patch(mod.patch(self.mock_source()))
+    def test_second_application_is_idempotent(self):
+        once=mod.patch_authentication(self.mock_source())
+        twice=mod.patch_authentication(once)
+        self.assertEqual(once,twice)
 
     def test_unknown_source_rejected_without_changes(self):
         with self.assertRaises(ValueError):
-            mod.patch("async def existing():\n    return None\n")
+            mod.patch_authentication("async def existing():\n    return None\n")
 
 
 if __name__ == "__main__":
