@@ -230,8 +230,6 @@ static void pushNetwork(const String &v){
 static void sendRadioStatus(bool immediate);
 static void toggleBrainWiFiByButton();
 static bool pendingC5VoiceStart=false;
-// Experimental C5 v22 OTA is NEVER automatic: S3-only bench tests keep v21.
-static bool experimentalC5OTAApproved=false;
 static uint16_t brainActivitySeq=33000;
 static bool forceActivityResend=false;
 static void processFace(const CuteLink::Frame &f){
@@ -744,7 +742,7 @@ static void consoleCommand(String cmd){
  cmd.trim();
  if(cmd=="help"){
   Serial.println("[S3] call status / call diagnose / call start / call stop (USB-only experimental realtime)");
-  Serial.println("[S3] c5 ota status / c5 ota enable (USB-only, THIS UPGRADES C5 to dev v22)");
+  Serial.println("[S3] c5 ota status (automatic OTA when a newer embedded C5 image is available)");
   Serial.println("[S3] audio beep / audio diagnose / audio test");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
   return;
@@ -765,19 +763,8 @@ static void consoleCommand(String cmd){
   return;
  }
  if(cmd=="c5 ota status"){
-  Serial.printf("[S3 OTA] experimental C5 update approved=%d stage=%d target_v=%lu (0=disabled)\n",
-   experimentalC5OTAApproved?1:0,(int)BrainC5OTA::stage,
-   (unsigned long)C5Image::version);
-  return;
- }
- if(cmd=="c5 ota enable"){
-  if(BrainRealtimeDirect::active()||BrainRealtimeAudio::active()||
-     BrainVoiceSTT::running||BrainTTS::running||BrainAudioTest::running){
-   Serial.println("[S3 OTA] REFUSED: end call and all audio before enabling C5 v22 OTA");
-   return;
-  }
-  experimentalC5OTAApproved=true; // RAM only; resets to false on S3 reboot
-  Serial.println("[S3 OTA] USER APPROVED development C5 OTA for this boot; update starts when idle");
+  Serial.printf("[S3 OTA] automatic update enabled; stage=%d target_v=%lu\n",
+   (int)BrainC5OTA::stage,(unsigned long)C5Image::version);
   return;
  }
  if(cmd=="call diagnose"){
@@ -1146,8 +1133,7 @@ void loop(){
   bootChirpDone=true;
   BrainAudioTest::beep(false);
  }
- BrainC5OTA::permitUpdate=experimentalC5OTAApproved &&
-    !activeSeq && !lanAwaitingCommand &&
+ BrainC5OTA::permitUpdate=!activeSeq && !lanAwaitingCommand &&
     !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active() &&
     incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
