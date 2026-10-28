@@ -185,9 +185,11 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   status("CALL_THINKING");
  }else if(strcmp(type,"response.done")==0){
   remoteResponse=false;
-  BrainRealtimeAudio::setRemoteReply(false);
-  if(!delegatedCallId.isEmpty() || !failedCallId.isEmpty())
-   toolResponseFinished=true;
+  // Keep the microphone muted during the chat-model handoff; otherwise the
+  // provider might transcribe the user again while a tool answer is pending.
+  const bool waitingForTool=!delegatedCallId.isEmpty() || !failedCallId.isEmpty();
+  BrainRealtimeAudio::setRemoteReply(waitingForTool);
+  if(waitingForTool)toolResponseFinished=true;
   if(!animationResponseId.isEmpty()){
    cJSON *response=cJSON_GetObjectItem(json,"response");
    cJSON *rid=cJSON_GetObjectItem(response,"id");
