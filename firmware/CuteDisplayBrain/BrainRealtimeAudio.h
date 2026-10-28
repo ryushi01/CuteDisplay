@@ -66,6 +66,9 @@ static volatile uint32_t lastPlaybackMs=0;
 static uint16_t micGain=100;
 static uint8_t speakerVolume=35;
 static volatile uint32_t droppedMic=0;
+// PCM energy for the C5 full-screen Kitty mouth, no microphone inference.
+static volatile uint8_t outputLipLevel=0;
+inline uint8_t lipLevel(){return outputLipLevel;}
 static TaskHandle_t owner=nullptr;
 
 inline bool active(){return running;}
@@ -186,6 +189,17 @@ static void audioTask(void *){
    }
    bool hasAudio=nextSpeaker(work->speaker);
    playing=hasAudio;
+   if(hasAudio){
+    uint32_t sum=0;
+    for(size_t i=0;i<SAMPLES;i+=4){
+     int v=work->speaker.pcm[i];
+     sum+=(uint32_t)(v<0?-v:v);
+    }
+    // Average source PCM magnitude, quantized to 0..9. The Arduino loop
+    // sends this tiny value at <=8Hz; I2S never touches the UART/LCD.
+    uint32_t avg=sum/(SAMPLES/4);
+    outputLipLevel=(uint8_t)min((uint32_t)9,(avg+360)/1250);
+   }else outputLipLevel=0;
    if(hasAudio)lastPlaybackMs=millis();
    // Wait until provider has stopped responding AND acoustic tail is gone.
    bool mute=remoteReply || hasAudio ||
@@ -222,7 +236,7 @@ static void audioTask(void *){
  }while(false);
  if(!stopping)fault=true;
  ready=false;
- playing=false;
+ playing=false;outputLipLevel=0;
  if(rx){if(rxOn)i2s_channel_disable(rx);i2s_del_channel(rx);}
  if(tx){if(txOn)i2s_channel_disable(tx);i2s_del_channel(tx);}
  running=false;
@@ -268,7 +282,7 @@ inline bool start(uint16_t gain,uint8_t volume){
  micGain=constrain((int)gain,0,300);
  speakerVolume=constrain((int)volume,0,100);
  lastPlaybackMs=millis()-TAIL_MUTE_MS;
- droppedMic=0;fault=false;ready=false;stopping=false;lastError="STARTING";
+ droppedMic=0;outputLipLevel=0;fault=false;ready=false;stopping=false;lastError="STARTING";
  playing=false;remoteReply=false;running=true;
  // Less than half the previous internal stack; fixed PCM buffers now live
  // in external PSRAM, so the stack only handles driver calls and scalars.
@@ -283,7 +297,7 @@ inline void stop(){
  // its channel before allowing manual PTT or another call to start.
  uint32_t since=millis();
  while(running && (uint32_t)(millis()-since)<450) vTaskDelay(pdMS_TO_TICKS(2));
- remoteReply=false;ready=false;
+ remoteReply=false;ready=false;outputLipLevel=0;
  if(micQueue)xQueueReset(micQueue);
  clearSpeaker();
  if(running)Serial.println("[CALL] I2S teardown still finishing; legacy audio stays blocked");
