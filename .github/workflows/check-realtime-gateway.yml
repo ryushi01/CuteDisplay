@@ -62,6 +62,7 @@ jobs:
         run: |
           bash -n server/deploy_existing_openwebui.sh
           bash -n server/create_verified_openwebui_backup.sh
+          bash -n server/upgrade_kitty_expressions.sh
       - name: Regression — never trust or restore a truncated gzip archive
         shell: bash
         run: |
