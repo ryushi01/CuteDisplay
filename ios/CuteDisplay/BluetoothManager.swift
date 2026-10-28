@@ -699,6 +699,35 @@ final class BluetoothManager: NSObject, ObservableObject {
         status = "Saving one Open WebUI connection to S3 (\(commands.count) BLE commands)"
     }
 
+    // Update ONLY the shared Open WebUI user API key used for Kitty AI and
+    // native realtime Call Mode. The existing URL/model remain untouched.
+    // The S3 persists field K in the same brain-ai NVS namespace; the WSS
+    // client reads that field on the next call. Never log the secret.
+    // Explicit encrypted Brain BLE is required; do not route key via LAN.
+    func saveBrainAIKey(_ key: String) {
+        guard bleReady() else {
+            status = "Connect to the S3 Brain securely over Bluetooth to update its API key"
+            return
+        }
+        let secret = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bytes = Array(secret.utf8)
+        guard secret.hasPrefix("sk-"), bytes.count > 20,
+              bytes.count <= 8192 else {
+            status = "Use a complete, revocable Open WebUI user API key beginning with sk-"
+            return
+        }
+        var commands = ["AI:BEGIN:K:\(bytes.count)"]
+        for offset in stride(from: 0, to: bytes.count, by: 40) {
+            let part = bytes[offset..<min(bytes.count, offset + 40)]
+            commands.append("AI:DATA:" + part.map {
+                String(format: "%02X", $0)
+            }.joined())
+        }
+        commands.append("AI:END")
+        enqueue(commands)
+        status = "Sending the shared Open WebUI API key to S3 over encrypted Bluetooth"
+    }
+
     // Wi-Fi credentials are provisioned over the connected BLE link.
     // Only use a network that you control. Password is never logged.
     func connectWiFi(ssid: String, password: String) {
