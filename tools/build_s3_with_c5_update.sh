@@ -138,6 +138,39 @@ Avoid powering two USB sources with a shared 5V bridge connected.
 CuteDisplay-CombinedFirmware.bin is the SINGLE compiled S3 application that embeds the C5 firmware.\nIt already contains all S3 .ino/.h/.cpp changes and the C5 firmware update.\nThe .bin files are APPLICATION images, NOT complete factory images.
 Do not flash app-only binaries to offset 0x0.
 EOF
+# Bundle every user-updated source alongside the matching compiled S3 build.
+# The existing iOS Xcode project/signing is intentionally not included.
+mkdir -p "$OUT/iPhone-app"
+cp "$ROOT/ios/CuteDisplay/ContentView.swift" "$OUT/iPhone-app/ContentView.swift"
+cp "$ROOT/ios/CuteDisplay/BluetoothManager.swift" "$OUT/iPhone-app/BluetoothManager.swift"
+cp "$ROOT/docs/INSTALL_REALTIME_COMPLETE.md" "$OUT/README_STEP_BY_STEP.md"
+cp "$ROOT/docs/REALTIME_I2S_AUDIO_EXPERIMENT.md" "$OUT/REALTIME_I2S_AUDIO_EXPERIMENT.md"
+python3 - "$OUT" <<'PY'
+from pathlib import Path
+import hashlib
+import sys
+root = Path(sys.argv[1])
+targets = [
+    root / "CuteDisplay-CombinedFirmware.bin",
+    root / "S3-Brain-includes-C5-v22-application.bin",
+    root / "C5-v22-application.bin",
+    root / "iPhone-app/ContentView.swift",
+    root / "iPhone-app/BluetoothManager.swift",
+    root / "CuteDisplayBrain/CuteDisplayBrain.ino",
+    root / "CuteDisplayBrain/BrainAI.h",
+    root / "CuteDisplayBrain/BrainRealtimeDirect.h",
+    root / "CuteDisplayBrain/BrainRealtimeAudio.h",
+]
+lines = []
+for path in targets:
+    if not path.is_file():
+        raise SystemExit(f"Required release file missing: {path}")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    lines.append(f"{digest}  {path.relative_to(root)}")
+(root / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n")
+PY
+git -C "$ROOT" rev-parse HEAD > "$OUT/SOURCE_COMMIT.txt"
+
 echo "[5/5] Combined firmware available at: $OUT"
 ls -lh "$OUT/"*.bin
 echo "Open $OUT/CuteDisplayBrain/CuteDisplayBrain.ino in Arduino IDE"
