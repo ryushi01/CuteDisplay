@@ -6,6 +6,7 @@ on:
     branches: [feature/realtime-call-c5v21]
     paths:
       - 'gateway/**'
+      - 'server/**'
       - 'ios/CuteDisplay/**'
       - '.github/workflows/check-realtime-gateway.yml'
 
@@ -39,3 +40,15 @@ jobs:
         run: |
           xcrun swiftc -frontend -parse ios/CuteDisplay/ContentView.swift
           xcrun swiftc -frontend -parse ios/CuteDisplay/BluetoothManager.swift
+
+  server-auth-patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile direct WebUI realtime auth patch
+        run: python -m py_compile server/patch_openwebui_realtime_api_key.py
+      - name: Test version guard and API-key permission delegation
+        run: python -m unittest discover -s server -p 'test_*.py' -v
