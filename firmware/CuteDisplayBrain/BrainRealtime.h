@@ -40,7 +40,7 @@ inline bool validURL(const String &u){
   String port=authority.substring(colon+1);
   authority=authority.substring(0,colon);
   if(port.isEmpty()||port.length()>5)return false;
-  for(char c:port)if(c<'0'||c>'9')return false;
+  for(size_t i=0;i<port.length();i++)if(port[i]<'0'||port[i]>'9')return false;
   int number=port.toInt();
   if(number<=0||number>65535)return false;
  }
@@ -88,7 +88,7 @@ inline void onSocket(WStype_t kind,uint8_t *payload,size_t length){
   cJSON *raw=cJSON_GetObjectItem(root,"nonce");
   String nonce=cJSON_IsString(raw)?String(raw->valuestring):String("");
   bool ok=nonce.length()==48;
-  for(char ch:nonce)if(!isxdigit((unsigned char)ch))ok=false;
+  for(size_t i=0;i<nonce.length();i++)if(!isxdigit((unsigned char)nonce[i]))ok=false;
   if(!ok || !validHex(deviceKey)){state("ERROR");socket.disconnect();}
   else{
    String msg=String("CuteDisplay-RT-v1|")+DEVICE_ID+"|"+nonce;
