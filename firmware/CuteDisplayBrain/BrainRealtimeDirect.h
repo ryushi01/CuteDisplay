@@ -51,12 +51,30 @@ inline void reload(){
  }
  if(url.endsWith("/"))url.remove(url.length()-1);
 }
-inline bool valid(){
- if(WiFi.status()!=WL_CONNECTED || !BrainClock::valid())return false;
+// Fixed reason codes only: NEVER print the URL, model, key or their bytes.
+// This local preflight does NOT validate server-side permissions or credentials.
+inline const char *preflightError(){
+ if(WiFi.status()!=WL_CONNECTED)return "S3_WIFI_OFFLINE";
+ if(!BrainClock::valid())return "S3_CLOCK_UNSYNCED";
+ if(url.isEmpty())return "OPENWEBUI_URL_MISSING";
  if(!url.startsWith("https://")||url.indexOf('@')>=0||
-    url.indexOf('#')>=0||url.indexOf('?')>=0||url.length()>256)return false;
- if(!model.length()||model.length()>128 || !key.startsWith("sk-"))return false;
- return true;
+    url.indexOf('#')>=0||url.indexOf('?')>=0||url.length()>256)
+  return "OPENWEBUI_URL_INVALID";
+ if(model.isEmpty()||model.length()>128)return "OPENWEBUI_MODEL_MISSING_OR_INVALID";
+ if(!key.startsWith("sk-")||key.length()<=20)return "S3_SAVED_KEY_NOT_VALID_SK_FORMAT";
+ return nullptr;
+}
+inline bool valid(){return preflightError()==nullptr;}
+inline void diagnose(bool audioBusy){
+ reload();
+ const char *err=preflightError();
+ if(audioBusy)Serial.println("[CALL] DIAG: AUDIO_BUSY");
+ else if(err)Serial.printf("[CALL] DIAG: %s\\n",err);
+ else Serial.println("[CALL] DIAG: PREFLIGHT_PASS");
+ Serial.printf("[CALL] DIAG: wifi_connected=%d clock_valid=%d url_configured=%d model_configured=%d sk_key_format=%d audio_busy=%d\\n",
+  WiFi.status()==WL_CONNECTED?1:0,BrainClock::valid()?1:0,
+  !url.isEmpty()?1:0,!model.isEmpty()?1:0,
+  key.startsWith("sk-")&&key.length()>20?1:0,audioBusy?1:0);
 }
 inline void stop(){
  requested=false;ready=false;connected=false;started=false;
@@ -162,7 +180,11 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
 }
 inline bool connect(){
  reload();
- if(!valid()){status("CALL_ERROR");return false;}
+ if(!valid()){
+  const char *reason=preflightError();
+  Serial.printf("[CALL] PREFLIGHT REFUSED: %s\\n",reason?reason:"UNKNOWN");
+  status("CALL_ERROR");return false;
+ }
  int end=url.indexOf('/',8);
  String authority=end<0?url.substring(8):url.substring(8,end);
  if(authority.isEmpty()||authority.indexOf('[')>=0||
@@ -202,7 +224,10 @@ inline void init(){
 }
 inline bool toggle(bool audioBusy){
  if(requested){stop();return true;}
- if(audioBusy){status("CALL_ERROR");return false;}
+ if(audioBusy){
+  Serial.println("[CALL] PREFLIGHT REFUSED: AUDIO_BUSY");
+  status("CALL_ERROR");return false;
+ }
  reload();
  if(!valid()){status("CALL_ERROR");return false;}
  requested=true;
