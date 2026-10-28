@@ -213,6 +213,11 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   cJSON_AddStringToObject(auth,"type","auth");
   cJSON_AddStringToObject(auth,"token",key.c_str());
   cJSON_AddStringToObject(auth,"model_id",model.c_str());
+  // Optional server-side feature negotiation. Unpatched/older Open WebUI
+  // safely ignores this field and preserves the proven audio path.
+  // It enables set_expression ONLY for this Kitty-capable S3, never for
+  // ordinary browser/mobile voice clients.
+  cJSON_AddBoolToObject(auth,"kitty_expressions",true);
   char* json=cJSON_PrintUnformatted(auth);
   cJSON_Delete(auth);
   if(!json){fail("JSON");return;}
@@ -313,18 +318,36 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
      toolResponseFinished=false;
      status("CALL_THINKING");
     }
-   }else if(strcmp(name->valuestring,"play_animation")==0){
-    // Open WebUI exposes model-authorized avatar gestures (if configured).
+   }else if(strcmp(name->valuestring,"set_expression")==0 ||
+             strcmp(name->valuestring,"play_animation")==0){
+    // New set_expression tool has a fixed eight-emotion allowlist and is
+    // offered only after S3 capability negotiation. Keep legacy avatar
+    // gestures working for servers that already have them.
     // Honor ONLY gestures explicitly validated by the existing bridge;
     // never send unsolicited function/tool calls to the model.
     cJSON *arg=cJSON_GetObjectItem(item,"arguments");
     cJSON *args=cJSON_IsString(arg)?cJSON_Parse(arg->valuestring):nullptr;
-    cJSON *nameParam=cJSON_GetObjectItem(args,"name");
-    int mood=cJSON_IsString(nameParam)?emotionForGesture(nameParam->valuestring):-1;
+    bool expressionTool=strcmp(name->valuestring,"set_expression")==0;
+    cJSON *nameParam=cJSON_GetObjectItem(args,expressionTool?"emotion":"name");
+    int mood=-1;
+    if(cJSON_IsString(nameParam)){
+     if(expressionTool){
+      static const char* const names[8]={
+       "neutral","happy","sad","angry","hungry","sleepy","excited","shy"
+      };
+      for(int k=0;k<8;k++)if(strcmp(nameParam->valuestring,names[k])==0){
+       mood=k;break;
+      }
+     }else mood=emotionForGesture(nameParam->valuestring);
+    }
     const bool allowed=cJSON_IsTrue(cJSON_GetObjectItem(json,"animation_valid"));
     if(args)cJSON_Delete(args);
     const bool started=allowed && mood>=0;
-    if(started)chooseMood(mood,true);
+    if(started){
+     chooseMood(mood,true);
+     Serial.printf("[CALL FACE] AI set expression=%d (%s)\n",mood,
+                   expressionTool?"set_expression":"play_animation");
+    }
     cJSON *out=cJSON_CreateObject();
     if(out){
      cJSON_AddStringToObject(out,"type","bridge.animation.result");
