@@ -663,6 +663,46 @@ final class BluetoothManager: NSObject, ObservableObject {
         status = "Sending AI prompt to S3 Brain (\(commands.count) commands)"
     }
 
+    // One-time realtime gateway pairing. Only a device-scoped secret is sent
+    // across the existing encrypted Brain BLE transport, never WebUI login/MFA.
+    // This command path deliberately refuses LAN fallback for secret provisioning.
+    func provisionRealtimeGateway(url: String, deviceSecret: String,
+                                  caCertificate: String, autoJoin: Bool) {
+        guard bleReady() else {
+            status = "Realtime setup requires Brain encrypted Bluetooth"
+            return
+        }
+        let urlValue = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keyValue = deviceSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        let caValue = caCertificate.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+        guard urlValue.hasPrefix("wss://"), !urlValue.contains("@"),
+              !urlValue.contains("#"), !urlValue.contains("?"),
+              urlValue.utf8.count <= 256,
+              keyValue.utf8.count == 64 && keyValue.allSatisfy({ $0.isHexDigit }),
+              caValue.contains("-----BEGIN CERTIFICATE-----"),
+              caValue.contains("-----END CERTIFICATE-----"),
+              caValue.utf8.count <= 4096 else {
+            status = "Enter valid WSS hostname, 64-hex device secret and public CA PEM"
+            return
+        }
+        let fields = [("U", urlValue), ("S", keyValue), ("C", caValue)]
+        var commands: [String] = []
+        for (name, value) in fields {
+            let bytes = Array(value.utf8)
+            commands.append("RT:BEGIN:\(name):\(bytes.count)")
+            for offset in stride(from: 0, to: bytes.count, by: 40) {
+                let fragment = bytes[offset..<min(bytes.count, offset + 40)]
+                commands.append("RT:DATA:" + fragment.map {
+                    String(format: "%02X", $0)
+                }.joined())
+            }
+            commands.append("RT:END")
+        }
+        commands.append("RT:AUTO:\(autoJoin ? 1 : 0)")
+        enqueue(commands)
+        status = "Sending one-time Realtime pairing to S3 (\(commands.count) steps)"
+    }
+
     // Wi-Fi credentials are provisioned over the connected BLE link.
     // Only use a network that you control. Password is never logged.
     func connectWiFi(ssid: String, password: String) {
