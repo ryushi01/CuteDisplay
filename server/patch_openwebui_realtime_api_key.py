@@ -54,16 +54,145 @@ async def _cutedisplay_verified_realtime_user(ws: WebSocket, token: str, redis=N
 }
 
 
+# A separate capability, opt-in only for S3 callers. The server source may
+# already have the original secure API-key patch deployed, so both base states
+# are supported. We never replace, loosen or bypass existing authorization.
+EXPRESSION_MARKER = "# CuteDisplay realtime facial expressions (opt-in v1)"
+EXPRESSION_MOODS = ("neutral", "happy", "sad", "angry", "hungry", "sleepy", "excited", "shy")
+EXPRESSION_TOOL = """
+KITTY_EXPRESSIONS = ("neutral", "happy", "sad", "angry", "hungry", "sleepy", "excited", "shy")
+KITTY_EXPRESSION_TOOL = {
+    'type': 'function',
+    'name': 'set_expression',
+    'description': (
+        'Change your Kitty companion face to match the emotional tone of your '
+        'speech. Use happy, sad, angry, excited, sleepy, shy, hungry or neutral '
+        'when genuinely appropriate. Do not narrate the expression command; '
+        'continue the spoken conversation normally. Prefer at most one change '
+        'per spoken answer, only when the emotional tone changes.'
+    ),
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'emotion': {'type': 'string', 'enum': list(KITTY_EXPRESSIONS)}
+        },
+        'required': ['emotion'],
+        'additionalProperties': False,
+    },
+}
+KITTY_EXPRESSION_INSTRUCTIONS = (
+    "\\nYou have a small animated Kitty companion face. When your emotion changes, "
+    "call set_expression with one supported emotion before speaking. "
+    "Use it sparingly, never verbalize the control, and continue the response."
+)
+""" + EXPRESSION_MARKER + "\\n"
+
+EXPRESSION_ANCHORS = {
+    "call_protocol": "def __init__(self, gestures=()):",
+    "call_protocol_state": "self.gesture_names = {gesture.name for gesture in gestures}",
+    "observer": "if item.get('name') == 'play_animation':",
+    "auth": "token = auth['token']",
+    "protocol": "protocol = CallProtocol(\\n            model_info.meta.voice_avatar.gestures if model_info and model_info.meta.voice_avatar else ()\\n        )",
+    "instructions": "+ (AVATAR_CALL_INSTRUCTIONS if protocol.animation_tools else '')",
+    "tools": "'tools': [CHAT_TOOL, *protocol.animation_tools],",
+}
+
+def patch_expressions(source):
+    if EXPRESSION_MARKER in source:
+        return source
+    for name, anchor in EXPRESSION_ANCHORS.items():
+        if source.count(anchor) != 1:
+            raise ValueError(
+                f"Unsupported Realtime version: expected one {name} anchor, "
+                f"found {source.count(anchor)}"
+            )
+    result = source.replace("class CallProtocol:", EXPRESSION_TOOL + "\\nclass CallProtocol:", 1)
+    result = result.replace(
+        "def __init__(self, gestures=()):",
+        "def __init__(self, gestures=(), kitty_expressions=False):",
+        1,
+    )
+    result = result.replace(
+        "self.gesture_names = {gesture.name for gesture in gestures}",
+        "self.kitty_expressions = bool(kitty_expressions)\\n        "
+        "self.gesture_names = {gesture.name for gesture in gestures}",
+        1,
+    )
+    result = result.replace(
+        "if item.get('name') == 'play_animation':",
+        """if item.get('name') == 'set_expression' and self.kitty_expressions:
+                    # Reuse the existing validated animation result/continuation
+                    # protocol; the ESP32 already supports it. Keep call IDs
+                    # scoped to the authenticated WebSocket session.
+                    if item['call_id'] in self.animation_seen:
+                        return
+                    if len(self.animation_seen) >= 4096:
+                        raise ValueError('Call limit reached. Start a new call.')
+                    try:
+                        args = JSONCodec.loads(item.get('arguments', ''))
+                        valid = (isinstance(args, dict) and set(args) == {'emotion'}
+                                 and type(args['emotion']) is str
+                                 and args['emotion'] in KITTY_EXPRESSIONS)
+                    except (ValueError, TypeError, KeyError):
+                        valid = False
+                    event['animation_valid'] = bool(valid)
+                    self.animation_seen.add(item['call_id'])
+                    self.animation_calls[item['call_id']] = (event['response_id'], bool(valid))
+                    self.animation_responses.add(event['response_id'])
+                    return
+                if item.get('name') == 'play_animation':""",
+        1,
+    )
+    result = result.replace(
+        "token = auth['token']",
+        """# Optional capability is set only by the authenticated device. Unknown
+        # clients (browser and older S3 firmware) keep unchanged behavior.
+        kitty_expressions = auth.get('kitty_expressions') is True
+        token = auth['token']""",
+        1,
+    )
+    result = result.replace(
+        EXPRESSION_ANCHORS["protocol"],
+        "protocol = CallProtocol(\\n"
+        "            model_info.meta.voice_avatar.gestures if model_info and model_info.meta.voice_avatar else (),\\n"
+        "            kitty_expressions=kitty_expressions,\\n"
+        "        )",
+        1,
+    )
+    result = result.replace(
+        EXPRESSION_ANCHORS["instructions"],
+        "+ (AVATAR_CALL_INSTRUCTIONS if protocol.animation_tools else '')\\n"
+        "                            + (KITTY_EXPRESSION_INSTRUCTIONS if protocol.kitty_expressions else '')",
+        1,
+    )
+    result = result.replace(
+        EXPRESSION_ANCHORS["tools"],
+        "'tools': [CHAT_TOOL, *protocol.animation_tools, *([KITTY_EXPRESSION_TOOL] if protocol.kitty_expressions else [])],",
+        1,
+    )
+    compile(result, TARGET, "exec")
+    return result
+
+
 def patch(source):
+    # Preserve an existing auth patch when building on the already-deployed
+    # Open WebUI image; never reapply auth and accidentally double-modify it.
     if MARKER in source:
-        raise ValueError("Already patched; verify your deployed server instead")
-    for name, old in OLD.items():
-        count = source.count(old)
-        if count != 1:
-            raise ValueError(f"Unsupported Open WebUI version: expected exactly one {name} anchor, found {count}")
-    result = source
-    for name in ("fastapi", "auth", "router", "initial", "renew"):
-        result = result.replace(OLD[name], NEW[name], 1)
+        if source.count(MARKER) != 1:
+            raise ValueError("Multiple authorization patch markers")
+        result = source
+    else:
+        for name, old in OLD.items():
+            count = source.count(old)
+            if count != 1:
+                raise ValueError(
+                    f"Unsupported Open WebUI version: expected exactly one "
+                    f"{name} anchor, found {count}"
+                )
+        result = source
+        for name in ("fastapi", "auth", "router", "initial", "renew"):
+            result = result.replace(OLD[name], NEW[name], 1)
+    result = patch_expressions(result)
     compile(result, TARGET, "exec")
     return result
 
@@ -85,15 +214,18 @@ def main():
     except (SyntaxError, ValueError) as exc:
         parser.error(str(exc))
     if args.check:
-        print("PASS: source compatible with scoped API-key realtime patch (no changes made)")
+        print("PASS: source compatible with existing API-key authentication and opt-in Kitty expressions (no changes made)")
         print("Direct device endpoint remains: wss://YOUR-WEBUI-HOST/api/v1/audio/realtime")
         return 0
     backup = target.with_suffix(".py.cutedisplay-original")
     if backup.exists():
         parser.error(f"Refusing to overwrite source backup: {backup}")
+    if updated == original:
+        print("PASS: realtime auth and expression capability already installed")
+        return 0
     shutil.copy2(target, backup)
     target.write_text(updated)
-    print("PATCHED Open WebUI source:", target)
+    print("PATCHED Open WebUI source (auth preserved, Kitty expressions opt-in):", target)
     print("BACKUP of pristine source:", backup)
     print("No running server was modified. Inspect git diff, rebuild and run permissions/revocation tests.")
     return 0
