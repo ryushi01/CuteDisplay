@@ -63,6 +63,14 @@ mkdir -p "$OUT/lcd"
 cp -R "$WORK/lcd/." "$OUT/lcd/"
 cp "$WORK/build-c5/lcd.ino.bin" "$OUT/C5-v${VERSION}-application.bin"
 
+# Realtime experiment must NEVER silently replace hardware-tested C5 v21.
+# Fail the release build if the explicit RAM-only USB consent gate disappears.
+if [ "$VERSION" -eq 22 ]; then
+  grep -Fq 'static bool experimentalC5OTAApproved=false;'     "$ROOT/firmware/CuteDisplayBrain/CuteDisplayBrain.ino"
+  grep -Fq 'BrainC5OTA::permitUpdate=experimentalC5OTAApproved &&'     "$ROOT/firmware/CuteDisplayBrain/CuteDisplayBrain.ino"
+  echo "PASS: experimental C5 v22 OTA blocked until USB-only consent"
+fi
+
 echo "[3/5] Embed C5 v$VERSION in S3 firmware"
 mkdir -p "$WORK/CuteDisplayBrain"
 cp -R "$ROOT/firmware/CuteDisplayBrain/." "$WORK/CuteDisplayBrain/"
@@ -91,8 +99,8 @@ cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
 cat > "$OUT/READ_ME_FIRST.txt" <<EOF
 CuteDisplay combined firmware build: S3 Brain + C5 v$VERSION
 =======================================================
-HARDWARE-TESTED: on 2026-10-27 user confirmed C5 v1 -> v2 UART OTA,
-C5 reboot, post-boot version success, Kitty and iPhone app functionality.
+EXPERIMENTAL 24 kHz voice on S3 and C5 v22: NOT YET HARDWARE TESTED.
+Hardware-tested C5 v21 checkpoint MUST be preserved for recovery.
 
 NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
 1. Open CuteDisplayBrain/CuteDisplayBrain.ino FROM THIS ARTIFACT.
@@ -102,8 +110,14 @@ NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
    for MP3 voice replies. Recording sends 8-bit PCM WAV (16 kHz)
    with 16-bit PCM WAV fallback; no extra recording codec library.
 4. Upload ONLY the S3 sketch, then open Serial Monitor at 115200.
-5. S3 upgrades C5 automatically ONLY if bundled version is newer.
-   Expect: [S3 OTA] SUCCESS: new display firmware confirmed after reboot
+5. EXPERIMENTAL v22: S3 DOES NOT auto-upgrade C5.
+   It is safe to test realtime audio on S3 while C5 stays on hardware-tested v21.
+   USB Serial Monitor: call status, call start, call stop.
+   Confirm: c5 ota status -> approved=0
+6. ONLY when you choose to upgrade C5, type c5 ota enable in S3 USB
+   Serial Monitor; this opts in to v22 for this boot and starts OTA when idle.
+   Expect: [S3 OTA] SUCCESS: new display firmware confirmed after reboot.
+   Do not issue c5 ota enable for the initial S3-only hardware test.
 
 The CombinedFirmwareImage.h from the normal repository is deliberately EMPTY.
 Never upload the repository's S3 sketch as a combined firmware release;
