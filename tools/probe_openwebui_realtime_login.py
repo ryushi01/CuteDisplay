@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Prompt for Open WebUI password login, then run the no-audio realtime bridge probe.
+"""Prompt for Open WebUI password + authenticator code, then probe Realtime.
 
-The password and returned session token stay in memory. Supports local password
-auth only; SSO/MFA accounts need an alternative authenticated test workflow.
+The password, MFA code and resulting session token are kept in process memory.
+Supports local password + already-enrolled TOTP MFA (or no MFA). SSO,
+unconfigured MFA, and administrator MFA resets require separate login workflows.
 Requires tools/probe_openwebui_realtime.py and websockets>=14,<17.
 """
 import argparse
@@ -15,6 +16,25 @@ import sys
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
+
+
+def post_json(url, fields, action):
+    body = json.dumps(fields).encode("utf-8")
+    request = Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urlopen(request, timeout=30) as response:
+            payload = json.load(response)
+    except HTTPError as exc:
+        print(f"{action} failed (HTTP {exc.code}). Verify account settings and try again; no tokens were printed.",
+              file=sys.stderr)
+        return None
+    except (URLError, TimeoutError, ValueError) as exc:
+        print(f"{action} failed ({type(exc).__name__}).", file=sys.stderr)
+        return None
+    if not isinstance(payload, dict):
+        print(f"{action} returned an unexpected response.", file=sys.stderr)
+        return None
+    return payload
 
 
 def main():
@@ -30,24 +50,44 @@ def main():
     password = getpass("Open WebUI password (hidden): ")
     if not email or not password:
         parser.error("Login email and password required")
-
-    body = json.dumps({"email": email, "password": password}).encode("utf-8")
+    payload = post_json(
+        base + "/api/v1/auths/signin",
+        {"email": email, "password": password},
+        "Password login",
+    )
     del password
-    request = Request(base + "/api/v1/auths/signin", data=body,
-                      headers={"Content-Type": "application/json"},
-                      method="POST")
-    try:
-        with urlopen(request, timeout=30) as response:
-            payload = json.load(response)
-    except HTTPError as exc:
-        print(f"Login HTTP {exc.code}. Password login may be disabled, or credentials/MFA need attention.", file=sys.stderr)
+    if payload is None:
         return 1
-    except (URLError, TimeoutError, ValueError) as exc:
-        print(f"Unable to reach or decode login response: {type(exc).__name__}", file=sys.stderr)
+
+    if payload.get("next_step") == "verify":
+        challenge = payload.get("challenge_token")
+        if not isinstance(challenge, str) or not challenge:
+            print("Server sent MFA verification without a challenge token.", file=sys.stderr)
+            return 1
+        print("Password accepted. Open your authenticator app for a fresh one-time code.")
+        code = getpass("6-digit authenticator code (hidden): ").strip()
+        if len(code) != 6 or not code.isascii() or not code.isdigit():
+            print("Expected six digits. No verification request sent.", file=sys.stderr)
+            return 1
+        payload = post_json(
+            base + "/api/v1/auths/mfa/verify",
+            {"challenge_token": challenge, "code": code, "recovery": False},
+            "2FA verification",
+        )
+        del code
+        if payload is None:
+            return 1
+        print("2FA verified.")
+    elif payload.get("next_step"):
+        print("This account needs a different login step ("
+              + str(payload.get("next_step"))
+              + "). Complete setup or use the normal browser login; do not disable MFA.",
+              file=sys.stderr)
         return 1
+
     token = payload.get("token")
     if not isinstance(token, str) or not token:
-        print("Login did not provide a user-session token (possibly MFA/SSO). No probe attempted.", file=sys.stderr)
+        print("Login did not provide a user-session JWT. No probe attempted.", file=sys.stderr)
         return 1
     env = dict(os.environ)
     env["OPENWEBUI_SESSION_JWT"] = token
