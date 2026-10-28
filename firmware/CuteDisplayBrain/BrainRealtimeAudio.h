@@ -25,17 +25,31 @@ struct Frame { int16_t pcm[SAMPLES]; };
 struct Buffers {
  int32_t capture[SAMPLES*2];
  int32_t output[SAMPLES*2];
- Frame mic,speaker,discard;
+ Frame mic, speaker, discard;
 };
 static Buffers *work=nullptr;
-static QueueHandle_t micQueue=nullptr, speakerQueue=nullptr;
-// ESP-IDF's dynamically created FreeRTOS queues use internal memory.
-// 16+48 audio frames = 60KB; this can exhaust SRAM after Wi-Fi/WSS TLS.
-// Allocate only the queue payload storage in PSRAM, using static queues,
-// while small queue control blocks stay in internal DRAM.
-static StaticQueue_t micQueueControl, speakerQueueControl;
-static uint8_t *micQueueStorage=nullptr, *speakerQueueStorage=nullptr;
-static constexpr UBaseType_t MIC_FRAMES=16, SPEAKER_FRAMES=48;
+// Core 0 drains speaker audio at hardware clock rate. A realtime provider can
+// deliver several seconds of PCM in one WebSocket event, much faster than 1x
+// playback. A fixed 960ms speaker queue cannot hold those bursts.
+// Keep a bounded PCM16 mono ring in PSRAM, independent from the 20ms mic queue.
+static QueueHandle_t micQueue=nullptr;
+static StaticQueue_t micQueueControl;
+static uint8_t *micQueueStorage=nullptr;
+static constexpr UBaseType_t MIC_FRAMES=16;
+static int16_t *speakerRing=nullptr;
+static size_t speakerCapacity=0, speakerRead=0, speakerWrite=0, speakerCount=0;
+static portMUX_TYPE speakerMux=portMUX_INITIALIZER_UNLOCKED;
+static volatile uint32_t speakerOverrunSamples=0, speakerOverrunEvents=0;
+static volatile uint32_t speakerPeakSamples=0;
+static volatile uint32_t speakerUnderruns=0;
+inline uint32_t bufferedMs(){
+ portENTER_CRITICAL(&speakerMux);
+ size_t count=speakerCount;
+ portEXIT_CRITICAL(&speakerMux);
+ return (uint32_t)((count*1000ULL)/RATE);
+}
+inline uint32_t droppedSpeakerMs(){return (uint32_t)((speakerOverrunSamples*1000ULL)/RATE);}
+inline uint32_t peakSpeakerMs(){return (uint32_t)((speakerPeakSamples*1000ULL)/RATE);}
 static const char *lastError="NOT_STARTED";
 inline const char *issue(){return lastError;}
 inline void reportError(const char *stage,esp_err_t err=ESP_OK){
@@ -58,31 +72,72 @@ inline bool active(){return running;}
 inline bool initialized(){return running && ready && !fault;}
 inline bool failed(){return fault;}
 inline bool hasSpeakerAudio(){
- return playing || (speakerQueue && uxQueueMessagesWaiting(speakerQueue)>0);
+ portENTER_CRITICAL(&speakerMux);
+ bool buffered=speakerCount>0;
+ portEXIT_CRITICAL(&speakerMux);
+ return playing || buffered;
 }
 inline void setRemoteReply(bool active){remoteReply=active;}
 inline void clearSpeaker(){
- if(speakerQueue)xQueueReset(speakerQueue);
+ portENTER_CRITICAL(&speakerMux);
+ speakerRead=0;speakerWrite=0;speakerCount=0;
+ portEXIT_CRITICAL(&speakerMux);
  remoteReply=false;
 }
 inline bool takeMic(Frame &f){
  return micQueue && xQueueReceive(micQueue,&f,0)==pdTRUE;
 }
+// No network callback waits on the 24kHz DAC clock. Provider data are accepted
+// immediately into PSRAM, including large deltas delivered in a single burst.
+// A pathological >ring-size response discards the oldest pending audio rather
+// than failing the WebSocket call. Count overruns for diagnostics.
 inline bool queueSpeaker(const uint8_t *pcm,size_t bytes){
- if(!ready || !speakerQueue || !pcm || !bytes || (bytes&1u))return false;
- const size_t frames=(bytes/2+SAMPLES-1)/SAMPLES;
- if(frames>uxQueueSpacesAvailable(speakerQueue))return false;
- Frame f={};
- size_t sample=0, total=bytes/2;
- for(size_t chunk=0;chunk<frames;chunk++){
-  memset(&f,0,sizeof(f));
-  for(size_t i=0;i<SAMPLES && sample<total;i++,sample++){
-   size_t off=sample*2;
-   f.pcm[i]=(int16_t)((uint16_t)pcm[off]|((uint16_t)pcm[off+1]<<8));
+ if(!ready || !speakerRing || !pcm || !bytes || (bytes&1u))return false;
+ size_t total=bytes/2;
+ size_t at=0;
+ while(at<total){
+  const size_t n=min((size_t)SAMPLES,total-at);
+  int16_t block[SAMPLES];
+  for(size_t i=0;i<n;i++){
+   const size_t off=(at+i)*2;
+   block[i]=(int16_t)((uint16_t)pcm[off]|((uint16_t)pcm[off+1]<<8));
   }
-  if(xQueueSend(speakerQueue,&f,0)!=pdTRUE)return false;
+  portENTER_CRITICAL(&speakerMux);
+  if(n>speakerCapacity-speakerCount){
+   const size_t discard=n-(speakerCapacity-speakerCount);
+   speakerRead=(speakerRead+discard)%speakerCapacity;
+   speakerCount-=discard;
+   speakerOverrunSamples+=(uint32_t)discard;
+   speakerOverrunEvents++;
+  }
+  const size_t beforeWrap=min(n,speakerCapacity-speakerWrite);
+  memcpy(speakerRing+speakerWrite,block,beforeWrap*sizeof(int16_t));
+  if(n>beforeWrap)memcpy(speakerRing,block+beforeWrap,(n-beforeWrap)*sizeof(int16_t));
+  speakerWrite=(speakerWrite+n)%speakerCapacity;
+  speakerCount+=n;
+  if(speakerCount>speakerPeakSamples)speakerPeakSamples=(uint32_t)speakerCount;
+  portEXIT_CRITICAL(&speakerMux);
+  at+=n;
  }
  return true;
+}
+inline bool nextSpeaker(Frame &frame){
+ bool haveAudio=false;
+ memset(&frame,0,sizeof(frame));
+ portENTER_CRITICAL(&speakerMux);
+ const size_t n=min((size_t)SAMPLES,speakerCount);
+ if(n){
+  haveAudio=true;
+  const size_t beforeWrap=min(n,speakerCapacity-speakerRead);
+  memcpy(frame.pcm,speakerRing+speakerRead,beforeWrap*sizeof(int16_t));
+  if(n>beforeWrap)memcpy(frame.pcm+beforeWrap,speakerRing,(n-beforeWrap)*sizeof(int16_t));
+  speakerRead=(speakerRead+n)%speakerCapacity;
+  speakerCount-=n;
+ }else if(remoteReply){
+  speakerUnderruns++;
+ }
+ portEXIT_CRITICAL(&speakerMux);
+ return haveAudio;
 }
 
 static void audioTask(void *){
@@ -129,7 +184,7 @@ static void audioTask(void *){
    if(readError!=ESP_OK || read!=sizeof(work->capture)){
     reportError("MIC_READ",readError);break;
    }
-   bool hasAudio=xQueueReceive(speakerQueue,&work->speaker,0)==pdTRUE;
+   bool hasAudio=nextSpeaker(work->speaker);
    playing=hasAudio;
    if(hasAudio)lastPlaybackMs=millis();
    // Wait until provider has stopped responding AND acoustic tail is gone.
@@ -177,31 +232,39 @@ static void audioTask(void *){
 
 inline bool start(uint16_t gain,uint8_t volume){
  if(running || owner)return false;
- // Allocate 60KB of queue payloads in PSRAM, not scarce internal SRAM.
+ // The 8MB-PSRAM S3 needs to absorb bursts from upstream TTS.
+ // Prefer 24 seconds (1.15MB), fall back to 12 or 6 seconds when memory
+ // is fragmented. Even 6s dwarfs the old 960ms fixed queue.
  if(!psramFound()){
   reportError("NO_PSRAM_ENABLE_OPI");return false;
  }
  if(!work)
   work=(Buffers*)heap_caps_calloc(1,sizeof(Buffers),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
  if(!work){reportError("PSRAM_AUDIO_BUFFERS");return false;}
- if(!micQueueStorage)
-  micQueueStorage=(uint8_t*)heap_caps_malloc(MIC_FRAMES*sizeof(Frame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
- if(!speakerQueueStorage)
-  speakerQueueStorage=(uint8_t*)heap_caps_malloc(SPEAKER_FRAMES*sizeof(Frame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
- if(!micQueueStorage||!speakerQueueStorage){
-  reportError("PSRAM_QUEUE_STORAGE");return false;
+ if(!speakerRing){
+  for(uint32_t seconds: {24u,12u,6u}){
+   size_t candidate=(size_t)RATE*seconds;
+   speakerRing=(int16_t*)heap_caps_malloc(candidate*sizeof(int16_t),
+                                          MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+   if(speakerRing){speakerCapacity=candidate;break;}
+  }
  }
+ if(!speakerRing || speakerCapacity<SAMPLES){
+  reportError("PSRAM_SPEAKER_RING");return false;
+ }
+ if(!micQueueStorage)
+  micQueueStorage=(uint8_t*)heap_caps_malloc(MIC_FRAMES*sizeof(Frame),
+                                             MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!micQueueStorage){reportError("PSRAM_MIC_STORAGE");return false;}
  if(!micQueue)
   micQueue=xQueueCreateStatic(MIC_FRAMES,sizeof(Frame),micQueueStorage,&micQueueControl);
- if(!speakerQueue)
-  speakerQueue=xQueueCreateStatic(SPEAKER_FRAMES,sizeof(Frame),speakerQueueStorage,&speakerQueueControl);
- if(!micQueue||!speakerQueue){
-  reportError("STATIC_QUEUE_CREATE");return false;
- }
- Serial.printf("[CALL AUDIO] PSRAM queues ready: uplink=%u downlink=%u frames; internal free=%lu\n",
-   (unsigned)MIC_FRAMES,(unsigned)SPEAKER_FRAMES,
-   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
- xQueueReset(micQueue);xQueueReset(speakerQueue);
+ if(!micQueue){reportError("STATIC_MIC_QUEUE");return false;}
+ Serial.printf("[CALL AUDIO] PSRAM buffers ready: speaker_capacity=%lu ms mic_frames=%u internal_free=%lu\\n",
+  (unsigned long)(speakerCapacity*1000ULL/RATE),(unsigned)MIC_FRAMES,
+  (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+ xQueueReset(micQueue);
+ clearSpeaker();
+ speakerOverrunSamples=0;speakerOverrunEvents=0;speakerPeakSamples=0;speakerUnderruns=0;
  micGain=constrain((int)gain,0,300);
  speakerVolume=constrain((int)volume,0,100);
  lastPlaybackMs=millis()-TAIL_MUTE_MS;
@@ -222,7 +285,7 @@ inline void stop(){
  while(running && (uint32_t)(millis()-since)<450) vTaskDelay(pdMS_TO_TICKS(2));
  remoteReply=false;ready=false;
  if(micQueue)xQueueReset(micQueue);
- if(speakerQueue)xQueueReset(speakerQueue);
+ clearSpeaker();
  if(running)Serial.println("[CALL] I2S teardown still finishing; legacy audio stays blocked");
 }
 } // namespace BrainRealtimeAudio
