@@ -35,6 +35,7 @@ static String failedCallId, failedCallAnswer;
 static int pendingMood=-1;
 static uint8_t currentMood=1;
 static uint32_t moodUpdatedAt=0;
+static uint32_t lastExplicitMoodAt=0; // AI tool is authoritative over text heuristics
 inline int emotionForText(String phrase){
  phrase.toLowerCase();
  // English, French and Japanese. Sentiment fallback is intentionally
@@ -78,7 +79,12 @@ inline int emotionForGesture(String name){
 inline void chooseMood(int m,bool explicitGesture){
  if(m<0 || m>7 || !requested)return;
  uint32_t now=millis();
+ // An explicit realtime tool choice wins for its full displayed lifetime;
+ // optional fragmentary transcript keywords must never overwrite it.
+ if(!explicitGesture && lastExplicitMoodAt &&
+    (uint32_t)(now-lastExplicitMoodAt)<10000UL)return;
  if(!explicitGesture && (uint32_t)(now-moodUpdatedAt)<1400UL)return;
+ if(explicitGesture)lastExplicitMoodAt=now;
  if(m==currentMood && !explicitGesture)return;
  currentMood=(uint8_t)m;pendingMood=m;moodUpdatedAt=now;
 }
@@ -167,7 +173,7 @@ inline void diagnose(bool audioBusy){
   key.startsWith("sk-")&&key.length()>20?1:0,audioBusy?1:0);
 }
 inline void stop(){
- pendingMood=-1;currentMood=1;moodUpdatedAt=0;
+ pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -177,7 +183,7 @@ inline void stop(){
  status("CALL_OFF");
 }
 inline void fail(const char *why){
- pendingMood=-1;currentMood=1;moodUpdatedAt=0;
+ pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
  const bool localAudio=(strcmp(why,"I2S_RUNTIME")==0 ||
    strcmp(why,"AUDIO_TASK_ALLOC")==0 ||
    strncmp(why,"NO_PSRAM",8)==0 ||
@@ -198,7 +204,7 @@ inline void fail(const char *why){
 }
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
-  pendingMood=-1;currentMood=1;
+  pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
   failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
@@ -453,7 +459,7 @@ inline bool connect(){
  return true;
 }
 inline void init(){
- pendingMood=-1;currentMood=1;moodUpdatedAt=0;
+ pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
  requested=false;started=false;connected=false;ready=false;
  remoteResponse=false;streamedSpeech=false;delegatedCallId="";animationResponseId="";
  toolResponseFinished=false;failedCallId="";failedCallAnswer="";
