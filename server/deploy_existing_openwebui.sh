@@ -32,7 +32,20 @@ if [[ "$IMAGE" != "ghcr.io/open-webui/open-webui:main" || "$STATE" != "running" 
   exit 1
 fi
 if [[ "$MODE" == "--check" ]]; then
-  echo "PASS: both images available. No Docker service was changed."
+  # Exercise the EXACT candidate image/volume check that deployment runs,
+  # rather than passing preflight and failing when deployment starts.
+  CHECK_OVERRIDE="$(mktemp "$HOME/cutedisplay-compose-check-XXXXXXXX.yaml")"
+  trap 'rm -f "$CHECK_OVERRIDE"' EXIT
+  cat > "$CHECK_OVERRIDE" <<'OVERRIDE'
+services:
+  open-webui:
+    image: cutedisplay/openwebui:realtime-apikey-candidate
+OVERRIDE
+  sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" -f "$CHECK_OVERRIDE" config --format json |
+    python3 "$SCRIPT_DIR/check_openwebui_compose_config.py" \
+      --expected-image "$CANDIDATE"
+  echo "PASS: original and candidate Compose configurations preserve real Docker volume and port 8080."
+  echo "No Docker service was changed."
   exit 0
 fi
 
