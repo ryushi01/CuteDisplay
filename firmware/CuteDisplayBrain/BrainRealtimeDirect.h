@@ -3,7 +3,7 @@
 // Uses existing saved BrainAI HTTPS URL + cutedisplay-ai model + revocable sk-
 // credential. No second gateway, provider URL, account password, OTP or JWT.
 // REQUIRES version-checked API-key support on Open WebUI realtime WebSocket.
-// Status/connection ONLY: no microphone input, audio playback, or fake listening.
+// EXPERIMENTAL: live 24k PCM mic + speaker. Hardware testing not yet completed.
 // C5 left short tap toggles session; manual long-hold PTT stays unchanged.
 // Links2004 arduinoWebSockets 2.7.2; ESP32 Arduino 3.3.12.
 // WSS must use embedded verified ESP-IDF certificate bundle, NEVER setInsecure.
@@ -13,13 +13,19 @@
 #include <WebSocketsClient.h>
 #include <esp_arduino_version.h>
 #include <cJSON.h>
+#include <mbedtls/base64.h>
+#include <esp_heap_caps.h>
 #include "BrainClock.h"
+#include "BrainAudioTest.h"
+#include "BrainRealtimeAudio.h"
 
 namespace BrainRealtimeDirect {
 extern const uint8_t ca_bundle_start[] asm("_binary_x509_crt_bundle_start");
 extern const uint8_t ca_bundle_end[] asm("_binary_x509_crt_bundle_end");
 static WebSocketsClient ws;
 static bool requested=false, started=false, connected=false, ready=false;
+static bool remoteResponse=false, streamedSpeech=false;
+static constexpr size_t MAX_EVENT_BYTES=65536;
 static uint32_t lastAttempt=0, lastPing=0;
 static String url, model, key;
 static String state="CALL_OFF";
@@ -54,19 +60,24 @@ inline bool valid(){
 }
 inline void stop(){
  requested=false;ready=false;connected=false;started=false;
+ remoteResponse=false;streamedSpeech=false;
+ BrainRealtimeAudio::stop();
  ws.disconnect();
  status("CALL_OFF");
 }
 inline void fail(const char *why){
  Serial.printf("[CALL] %s; verify Open WebUI key/call permission, TLS and patch\n",why);
- // Stop retries on rejected credentials or incompatible server.
+ // Stop retries on rejected credentials, unexpected PCM or incompatible server.
  requested=false;ready=false;connected=false;started=false;
+ remoteResponse=false;streamedSpeech=false;
+ BrainRealtimeAudio::stop();
  ws.disconnect();
  status("CALL_ERROR");
 }
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
-  connected=false;ready=false;
+  connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
+  BrainRealtimeAudio::stop();
   if(requested)status("CALL_CONNECTING");
   return;
  }
@@ -85,28 +96,69 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   if(!sent)fail("AUTH_TX");
   return;
  }
- if(event!=WStype_TEXT || !n || n>8192)return;
+ if(event!=WStype_TEXT)return;
+ if(!n||n>MAX_EVENT_BYTES){fail("OVERSIZED_EVENT");return;}
+ // JSON parsing happens only on the Arduino loop (Core 1). Never parse on
+ // the 24kHz I2S task, and never log transcription or response audio.
  String text;
- text.reserve(n+1);
+ if(!text.reserve(n+1)){fail("JSON_ALLOC");return;}
  for(size_t i=0;i<n;i++)text+=(char)payload[i];
  cJSON* json=cJSON_Parse(text.c_str());
- if(!json)return;
+ if(!json){fail("JSON_PARSE");return;}
  cJSON *typ=cJSON_GetObjectItem(json,"type");
  const char *type=cJSON_IsString(typ)?typ->valuestring:"";
+ const char *failure=nullptr;
  if(strcmp(type,"bridge.ready")==0){
   cJSON* rate=cJSON_GetObjectItem(json,"sample_rate");
-  if(!cJSON_IsNumber(rate)||rate->valueint!=24000)fail("SAMPLE_RATE");
-  else {ready=true;lastPing=millis();status("CALL_READY");}
+  if(!cJSON_IsNumber(rate)||rate->valueint!=24000)failure="SAMPLE_RATE";
+  else if(!BrainRealtimeAudio::start(BrainAudioTest::micGain,
+                                     BrainAudioTest::speakerVolume))
+   failure="I2S_START";
+  else{
+   ready=true;lastPing=millis();status("CALL_CONNECTING");
+  }
  }else if(strcmp(type,"bridge.error")==0){
-  // Error details may contain sensitive information. Do not log them.
-  fail("AUTH_OR_CALL_PERMISSION");
+  failure="AUTH_OR_PROVIDER_ERROR"; // Never log server's sensitive detail.
  }else if(strcmp(type,"bridge.pong")==0){
   lastPing=millis();
- }else if(strcmp(type,"response.output_audio.delta")==0){
-  // No mic/audio hardware in this stage. Refuse unexpected voice frames.
-  fail("UNEXPECTED_AUDIO");
+ }else if(strcmp(type,"response.created")==0){
+  remoteResponse=true;streamedSpeech=false;
+  BrainRealtimeAudio::setRemoteReply(true);
+  status("CALL_THINKING");
+ }else if(strcmp(type,"response.done")==0){
+  remoteResponse=false;
+  BrainRealtimeAudio::setRemoteReply(false);
+ }else if(strcmp(type,"input_audio_buffer.speech_started")==0){
+  if(!remoteResponse)status("CALL_LISTENING");
+ }else if(strcmp(type,"input_audio_buffer.speech_stopped")==0){
+  status("CALL_THINKING");
+ }else if(strcmp(type,"response.output_audio.delta")==0 ||
+          strcmp(type,"response.audio.delta")==0){
+  cJSON *delta=cJSON_GetObjectItem(json,"delta");
+  if(!ready || !cJSON_IsString(delta))failure="BAD_AUDIO_FRAME";
+  else{
+   size_t encoded=strlen(delta->valuestring);
+   // Each provider event must fit in bounded PSRAM; no oversized allocations.
+   if(!encoded || encoded>48000 || (encoded&3u))failure="AUDIO_DELTA_SIZE";
+   else{
+    size_t capacity=(encoded/4)*3;
+    uint8_t *pcm=(uint8_t*)heap_caps_malloc(capacity,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!pcm)failure="AUDIO_PSRAM";
+    else{
+     size_t decoded=0;
+     int rc=mbedtls_base64_decode(pcm,capacity,&decoded,
+          (const unsigned char*)delta->valuestring,encoded);
+     if(rc!=0 || !decoded || (decoded&1u))failure="AUDIO_DELTA_BASE64";
+     else if(!BrainRealtimeAudio::queueSpeaker(pcm,decoded))
+       failure="SPEAKER_QUEUE_OVERFLOW";
+     else {streamedSpeech=true;status("CALL_SPEAKING");}
+     heap_caps_free(pcm);
+    }
+   }
+  }
  }
  cJSON_Delete(json);
+ if(failure)fail(failure);
 }
 inline bool connect(){
  reload();
@@ -145,6 +197,7 @@ inline bool connect(){
 }
 inline void init(){
  requested=false;started=false;connected=false;ready=false;
+ remoteResponse=false;streamedSpeech=false;
  status("CALL_OFF");
 }
 inline bool toggle(bool audioBusy){
@@ -163,7 +216,7 @@ inline bool toggle(bool audioBusy){
 inline void tick(bool audioBusy){
  if(!requested)return;
  if(WiFi.status()!=WL_CONNECTED){
-  if(started){ws.disconnect();started=false;connected=false;ready=false;}
+  if(started){BrainRealtimeAudio::stop();ws.disconnect();started=false;connected=false;ready=false;}
   status("CALL_CONNECTING");return;
  }
  if(!started){
@@ -173,8 +226,40 @@ inline void tick(bool audioBusy){
   return;
  }
  ws.loop();
+ if(!requested)return; // A callback may have rejected the session.
+ if(ready){
+  if(BrainRealtimeAudio::failed()){fail("I2S_RUNTIME");return;}
+  if(BrainRealtimeAudio::initialized()){
+   // 20ms mono little-endian PCM16, encoded as a native Open WebUI event.
+   // Never send more than 2 frames per tick (40ms maximum).
+   for(int n=0;n<2;n++){
+    BrainRealtimeAudio::Frame frame={};
+    if(!BrainRealtimeAudio::takeMic(frame))break;
+    unsigned char encoded[4*((sizeof(frame.pcm)+2)/3)+4]={0};
+    size_t produced=0;
+    if(mbedtls_base64_encode(encoded,sizeof(encoded),&produced,
+        (const unsigned char*)frame.pcm,sizeof(frame.pcm))!=0){
+     fail("MIC_ENCODE");return;
+    }
+    String payload;
+    if(!payload.reserve(produced+60)){fail("MIC_JSON_ALLOC");return;}
+    payload="{\"type\":\"input_audio_buffer.append\",\"audio\":\"";
+    payload+=(const char*)encoded;
+    payload+="\"}";
+    if(!ws.sendTXT(payload)){fail("MIC_SEND");return;}
+   }
+   if(BrainRealtimeAudio::hasSpeakerAudio() || (streamedSpeech&&remoteResponse)){
+    status("CALL_SPEAKING");
+   }else if(remoteResponse){
+    status("CALL_THINKING");
+   }else{
+    streamedSpeech=false;
+    status("CALL_LISTENING");
+   }
+  }
+ }
  if(ready && millis()-lastPing>PING_INTERVAL){
-  ws.sendTXT("{\"type\":\"bridge.ping\"}");
+  if(!ws.sendTXT("{\"type\":\"bridge.ping\"}")){fail("PING_SEND");return;}
   lastPing=millis();
  }
 }
