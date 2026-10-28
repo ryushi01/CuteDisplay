@@ -274,7 +274,7 @@ static void processFace(const CuteLink::Frame &f){
   if(turningOn && BrainTTS::running)BrainTTS::interrupt();
   bool busy=BrainVoiceSTT::running || BrainAI::busy ||
              BrainAudioTest::running || BrainC5OTA::updating() ||
-             BrainRealtimeAudio::active();
+             BrainTTS::running || BrainRealtimeAudio::active();
   if(!BrainRealtimeDirect::toggle(busy))
    Serial.println("[CALL] Start refused; verify WiFi, saved Open WebUI API key and server auth");
  } else if(f.type=="VOICE_INTERRUPT"){
@@ -797,7 +797,7 @@ static void consoleCommand(String cmd){
   if(BrainRealtimeDirect::active()){Serial.println("[CALL] Already active");return;}
   if(BrainTTS::running)BrainTTS::interrupt();
   bool busy=BrainVoiceSTT::running || BrainAI::busy || BrainAudioTest::running ||
-            BrainC5OTA::updating() || BrainRealtimeAudio::active();
+            BrainC5OTA::updating() || BrainTTS::running || BrainRealtimeAudio::active();
   if(!BrainRealtimeDirect::toggle(busy))Serial.println("[CALL] USB start refused: audio busy or missing WebUI config");
   return;
  }
