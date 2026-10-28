@@ -100,6 +100,39 @@ the installed C5 firmware and the S3/C5 are idle. The C5 v22 left-button
 short tap toggles Call Mode; long-hold manual PTT still works while
 Call Mode is OFF. There is NO manual OTA enable command.
 
+## Recovery fix for I2S_START + stuck Call error HUD (2026-10-29)
+
+The S3 realtime audio driver now reports the exact local failure stage and
+internal/PSRAM memory availability rather than blaming the Open WebUI key.
+It reserves smaller internal DMA buffers, keeps audio frame/queue storage in
+PSRAM, and reduces the I2S task's internal-memory stack. The normal manual
+PTT status now takes precedence over a failed Call Mode status.
+
+Once the matching combined build succeeds, upload the new S3 Arduino sketch
+with Erase All Flash disabled. Existing automatic C5 OTA remains enabled;
+if C5 is already v22, it should report "C5 already current" (no reflashing).
+The iPhone app and server do not need another update for this fix.
+
+One USB acceptance sequence (Serial Monitor at 115200, Newline):
+
+    call status
+    call diagnose
+    call start
+    call status
+
+Expect the line "[CALL] I2S 24kHz duplex active" and then CALL_LISTENING;
+the call's microphone should feed the voice model and responses should play.
+Stop with "call stop". Hold C5 left button to test manual PTT and verify
+Listening -> Uploading -> Thinking -> Speaking. If Call Mode fails, the
+Call error display is temporary and must not hide legacy PTT labels.
+
+If failure remains, send ONLY the [CALL AUDIO] error stage and "call status"
+output (no API key). Typical stages: NO_PSRAM_ENABLE_OPI means incorrect
+PSRAM setting or hardware memory unavailable; AUDIO_TASK_ALLOC indicates
+insufficient free internal memory; CHANNEL_ALLOC/TX_STD_INIT/RX_STD_INIT
+indicate I2S driver/channel initialization errors. These are local faults
+and do not require changing Open WebUI or rotating the user API key.
+
 ## Safety and limitations
 
 - Existing Open WebUI HTTPS host/port and login/2FA are unchanged.
