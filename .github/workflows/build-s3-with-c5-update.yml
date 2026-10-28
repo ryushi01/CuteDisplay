@@ -11,6 +11,9 @@ on:
       - "tools/generate_c5_japanese_font.py"
       - "firmware/CuteDisplay/**"
       - "firmware/CuteDisplayBrain/**"
+      - "ios/CuteDisplay/**"
+      - "docs/INSTALL_REALTIME_COMPLETE.md"
+      - "docs/REALTIME_I2S_AUDIO_EXPERIMENT.md"
       - "README.md"
 
 permissions:
