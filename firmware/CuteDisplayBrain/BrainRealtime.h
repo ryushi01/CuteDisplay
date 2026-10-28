@@ -124,14 +124,15 @@ inline void onSocket(WStype_t kind,uint8_t *payload,size_t length){
  }else if(type=="auth.ok"){
   authenticated=true;state("CONNECTING");
  }else if(type=="session.ready"){
-  ready=true;state("LISTENING");
+  ready=true;state("READY"); // Status-only build: microphone NOT yet streaming.
  }else if(type=="state"){
   cJSON *v=cJSON_GetObjectItem(root,"value");
   if(cJSON_IsString(v)&&v->valuestring){
    String label=v->valuestring;
-   if(label=="THINKING"||label=="SPEAKING"||
-      label=="LISTENING"||label=="USER_SPEAKING"||label=="MUTED")
-      state(label=="USER_SPEAKING"?"LISTENING":label.c_str());
+   // Do not display LISTENING while no I2S microphone is actually active.
+   if(label=="LISTENING" && ready)state("READY");
+   else if(label=="THINKING"||label=="SPEAKING"||
+           label=="USER_SPEAKING"||label=="MUTED")state(label.c_str());
   }
  }else if(type=="error"){
   state("ERROR");
