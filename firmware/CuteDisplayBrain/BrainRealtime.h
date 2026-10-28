@@ -33,8 +33,19 @@ inline bool validURL(const String &u){
     u.indexOf('?')>=0 || u.length()>MAX_URL)return false;
  int hostStart=6, hostEnd=u.indexOf('/',hostStart);
  String authority=hostEnd<0?u.substring(hostStart):u.substring(hostStart,hostEnd);
- if(authority.isEmpty()||authority.indexOf(' ')>=0||authority.indexOf(':')>=0)return false;
- return true; // IP literals prohibited; hostname must match certificate.
+ if(authority.isEmpty()||authority.indexOf(' ')>=0||authority.indexOf('[')>=0||
+    authority.indexOf(']')>=0)return false;
+ int colon=authority.indexOf(':');
+ if(colon>=0){
+  String port=authority.substring(colon+1);
+  authority=authority.substring(0,colon);
+  if(port.isEmpty()||port.length()>5)return false;
+  for(char c:port)if(c<'0'||c>'9')return false;
+  int number=port.toInt();
+  if(number<=0||number>65535)return false;
+ }
+ return !authority.isEmpty() && authority.indexOf(':')<0;
+ // Hostname still MUST match the configured TLS certificate.
 }
 inline void state(const char *value){
  if(phase==value)return;
@@ -144,11 +155,14 @@ inline bool start(){
     caPem.indexOf("-----END CERTIFICATE-----")<0){state("ERROR");return false;}
  // Only an explicitly configured certificate may authenticate the gateway.
  int base=6,slash=url.indexOf('/',base);
- String host=slash<0?url.substring(base):url.substring(base,slash);
+ String authority=slash<0?url.substring(base):url.substring(base,slash);
  String path=slash<0?"/":url.substring(slash);
+ int colon=authority.indexOf(':');
+ String host=colon<0?authority:authority.substring(0,colon);
+ uint16_t port=colon<0?443:(uint16_t)authority.substring(colon+1).toInt();
  socket.onEvent(onSocket);
  // Never call beginSSL(host,port,path) without a CA: that can disable checks.
- socket.beginSslWithCA(host.c_str(),443,path.c_str(),caPem.c_str());
+ socket.beginSslWithCA(host.c_str(),port,path.c_str(),caPem.c_str());
  socket.setReconnectInterval(6000);
  socket.enableHeartbeat(15000,3000,2);
  started=true;requested=true;state("CONNECTING");
