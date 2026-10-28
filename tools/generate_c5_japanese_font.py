@@ -24,7 +24,12 @@ def repertoire():
     # Include common symbols without depending on glyphs supplied by iOS.
     for start, end in (
         (0x2000,0x2070), (0x20A0,0x20D0), (0x2100,0x2150),
-        (0x2190,0x2300), (0x2460,0x2500),
+        (0x2190,0x2300), (0x2300,0x2500),
+        (0x2500,0x2C00),  # box drawing, geometric shapes, dingbats, arrows
+        (0x2E00,0x3000),  # supplemental punctuation / ideographic description
+        (0x0300,0x0370),  # combining diacritics (precomposed preferred)
+        (0x0370,0x0530),  # Greek, Coptic, Cyrillic
+        (0x1D00,0x1E00),  # phonetic/Latin extensions
     ):
         chars.update(range(start,end))
     # Full BMP CJK Unified Ideographs and Extension A, so Japanese kanji
@@ -32,6 +37,7 @@ def repertoire():
     # Bitmap data is stored in program flash (not runtime PSRAM).
     chars.update(range(0x3400,0xA000))
     chars.update(range(0xF900,0xFB00))  # CJK compatibility ideographs
+    chars.update(range(0xFE10,0xFE70))  # vertical and compatibility forms
     chars.update(range(0x3040,0x3100))  # Hiragana + Katakana
     chars.update(range(0x31F0,0x3200))  # Katakana phonetic extensions
     chars.update(range(0x3000,0x3040))  # Japanese punctuation
