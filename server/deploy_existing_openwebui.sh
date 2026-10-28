@@ -9,8 +9,9 @@ SERVICE=open-webui
 ORIGINAL=cutedisplay/openwebui-existing:backup
 CANDIDATE=cutedisplay/openwebui:realtime-apikey-candidate
 MODE="$1"
+BACKUP_REQUEST="${2:-}"
 if [[ "$MODE" != "--check" && "$MODE" != "--deploy" ]]; then
-  echo "Usage: bash server/deploy_existing_openwebui.sh --check|--deploy" >&2
+  echo "Usage: bash server/deploy_existing_openwebui.sh --check | --deploy /home/ryushi/openwebui-verified-NNNN" >&2
   exit 2
 fi
 if [[ ! -f "$BASE" ]]; then echo "Missing original Compose file" >&2; exit 1; fi
@@ -54,37 +55,32 @@ if [[ "$DATA" != "/var/lib/docker/volumes/open-webui/_data" ]]; then
   echo "Volume mountpoint differs; refusing deployment." >&2
   exit 1
 fi
-BACKUP="$(mktemp -d "$HOME/openwebui-rollback-XXXXXXXX")"
-chmod 700 "$BACKUP"
-sudo install -m 600 "$BASE" "$BACKUP/docker-compose.yaml"
-if [[ -f /home/ryushi/.env ]]; then
-  sudo install -m 600 /home/ryushi/.env "$BACKUP/.env"
+# A newly verified backup is mandatory. Do not stop the server to produce
+# another gzip file: the earlier 593 MB backup was truncated when interrupted.
+BACKUP="$BACKUP_REQUEST"
+if [[ ! "$BACKUP" == /home/ryushi/openwebui-verified-* ||
+      ! -f "$BACKUP/BACKUP_VERIFIED" ||
+      ! -f "$BACKUP/openwebui-data.tar.gz" ||
+      ! -f "$BACKUP/SHA256SUMS" ||
+      ! -f "$BACKUP/candidate.yaml" ]]; then
+ echo "Need a fully VERIFIED backup. Run create_verified_openwebui_backup.sh --backup first." >&2
+ exit 1
 fi
-cat > "$BACKUP/candidate.yaml" <<'OVERRIDE'
-services:
-  open-webui:
-    image: cutedisplay/openwebui:realtime-apikey-candidate
-OVERRIDE
-cat > "$BACKUP/rollback.yaml" <<'OVERRIDE'
-services:
-  open-webui:
-    image: cutedisplay/openwebui-existing:backup
-OVERRIDE
-# docker-compose.yaml was copied with sudo install and is root-owned mode 600.
-# Only chmod override files written by the unprivileged ryushi account.
-chmod 600 "$BACKUP/candidate.yaml" "$BACKUP/rollback.yaml"
-# Verify the effective Docker data volume, original port and candidate
-# image before stopping anything. A Compose volume alias is not its Docker name.
+# A backup must be recently captured to minimize loss if rollback is needed.
+AGE_SEC=$(( $(date +%s) - $(stat -c %Y "$BACKUP/BACKUP_VERIFIED") ))
+if (( AGE_SEC < 0 || AGE_SEC > 21600 )); then
+ echo "Backup is older than 6 hours. Create a new verified backup before deployment." >&2
+ exit 1
+fi
+echo "Verifying the independent archived snapshot BEFORE any service stop..."
+(cd "$BACKUP" && sudo sha256sum -c SHA256SUMS >/dev/null)
+sudo gzip -t "$BACKUP/openwebui-data.tar.gz"
+sudo tar -tzf "$BACKUP/openwebui-data.tar.gz" >/dev/null
+echo "PASS: validated protected Open WebUI data archive, SHA256 and gzip trailer."
+# Real Docker mount must remain open-webui even if Compose logical alias differs.
 sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" -f "$BACKUP/candidate.yaml" config --format json |
   python3 "$SCRIPT_DIR/check_openwebui_compose_config.py" \
     --expected-image "$CANDIDATE"
-AVAILABLE="$(df -Pk "$BACKUP" | awk 'NR==2{print $4}')"
-SIZE="$(sudo du -sk "$DATA" | awk '{print $1}')"
-if (( AVAILABLE < SIZE + 102400 )); then
-  echo "Insufficient disk space to back up database safely; original service untouched." >&2
-  exit 1
-fi
-
 STAGE=0
 DONE=0
 cleanup() {
@@ -102,14 +98,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Stopping ONLY open-webui for a consistent database backup..."
-# Arrange automatic restart even if the stop command itself returns an error.
+echo "Deploying with a PREVERIFIED existing backup. No new snapshot required."
 STAGE=1
 sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" stop "$SERVICE"
-sudo tar -czf "$BACKUP/openwebui-data.tar.gz" -C "$DATA" .
-sudo chmod 600 "$BACKUP/openwebui-data.tar.gz"
-sudo tar -tzf "$BACKUP/openwebui-data.tar.gz" >/dev/null
-echo "PASS: data archived while Open WebUI was stopped."
 STAGE=2
 sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" -f "$BACKUP/candidate.yaml" up -d --no-deps --force-recreate "$SERVICE"
 EXPECTED="$(sudo docker image inspect "$CANDIDATE" --format '{{.Id}}')"
@@ -133,6 +124,6 @@ fi
 DONE=1
 trap - EXIT
 echo "PASS: candidate image active and original /health responding."
-echo "Private backup directory: $BACKUP"
+echo "Verified backup directory: $BACKUP"
 echo "Browser login, MFA and API-key tests still required before flashing devices."
 echo "Rollback command: sudo docker compose -p ryushi -f /home/ryushi/docker-compose.yaml -f '$BACKUP/rollback.yaml' up -d --no-deps --force-recreate open-webui"
