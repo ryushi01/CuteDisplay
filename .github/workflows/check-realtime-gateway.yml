@@ -1,0 +1,41 @@
+name: Check Realtime gateway and iPhone pairing source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/realtime-call-c5v21]
+    paths:
+      - 'gateway/**'
+      - 'ios/CuteDisplay/**'
+      - '.github/workflows/check-realtime-gateway.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install WebSocket client/server
+        run: python -m pip install 'websockets>=14,<17'
+      - name: Syntax check
+        run: python -m compileall -q gateway
+      - name: Unit tests — no accounts or network needed
+        run: python -m unittest discover -s gateway -p 'test_*.py' -v
+      - name: Ensure no credentials accidentally committed
+        run: |
+          test ! -e gateway/private-config.json
+          ! grep -R -E 'shana\.deroose@gmail\.com|sk-[A-Za-z0-9]{32}' gateway/ --include='*.py'
+
+  ios-parse:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse SwiftUI source (syntax only; no Xcode project in repository)
+        run: |
+          xcrun swiftc -frontend -parse ios/CuteDisplay/ContentView.swift
+          xcrun swiftc -frontend -parse ios/CuteDisplay/BluetoothManager.swift
