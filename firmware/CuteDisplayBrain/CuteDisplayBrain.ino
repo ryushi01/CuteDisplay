@@ -1168,10 +1168,19 @@ void loop(){
                 BrainRealtimeDirect::active() || BrainRealtimeAudio::active());
  static String priorActivity;
  static uint32_t lastActivitySend=0;
- String activity=BrainRealtimeDirect::active() || BrainRealtimeDirect::activity()=="CALL_ERROR"
-   ?BrainRealtimeDirect::activity()
+ // A failed realtime call is not an active call and MUST NOT mask the
+ // original long-press PTT status. Show Call error only transiently while
+ // idle, then give the HUD back to manual STT/AI/TTS.
+ static bool callErrorWasVisible=false;
+ static uint32_t callErrorAt=0;
+ const bool callError=BrainRealtimeDirect::activity()=="CALL_ERROR";
+ if(callError && !callErrorWasVisible)callErrorAt=millis();
+ callErrorWasVisible=callError;
+ const bool showCallError=callError && (uint32_t)(millis()-callErrorAt)<3000UL;
+ String activity=BrainRealtimeDirect::active()?BrainRealtimeDirect::activity()
    :BrainVoiceSTT::capturing?"LISTENING":BrainVoiceSTT::running?"UPLOADING"
-   :BrainAI::busy?"THINKING":BrainTTS::running?"SPEAKING":"";
+   :BrainAI::busy?"THINKING":BrainTTS::running?"SPEAKING"
+   :showCallError?"CALL_ERROR":"";
  if((activity!=priorActivity || forceActivityResend ||
      millis()-lastActivitySend>=15000UL) &&
     faceOnline && !BrainC5OTA::updating()){
