@@ -10,5 +10,7 @@
 // v19 restores original ASCII chat style and selectively adjusts Latin accents.
 // v20: consistent Latin glyph priority; ignore old smooth overrides.
 // v21: French accents drawn using the exact matching ASCII letter bitmap.
-// v22 (experimental only): C5 left short tap toggles realtime call; long hold preserves PTT.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 22;
+// v22: C5 left short tap toggles realtime call; long hold preserves PTT.
+// v23: 320x170 bespoke full-screen Kitty call face with 8 moods, lip sync and
+// immediate return to the original normal message/mascot on CALL_OFF.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 23;
