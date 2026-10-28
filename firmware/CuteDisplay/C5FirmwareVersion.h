@@ -10,4 +10,5 @@
 // v19 restores original ASCII chat style and selectively adjusts Latin accents.
 // v20: consistent Latin glyph priority; ignore old smooth overrides.
 // v21: French accents drawn using the exact matching ASCII letter bitmap.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 21;
+// v22 (experimental only): C5 left short tap toggles realtime call; long hold preserves PTT.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 22;
