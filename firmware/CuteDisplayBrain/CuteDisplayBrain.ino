@@ -779,10 +779,13 @@ static void consoleCommand(String cmd){
   return;
  }
  if(cmd=="call status"){
-  Serial.printf("[CALL] state=%s socket_requested=%d i2s_owner=%d i2s_ready=%d playback_queued=%u mic_dropped=%lu\n",
+  Serial.printf("[CALL] state=%s socket_requested=%d i2s_owner=%d i2s_ready=%d playback_buffer_ms=%lu playback_peak_ms=%lu playback_skipped_ms=%lu underruns=%lu mic_dropped=%lu\n",
    BrainRealtimeDirect::activity().c_str(),BrainRealtimeDirect::active()?1:0,
    BrainRealtimeAudio::active()?1:0,BrainRealtimeAudio::initialized()?1:0,
-   BrainRealtimeAudio::speakerQueue?(unsigned)uxQueueMessagesWaiting(BrainRealtimeAudio::speakerQueue):0,
+   (unsigned long)BrainRealtimeAudio::bufferedMs(),
+   (unsigned long)BrainRealtimeAudio::peakSpeakerMs(),
+   (unsigned long)BrainRealtimeAudio::droppedSpeakerMs(),
+   (unsigned long)BrainRealtimeAudio::speakerUnderruns,
    (unsigned long)BrainRealtimeAudio::droppedMic);
   Serial.printf("[CALL AUDIO] last_stage=%s psram_found=%d internal_free=%lu largest_internal=%lu psram_free=%lu\n",
    BrainRealtimeAudio::issue(),psramFound()?1:0,
