@@ -1039,8 +1039,12 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
     if(x + width <= clipRight) glyph(x,y,(char)cp,ascScale,color);
    }else {
     const uint8_t *bitmap=nullptr;
-    for(int k=0;k<glyphCount;k++){
-     if(glyphCache[k].code==cp){bitmap=glyphCache[k].bits;break;}
+    // Western Latin always uses the shipped font, not a smaller saved
+    // 16x16 custom glyph. Leave Japanese and other Unicode cache untouched.
+    if(!narrowUnicodeGlyph(cp)){
+     for(int k=0;k<glyphCount;k++){
+      if(glyphCache[k].code==cp){bitmap=glyphCache[k].bits;break;}
+     }
     }
     const C5JPEntry *embedded=bitmap?nullptr:c5JPFind(cp);
     if(bitmap || embedded) {
