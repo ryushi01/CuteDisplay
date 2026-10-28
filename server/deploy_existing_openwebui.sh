@@ -19,7 +19,7 @@ sudo docker compose version >/dev/null
 sudo docker image inspect "$ORIGINAL" >/dev/null
 sudo docker image inspect "$CANDIDATE" >/dev/null
 # Do not print resolved Compose config: it may contain passwords.
-sudo docker compose -p "$PROJECT" -f "$BASE" config --format json | python3 -c '
+sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" config --format json | python3 -c '
 import json,sys
 cfg=json.load(sys.stdin)
 s=cfg["services"]["open-webui"]
@@ -64,9 +64,11 @@ services:
   open-webui:
     image: cutedisplay/openwebui-existing:backup
 OVERRIDE
-chmod 600 "$BACKUP"/*.yaml
+# docker-compose.yaml was copied with sudo install and is root-owned mode 600.
+# Only chmod override files written by the unprivileged ryushi account.
+chmod 600 "$BACKUP/candidate.yaml" "$BACKUP/rollback.yaml"
 # Verify replacement keeps exactly the same persistent data mapping.
-sudo docker compose -p "$PROJECT" -f "$BASE" -f "$BACKUP/candidate.yaml" config --format json | python3 -c '
+sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" -f "$BACKUP/candidate.yaml" config --format json | python3 -c '
 import json,sys
 svc=json.load(sys.stdin)["services"]["open-webui"]
 assert svc["image"]=="cutedisplay/openwebui:realtime-apikey-candidate"
@@ -89,7 +91,7 @@ cleanup() {
     sudo docker start open-webui || true
   elif [[ "$DONE" == 0 && "$STAGE" == 2 ]]; then
     echo "Replacing failed candidate with ORIGINAL backed-up image..." >&2
-    sudo docker compose -p "$PROJECT" -f "$BASE" -f "$BACKUP/rollback.yaml" up -d --no-deps --force-recreate "$SERVICE" || true
+    sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" -f "$BACKUP/rollback.yaml" up -d --no-deps --force-recreate "$SERVICE" || true
   fi
   if [[ "$DONE" == 0 ]]; then echo "Deployment failed. Backup: $BACKUP" >&2; fi
   exit "$result"
@@ -97,14 +99,15 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Stopping ONLY open-webui for a consistent database backup..."
-sudo docker compose -p "$PROJECT" -f "$BASE" stop "$SERVICE"
+# Arrange automatic restart even if the stop command itself returns an error.
 STAGE=1
+sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" stop "$SERVICE"
 sudo tar -czf "$BACKUP/openwebui-data.tar.gz" -C "$DATA" .
 sudo chmod 600 "$BACKUP/openwebui-data.tar.gz"
 sudo tar -tzf "$BACKUP/openwebui-data.tar.gz" >/dev/null
 echo "PASS: data archived while Open WebUI was stopped."
 STAGE=2
-sudo docker compose -p "$PROJECT" -f "$BASE" -f "$BACKUP/candidate.yaml" up -d --no-deps --force-recreate "$SERVICE"
+sudo docker compose -p "$PROJECT" --project-directory /home/ryushi -f "$BASE" -f "$BACKUP/candidate.yaml" up -d --no-deps --force-recreate "$SERVICE"
 EXPECTED="$(sudo docker image inspect "$CANDIDATE" --format '{{.Id}}')"
 ACTIVE="$(sudo docker inspect "$SERVICE" --format '{{.Image}}')"
 if [[ "$EXPECTED" != "$ACTIVE" ]]; then
