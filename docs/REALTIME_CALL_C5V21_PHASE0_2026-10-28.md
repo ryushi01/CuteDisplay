@@ -38,11 +38,12 @@ Observed WebSocket API in this upstream source:
 ## Phase 0 — test the actual deployed Open WebUI bridge (no firmware change)
 New local-only diagnostic: `tools/probe_openwebui_realtime.py`.
 
-Use a temporary virtualenv with `websockets>=14,<17`, then set environment variables **locally and privately**, not in Git, shell history with literal secrets, issue comments or logs:
-- `OPENWEBUI_SESSION_JWT`: fresh **Open WebUI user session token**, not the `sk-` API key.
-- `OPENWEBUI_MODEL_ID`: actual server-configured model selected for the working browser call.
+Use a temporary virtualenv with `websockets>=14,<17`. For accounts using local Open WebUI password login **and an existing 2FA authenticator**, use `tools/probe_openwebui_realtime_login.py` instead of manually copying a JWT. This helper asks for email/password and, when the server returns `next_step=verify`, prompts for the current six-digit authenticator code. It posts `challenge_token`, `code`, and `recovery=false` to `/api/v1/auths/mfa/verify`, receives the normal session JWT, and starts the WebSocket probe. The credentials and challenge stay in process memory, are not printed, and are not written to the repository.
 
-Run: `python tools/probe_openwebui_realtime.py --url https://YOUR-OPENWEBUI-HOST`
+Recommended run:
+`python tools/probe_openwebui_realtime_login.py --url https://YOUR-OPENWEBUI-HOST --model YOUR-SERVER-MODEL-ID`
+
+For SSO, disabled password login, MFA enrollment/reset, or incompatible older Open WebUI versions, stop and inspect the server's authentication mode rather than disabling 2FA. A fallback low-level `probe_openwebui_realtime.py` can still accept `OPENWEBUI_SESSION_JWT` from a locally managed session for diagnostics, but is not preferred.
 
 Success is `bridge.ready` at 24000 Hz followed by `bridge.pong`. This validates authenticated transport and that the realtime provider starts; it **does not** synthesize audio, validate S3 hardware or prove sustained conversation. The probe sends no audio or chat messages and does not expose token values. Do not save these credentials to CuteDisplay device NVS.
 
