@@ -21,27 +21,29 @@ else
 fi
 cd "$HOME/CuteDisplay-realtime-server"
 
-# Tag the EXACT image already running locally; do not pull a moving :main tag.
-RUNNING_IMAGE_ID="$(docker inspect open-webui --format '{{.Image}}')"
-RUNNING_USER="$(docker inspect open-webui --format '{{.Config.User}}')"
+# The ryushi account may not be in the Docker socket-access group.
+# Use sudo for Docker rather than modifying root-equivalent group memberships.
+# Fail fast on ANY error. The server container remains running.
+bash <<'BUILD_CANDIDATE'
+set -euo pipefail
+sudo docker info >/dev/null
+RUNNING_IMAGE_ID="$(sudo docker inspect open-webui --format '{{.Image}}')"
+RUNNING_USER="$(sudo docker inspect open-webui --format '{{.Config.User}}')"
 [ -n "$RUNNING_USER" ] || RUNNING_USER='0:0'
-docker image tag "$RUNNING_IMAGE_ID" cutedisplay/openwebui-existing:backup
+sudo docker image tag "$RUNNING_IMAGE_ID" cutedisplay/openwebui-existing:backup
 
-# Compile only; the container and its data volumes remain untouched.
-docker build -f server/Dockerfile.openwebui-realtime-apikey \
+# This builds a NEW image only. No service restart, DB change or deployment.
+sudo docker build -f server/Dockerfile.openwebui-realtime-apikey \
   --build-arg BASE_IMAGE=cutedisplay/openwebui-existing:backup \
   --build-arg ORIGINAL_USER="$RUNNING_USER" \
   -t cutedisplay/openwebui:realtime-apikey-candidate .
 
-printf 'PATCH_IMAGE_BUILT: '
-docker image inspect cutedisplay/openwebui:realtime-apikey-candidate \
-  --format '{{.Id}}'
-printf 'Compose config files: '
-docker inspect open-webui --format \
-  '{{index .Config.Labels "com.docker.compose.project.config_files"}}'
+sudo docker image inspect cutedisplay/openwebui:realtime-apikey-candidate \
+  --format 'PATCH_IMAGE_BUILT_AND_VERIFIED: {{.Id}}'
+BUILD_CANDIDATE
 ```
 
-The source patch runs a strict source-version check; Docker build **fails** if the installed Open WebUI Python module has changed incompatibly. At this point the running container is **not** touched, users' chats and settings remain available, and the original image has a local backup tag.
+A command that merely prints `BUILD COMPLETE` does **not** prove Docker succeeded. Only the final `PATCH_IMAGE_BUILT_AND_VERIFIED` line from the guarded block means the image was created. The source patch runs a strict source-version check; Docker build **fails** if the installed Open WebUI Python module has changed incompatibly. At this point the running container is **not** touched, users' chats and settings remain available, and the original image has a local backup tag.
 
 ## Step 2 — controlled deployment, not automatic
 
