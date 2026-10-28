@@ -282,8 +282,21 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
           (const unsigned char*)delta->valuestring,encoded);
      if(rc!=0 || !decoded || (decoded&1u))failure="AUDIO_DELTA_BASE64";
      else if(!BrainRealtimeAudio::queueSpeaker(pcm,decoded))
-       failure="SPEAKER_QUEUE_OVERFLOW";
-     else {streamedSpeech=true;status("CALL_SPEAKING");}
+       failure="SPEAKER_BUFFER_UNAVAILABLE";
+     else {
+      // Incoming TTS can arrive faster than playback; the PSRAM ring
+      // absorbs those bursts without disconnecting an authenticated call.
+      static uint32_t lastPressureLog=0;
+      if(BrainRealtimeAudio::speakerOverrunEvents &&
+         millis()-lastPressureLog>=5000UL){
+       lastPressureLog=millis();
+       Serial.printf("[CALL AUDIO] speaker buffer pressure: buffered=%lu ms peak=%lu ms skipped=%lu ms (call retained)\n",
+        (unsigned long)BrainRealtimeAudio::bufferedMs(),
+        (unsigned long)BrainRealtimeAudio::peakSpeakerMs(),
+        (unsigned long)BrainRealtimeAudio::droppedSpeakerMs());
+      }
+      streamedSpeech=true;status("CALL_SPEAKING");
+     }
      heap_caps_free(pcm);
     }
    }
