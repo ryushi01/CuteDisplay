@@ -92,7 +92,7 @@ EXPRESSION_ANCHORS = {
     "call_protocol_state": "self.gesture_names = {gesture.name for gesture in gestures}",
     "observer": "if item.get('name') == 'play_animation':",
     "auth": "token = auth['token']",
-    "protocol": "protocol = CallProtocol(\\n            model_info.meta.voice_avatar.gestures if model_info and model_info.meta.voice_avatar else ()\\n        )",
+    "protocol": "protocol = CallProtocol(\n            model_info.meta.voice_avatar.gestures if model_info and model_info.meta.voice_avatar else ()\n        )",
     "instructions": "+ (AVATAR_CALL_INSTRUCTIONS if protocol.animation_tools else '')",
     "tools": "'tools': [CHAT_TOOL, *protocol.animation_tools],",
 }
@@ -106,7 +106,7 @@ def patch_expressions(source):
                 f"Unsupported Realtime version: expected one {name} anchor, "
                 f"found {source.count(anchor)}"
             )
-    result = source.replace("class CallProtocol:", EXPRESSION_TOOL + "\\nclass CallProtocol:", 1)
+    result = source.replace("class CallProtocol:", EXPRESSION_TOOL + "\nclass CallProtocol:", 1)
     result = result.replace(
         "def __init__(self, gestures=()):",
         "def __init__(self, gestures=(), kitty_expressions=False):",
@@ -114,7 +114,7 @@ def patch_expressions(source):
     )
     result = result.replace(
         "self.gesture_names = {gesture.name for gesture in gestures}",
-        "self.kitty_expressions = bool(kitty_expressions)\\n        "
+        "self.kitty_expressions = bool(kitty_expressions)\n        "
         "self.gesture_names = {gesture.name for gesture in gestures}",
         1,
     )
@@ -153,15 +153,15 @@ def patch_expressions(source):
     )
     result = result.replace(
         EXPRESSION_ANCHORS["protocol"],
-        "protocol = CallProtocol(\\n"
-        "            model_info.meta.voice_avatar.gestures if model_info and model_info.meta.voice_avatar else (),\\n"
-        "            kitty_expressions=kitty_expressions,\\n"
+        "protocol = CallProtocol(\n"
+        "            model_info.meta.voice_avatar.gestures if model_info and model_info.meta.voice_avatar else (),\n"
+        "            kitty_expressions=kitty_expressions,\n"
         "        )",
         1,
     )
     result = result.replace(
         EXPRESSION_ANCHORS["instructions"],
-        "+ (AVATAR_CALL_INSTRUCTIONS if protocol.animation_tools else '')\\n"
+        "+ (AVATAR_CALL_INSTRUCTIONS if protocol.animation_tools else '')\n"
         "                            + (KITTY_EXPRESSION_INSTRUCTIONS if protocol.kitty_expressions else '')",
         1,
     )
