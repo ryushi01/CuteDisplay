@@ -116,8 +116,8 @@ static void audioTask(void *){
     // Bound first hardware tests to ~38% full scale even at volume=100.
     if(out>12500)out=12500;
     if(out< -12500)out=-12500;
-    output[2*i]=out<<16;
-    output[2*i+1]=out<<16;
+    output[2*i]=(int32_t)((int64_t)out*65536LL);
+    output[2*i+1]=(int32_t)((int64_t)out*65536LL);
    }
    if(xQueueSend(micQueue,&mic,0)!=pdTRUE){
     // Prefer freshest audio instead of accumulating latency on a slow Wi-Fi link.
@@ -152,7 +152,7 @@ inline bool start(uint16_t gain,uint8_t volume){
  lastPlaybackMs=millis()-TAIL_MUTE_MS;
  droppedMic=0;fault=false;ready=false;stopping=false;
  playing=false;remoteReply=false;running=true;
- if(xTaskCreatePinnedToCore(audioTask,"call_i2s",12288,nullptr,3,&owner,0)!=pdPASS){
+ if(xTaskCreatePinnedToCore(audioTask,"call_i2s",16384,nullptr,3,&owner,0)!=pdPASS){
   running=false;owner=nullptr;fault=true;return false;
  }
  return true;
