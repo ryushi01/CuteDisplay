@@ -487,6 +487,9 @@ bool userButtonStable = HIGH;
 unsigned long userButtonChangedAt = 0;
 unsigned long userButtonPressedAt = 0;
 bool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false,voiceButtonHoldStarted=false;
+// C5 left BOOT short tap toggles Realtime Call; S3 is authoritative.
+// Long hold retains legacy manual PTT only when Call Mode is off.
+bool callModeActive=false;
 unsigned long voiceButtonChangedAt=0,voiceButtonHeldAt=0;
 bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
@@ -2816,6 +2819,7 @@ static void serviceBrain() {
    continue;
   }
   if(f.type=="HELLO"){
+   callModeActive=false;
    // Remote reboot: require a NEW successful round trip.
    lastProbeAck=0;
    resetCmdParts();
@@ -2855,6 +2859,8 @@ static void serviceBrain() {
   }
   else if(f.type=="ACTIVITY"){
    String next=f.payload.substring(0,18);
+   if(next.startsWith("CALL_"))callModeActive=next!="CALL_OFF" && next!="CALL_ERROR";
+   else if(next.isEmpty())callModeActive=false;
    if(next!=kittyActivity){kittyActivity=next;if(lcdReady)redrawCurrent();}
   }
   else if(f.type=="AI_BEGIN"){
@@ -3061,8 +3067,9 @@ void loop(){
   }
   if(lcdReady)redrawCurrent();
  }
- // Dedicated BOOT GPIO28: press interrupts speech; short tap stops,
- // hold 320ms starts recording; release sends captured speech.
+ // Dedicated BOOT GPIO28: short tap toggles Call Mode ON/OFF.
+ // Long hold (>=320 ms) is legacy manual PTT only while Call Mode is OFF.
+ // No press-down interruption: otherwise short taps cancel the current speech.
  bool voiceRaw=digitalRead(PIN_VOICE_BUTTON);
  if(voiceRaw!=voiceButtonLastRaw){voiceButtonChangedAt=now;voiceButtonLastRaw=voiceRaw;}
  if(now-voiceButtonChangedAt>=35 && voiceRaw!=voiceButtonStable){
@@ -3071,10 +3078,16 @@ void loop(){
    voiceButtonHeldAt=now;
    voiceButtonHoldStarted=false;
    voiceButtonSession=s3Online;
-   if(s3Online)toS3("VOICE_INTERRUPT");
   }else{
-   if(voiceButtonHoldStarted && voiceButtonSession && s3Online)toS3("VOICE_STOP");
-   else if(voiceButtonSession && s3Online)toS3("VOICE_CANCEL");
+   if(voiceButtonSession && s3Online){
+    if(voiceButtonHoldStarted){
+     if(!callModeActive)toS3("VOICE_STOP");
+    }else{
+     toS3("CALL_TOGGLE");
+     // Optimistic local state for the very next press, corrected by S3 ACTIVITY.
+     callModeActive=!callModeActive;
+    }
+   }
    voiceButtonSession=false;
    voiceButtonHoldStarted=false;
    voiceButtonHeldAt=0;
@@ -3083,7 +3096,10 @@ void loop(){
  if(voiceButtonStable==LOW && voiceButtonSession && !voiceButtonHoldStarted &&
     (uint32_t)(now-voiceButtonHeldAt)>=320UL){
   voiceButtonHoldStarted=true;
-  if(s3Online)toS3("VOICE_START");
+  if(s3Online && !callModeActive){
+   toS3("VOICE_INTERRUPT");
+   toS3("VOICE_START");
+  }
  }
  if(now-lastBatteryRead>=BATTERY_SAMPLE_MS){
   lastBatteryRead=now;
