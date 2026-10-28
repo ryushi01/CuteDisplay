@@ -1027,7 +1027,11 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
     x+=width;
     continue;
    }
-   int smooth=findSmoothGlyph(cp);
+   // ASCII and Western accented Latin must use the built-in consistent
+   // chat font, not older persisted smooth glyphs of varying dimensions.
+   // Other Unicode ranges keep their existing smooth-glyph behavior.
+   bool fixedLatin=(cp<128) || narrowUnicodeGlyph(cp);
+   int smooth=fixedLatin?-1:findSmoothGlyph(cp);
    if(smooth>=0){
     int h=cp<128?7*ascScale:16*jpScale;
     drawSmoothGlyph(smoothGlyphs[smooth],x,y,width,h,color,clipRight);
