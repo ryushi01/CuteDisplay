@@ -1,6 +1,6 @@
 # CuteDisplay: native Realtime on the SAME Open WebUI server
 
-**Status:** The C5 v22 short-tap Call Mode toggle and S3 direct WSS status client compile; audio I2S full conversation is not yet enabled. The Open WebUI server patch is prepared, not deployed. Never paste a human password, 2FA code, API key, or Docker secrets into chats or Git.
+**Status (2026-10-28):** The existing Open WebUI patched realtime WebSocket is **deployed, healthy and API-key handshake tested** using the saved sk- credential with 24 kHz ping/pong. Experimental S3 24kHz I2S audio streaming and C5 v22 status display have been implemented on the development branch, but physical audio is **not yet hardware-verified or flashed**. For wiring, limitations and the safe S3-only USB bench path see [Realtime I2S Audio Experiment](../docs/REALTIME_I2S_AUDIO_EXPERIMENT.md). Never paste a password, 2FA code, API key, or Docker secrets into chats or Git.
 
 ## Auth: no password/2FA on S3
 
@@ -117,4 +117,4 @@ The experimental **C5 v22** left BOOT button:
 - Hold during Call Mode: ignored (not a second PTT).
 - The S3 reports `CALL_CONNECTING`, `CALL_READY`, `CALL_ERROR` and `CALL_OFF` to C5 via UART, with state resynchronization after C5 reboot and every 15 seconds.
 
-**Important:** `CALL_READY` currently means authenticated realtime WebSocket, **NOT** live microphone/speaker. Keep your hardware-tested C5 v21 branch intact and do not flash the v22 experiment until the server-side API-key WSS is tested. The next guarded firmware milestone is 24kHz I2S streaming with safe shared GPIO41/42 clocks, plus selected-model delegation and speaker playback.
+**Important:** The development branch now includes 24kHz microphone-to-WSS and WSS-to-speaker PCM handling, gated by native `bridge.ready`. It is compiled but **not yet bench-validated**. Start with USB Serial Monitor `call start`, `call status`, `call stop` on S3 to preserve the v21 C5 checkpoint, then validate a matched dev C5 v22 pair. Current audio uses acoustic half-duplex with a 300ms mute tail; captions and echo cancellation remain future work. See [detailed test plan](../docs/REALTIME_I2S_AUDIO_EXPERIMENT.md).
