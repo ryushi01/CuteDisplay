@@ -27,6 +27,9 @@ static WebSocketsClient ws;
 static bool requested=false, started=false, connected=false, ready=false;
 static bool remoteResponse=false, streamedSpeech=false;
 static String delegatedCallId, animationResponseId;
+// The provider must finish the initial tool-call response before bridge.respond.
+static bool toolResponseFinished=false;
+static String failedCallId, failedCallAnswer;
 // C5 does not have to implement any new server protocol; only S3 owns it.
 static constexpr size_t MAX_EVENT_BYTES=65536;
 static uint32_t lastAttempt=0, lastPing=0;
@@ -110,7 +113,8 @@ inline void diagnose(bool audioBusy){
 inline void stop(){
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
- delegatedCallId="";animationResponseId="";BrainAI::cancelCallDelegation();
+ delegatedCallId="";animationResponseId="";toolResponseFinished=false;
+ failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
  BrainRealtimeAudio::stop();
  ws.disconnect();
  status("CALL_OFF");
@@ -120,7 +124,8 @@ inline void fail(const char *why){
  // Stop retries on rejected credentials, unexpected PCM or incompatible server.
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
- delegatedCallId="";animationResponseId="";BrainAI::cancelCallDelegation();
+ delegatedCallId="";animationResponseId="";toolResponseFinished=false;
+ failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
  BrainRealtimeAudio::stop();
  ws.disconnect();
  status("CALL_ERROR");
@@ -128,7 +133,8 @@ inline void fail(const char *why){
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
-  delegatedCallId="";animationResponseId="";BrainAI::cancelCallDelegation();
+  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
+  failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
   BrainRealtimeAudio::stop();
   if(requested)status("CALL_CONNECTING");
   return;
@@ -180,6 +186,8 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  }else if(strcmp(type,"response.done")==0){
   remoteResponse=false;
   BrainRealtimeAudio::setRemoteReply(false);
+  if(!delegatedCallId.isEmpty() || !failedCallId.isEmpty())
+   toolResponseFinished=true;
   if(!animationResponseId.isEmpty()){
    cJSON *response=cJSON_GetObjectItem(json,"response");
    cJSON *rid=cJSON_GetObjectItem(response,"id");
@@ -227,10 +235,13 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
     // SAME saved Open WebUI chat model. No second server or key.
     if(!delegatedCallId.isEmpty() || prompt.isEmpty() ||
        !BrainAI::startCallDelegation(prompt)){
-     if(!bridgeResult(callId,"failed","I could not start the chat model. Please try again.")||
-        !bridgeRespond("call_id",callId))failure="DELEGATION_REJECTED";
+     if(!failedCallId.isEmpty())failure="TOOL_QUEUE_FULL";
+     else {failedCallId=callId;
+      failedCallAnswer="I could not start the chat model. Please try again.";}
+
     }else{
      delegatedCallId=callId;
+     toolResponseFinished=false;
      status("CALL_THINKING");
     }
    }else if(strcmp(name->valuestring,"play_animation")==0){
@@ -313,6 +324,7 @@ inline bool connect(){
 inline void init(){
  requested=false;started=false;connected=false;ready=false;
  remoteResponse=false;streamedSpeech=false;delegatedCallId="";animationResponseId="";
+ toolResponseFinished=false;failedCallId="";failedCallAnswer="";
  status("CALL_OFF");
 }
 inline bool toggle(bool audioBusy){
@@ -345,12 +357,18 @@ inline void tick(bool audioBusy){
  }
  ws.loop();
  if(!requested)return; // A callback may have rejected the session.
- if(!delegatedCallId.isEmpty()){
+ if(toolResponseFinished && !failedCallId.isEmpty()){
+  String id=failedCallId,answer=failedCallAnswer;
+  failedCallId="";failedCallAnswer="";toolResponseFinished=false;
+  if(!bridgeResult(id,"failed",answer) ||
+     !bridgeRespond("call_id",id)){fail("TOOL_FAILURE_RESULT");return;}
+ }
+ if(toolResponseFinished && !delegatedCallId.isEmpty()){
   String answer;
   bool ok=false;
   if(BrainAI::takeCallDelegation(answer,ok)){
    String doneId=delegatedCallId;
-   delegatedCallId="";
+   delegatedCallId="";toolResponseFinished=false;
    if(!bridgeResult(doneId,ok?"completed":"failed",answer)||
       !bridgeRespond("call_id",doneId)){
     fail("DELEGATION_RESULT_SEND");return;
