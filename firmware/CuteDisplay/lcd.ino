@@ -490,6 +490,11 @@ bool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false,voi
 // C5 left BOOT short tap toggles Realtime Call; S3 is authoritative.
 // Long hold retains legacy manual PTT only when Call Mode is off.
 bool callModeActive=false;
+// Transient full-screen call artwork state; normal user settings are untouched.
+static uint8_t callFaceMood=1; // neutral 0, happy 1, sad 2, angry 3 ...
+static uint8_t callLipLevel=0; // S3 speaker PCM intensity 0..9
+static uint32_t callFaceMoodSince=0,callLipAt=0;
+static constexpr uint32_t CALL_MOOD_HOLD_MS=10000UL;
 unsigned long voiceButtonChangedAt=0,voiceButtonHeldAt=0;
 bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
@@ -2070,8 +2075,15 @@ void drawSpeechBubble() {
     && ((millis()/280)%2==0) && y<by+bh-14)
   rect(min(x,innerRight-3),y,2,max(7*a,16*j),BLACK);
 }
+#include "C5CallFace.h"
 void drawMessage() {
  if(!beginDrawing())return;
+ if(callModeActive && !C5UARTOTA::active()){
+  drawFullScreenKittyFace();
+  drawBrainLinkOverlay();
+  finishDrawing();
+  return;
+ }
  int a=asciiMessageScale(), j=jpMessageScale();
  int height=max(7*a,16*j);
  int multilineHeight=height+(richLineCount(message)-1)*(height+4);
@@ -2828,7 +2840,7 @@ static void serviceBrain() {
    continue;
   }
   if(f.type=="HELLO"){
-   callModeActive=false;
+   callModeActive=false;callFaceMood=1;callLipLevel=0;
    // Remote reboot: require a NEW successful round trip.
    lastProbeAck=0;
    resetCmdParts();
@@ -2868,9 +2880,30 @@ static void serviceBrain() {
   }
   else if(f.type=="ACTIVITY"){
    String next=f.payload.substring(0,18);
+   bool wasActive=callModeActive;
    if(next.startsWith("CALL_"))callModeActive=next!="CALL_OFF" && next!="CALL_ERROR";
    else if(next.isEmpty())callModeActive=false;
-   if(next!=kittyActivity){kittyActivity=next;if(lcdReady)redrawCurrent();}
+   if(!callModeActive){callFaceMood=1;callLipLevel=0;}
+   if(next!=kittyActivity || wasActive!=callModeActive){
+    kittyActivity=next;if(lcdReady)redrawCurrent();
+   }
+  }
+  else if(f.type=="CALL_MOOD"){
+   // AI expressions never overwrite the user's regular persisted mood.
+   if(callModeActive && f.payload.length()==1 &&
+      f.payload[0]>='0'&&f.payload[0]<='7'){
+    uint8_t next=(uint8_t)(f.payload[0]-'0');
+    callFaceMoodSince=millis();
+    if(callFaceMood!=next){callFaceMood=next;if(lcdReady)redrawCurrent();}
+   }
+  }
+  else if(f.type=="CALL_LIP"){
+   if(callModeActive && f.payload.length()==1 &&
+      f.payload[0]>='0'&&f.payload[0]<='9'){
+    uint8_t next=(uint8_t)(f.payload[0]-'0');
+    callLipAt=millis();
+    if(callLipLevel!=next){callLipLevel=next;if(lcdReady)redrawCurrent();}
+   }
   }
   else if(f.type=="AI_BEGIN"){
    if(!lcdReady){CuteLink::send(Serial1,f.seq,"NACK","DISPLAY");}
@@ -2925,6 +2958,7 @@ static void serviceBrain() {
  }
  uint32_t now=millis();
  if(s3Online&&(uint32_t)(now-lastS3)>BRAIN_LOST_MS){
+  callModeActive=false;callFaceMood=1;callLipLevel=0;
   s3Online=false;
   lastProbeAck=0;
   pendingProbeSeq=0;
@@ -3095,6 +3129,8 @@ void loop(){
      toS3("CALL_TOGGLE");
      // Optimistic local state for the very next press, corrected by S3 ACTIVITY.
      callModeActive=!callModeActive;
+     callFaceMood=1;callFaceMoodSince=now;callLipLevel=0;
+     if(lcdReady)redrawCurrent();
     }
    }
    voiceButtonSession=false;
@@ -3131,6 +3167,16 @@ void loop(){
   lastBatteryOverlayFrame=now;
   if(!batteryOverlayUntil)redrawCurrent();
  }
+ if(callModeActive){
+  // Return to a gentle default if no more AI gestures arrive. Silence and
+  // link drops cannot leave an open speaking mouth stuck on the face.
+  if(callFaceMood!=1 && (uint32_t)(now-callFaceMoodSince)>=CALL_MOOD_HOLD_MS){
+   callFaceMood=1;if(lcdReady)redrawCurrent();
+  }
+  if(callLipLevel && (uint32_t)(now-callLipAt)>500UL){
+   callLipLevel=0;if(lcdReady)redrawCurrent();
+  }
+ }
  // Surprise actions start at randomized intervals and automatically end.
  // They never alter the user's chosen mood or mascot.
  if(!nextSurpriseAt)scheduleNextSurprise(millis());
@@ -3138,13 +3184,13 @@ void loop(){
   surpriseAction=0;
   scheduleNextSurprise(millis());
   if(mascotVisible && !scrolling)redrawCurrent();
- }else if(surprisesEnabled && mascotVisible && !surpriseAction
+ }else if(surprisesEnabled && mascotVisible && !callModeActive && !surpriseAction
           && (int32_t)(millis()-nextSurpriseAt)>=0){
   surpriseAction=choosePerformance((esp_random()%3)==0);
   surpriseStart=millis();
   if(!scrolling)redrawCurrent();
  }
- if(mascotVisible && millis()-lastMascotAnimation>=MASCOT_ANIMATION_MS){
+ if((mascotVisible || callModeActive) && millis()-lastMascotAnimation>=MASCOT_ANIMATION_MS){
   lastMascotAnimation=millis();animPhase=(animPhase+1)%32;
   updateExpressiveEyes(lastMascotAnimation);
   // The scrolling message already redraws frequently; avoid unnecessary transfers.
@@ -3199,7 +3245,7 @@ void loop(){
   if(remaining<=0){sleepMs=1;return;}
   if((uint32_t)remaining<sleepMs)sleepMs=(uint32_t)remaining;
  };
- if(mascotVisible)untilDue(lastMascotAnimation+MASCOT_ANIMATION_MS);
+ if(mascotVisible || callModeActive)untilDue(lastMascotAnimation+MASCOT_ANIMATION_MS);
  if(scrolling)untilDue(lastScroll+55UL);
  if((bubbleEnabled && bubbleTypewriter || aiScrollMode) &&
     revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+(aiScrollMode?65UL:BUBBLE_LETTER_MS));
