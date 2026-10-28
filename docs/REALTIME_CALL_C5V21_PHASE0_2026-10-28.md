@@ -60,3 +60,12 @@ Success is `bridge.ready` at 24000 Hz followed by `bridge.pong`. This validates 
 Once Phase 0 passes, implement **S3 opt-in WebSocket connection + status-only read path** (no audio) behind a disabled-by-default switch, with authentication mediation agreed and tested. Only then layer small PCM chunks and speaker output. A simpler **Standard-style hands-free VAD loop** using existing STT/LLM/TTS is a fallback if native WebSocket authentication/delegation proves unsuitable, but it is not equivalent to Open WebUI's Realtime provider.
 
 No services, firmware, credentials, or audio data were modified by this checkpoint.
+
+
+## 2026-10-28 macOS certificate-trust adjustment
+
+A test Mac running Python 3.11 could open the Open WebUI site in Safari but the initial Python `urllib` HTTPS password login failed on certificate verification. **This is not evidence of invalid credentials or a 2FA failure.** Browser access may rely on macOS Keychain/native trust while the venv's OpenSSL trust roots differ. A missing server intermediate or invalid certificate may also cause this.
+
+Both the interactive login and the WebSocket probe now use `truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)` to validate TLS using the operating system's trusted certificates without suppressing verification. Install `python -m pip install truststore 'websockets>=14,<17'` in `.venv-realtime` first. Run `curl -sS -o /dev/null -w 'HTTP %{http_code}, certificate verify result %{ssl_verify_result}\\n' "$OPENWEBUI_URL/"` to compare macOS native TLS verification. Never use `curl -k`, `ssl.CERT_NONE`, `verify=False` or `PYTHONHTTPSVERIFY=0`; if native macOS verification fails, repair the HTTPS certificate chain or trust configuration instead.
+
+This adjustment only affects the **local Mac diagnostic scripts**; neither ESP32 firmware nor Open WebUI server was modified. Realtime WebSocket authorization and device-side authentication remain an open design gate.
