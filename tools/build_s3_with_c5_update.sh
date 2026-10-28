@@ -106,9 +106,14 @@ NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
 1. Open CuteDisplayBrain/CuteDisplayBrain.ino FROM THIS ARTIFACT.
 2. Choose ESP32S3 Dev Module, 16 MB flash, OPI PSRAM, Custom
    partition scheme (included partitions.csv); select S3 USB port.
-3. Before compiling in Arduino IDE, install ESP8266Audio 2.4.1
-   for MP3 voice replies. Recording sends 8-bit PCM WAV (16 kHz)
-   with 16-bit PCM WAV fallback; no extra recording codec library.
+3. BEFORE clicking Arduino IDE Verify or Upload, open Library Manager
+   and install both exact libraries:
+   - WebSockets by Markus Sattler (Links2004), version 2.7.2
+     REQUIRED for BrainRealtimeDirect.h: #include <WebSocketsClient.h>
+     (Not ArduinoWebsockets by Gil Maimon.)
+   - ESP8266Audio by Earle F. Philhower, version 2.4.1
+     REQUIRED for existing MP3 voice playback.
+   Core: Espressif esp32 3.3.12. Recording uses WAV only.
 4. Upload ONLY the S3 sketch, then open Serial Monitor at 115200.
 5. EXPERIMENTAL v22: S3 DOES NOT auto-upgrade C5.
    It is safe to test realtime audio on S3 while C5 stays on hardware-tested v21.
