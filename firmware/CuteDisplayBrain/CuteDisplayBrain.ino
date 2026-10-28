@@ -35,7 +35,7 @@
 #include "BrainRealtimeDirect.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
-static constexpr char S3_FW_VERSION[]="Phase7-S3-AI-STREAM-BLE-DIAGNOSTIC";
+static constexpr char S3_FW_VERSION[]="Call24k-EXP-UNTESTED";
 static constexpr size_t MAX_CMD=96;
 // Hex-encoding uses two characters/byte; 45 bytes fits the 96-char
 // UART frame payload (one-digit chunk index, total, delimiters).
@@ -271,7 +271,8 @@ static void processFace(const CuteLink::Frame &f){
   bool turningOn=!BrainRealtimeDirect::active();
   if(turningOn && BrainTTS::running)BrainTTS::interrupt();
   bool busy=BrainVoiceSTT::running || BrainAI::busy ||
-            BrainAudioTest::running || BrainC5OTA::updating();
+             BrainAudioTest::running || BrainC5OTA::updating() ||
+             BrainRealtimeAudio::active();
   if(!BrainRealtimeDirect::toggle(busy))
    Serial.println("[CALL] Start refused; verify WiFi, saved Open WebUI API key and server auth");
  } else if(f.type=="VOICE_INTERRUPT"){
@@ -282,14 +283,14 @@ static void processFace(const CuteLink::Frame &f){
   BrainTTS::interrupt();
   if(BrainAI::busy){String ignored;BrainAI::provision("AI:STOP",ignored);}
  } else if(f.type=="VOICE_START"){
-  if(BrainRealtimeDirect::active())return;
+  if(BrainRealtimeDirect::active() || BrainRealtimeAudio::active())return;
   // Decoder teardown is asynchronous: queue recording until I2S is free.
   if(BrainTTS::running){BrainTTS::interrupt();pendingC5VoiceStart=true;return;}
   if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy && !BrainTTS::running){
    if(BrainVoiceSTT::start())Serial.println("[VOICE] C5 button started recording");
   }else Serial.println("[VOICE] C5 button rejected: busy");
  } else if(f.type=="VOICE_STOP"){
-  if(BrainRealtimeDirect::active())return;
+  if(BrainRealtimeDirect::active() || BrainRealtimeAudio::active())return;
   pendingC5VoiceStart=false;
   if(BrainVoiceSTT::stop())Serial.println("[VOICE] C5 button released: send recording");
  } else if(f.type=="WIFI_TOGGLE"){
@@ -691,7 +692,10 @@ static void pollBLECommands(){
   return;
  }
  if(incoming.startsWith("AI:")){
-  String result;
+   if((BrainRealtimeDirect::active() || BrainRealtimeAudio::active()) && incoming=="AI:GO"){
+    proxyResult("ERR:CALL_ACTIVE");return;
+   }
+   String result;
   if(BrainAI::provision(incoming,result)){
    // Do not expose AI:DATA hex, key, or prompt in serial logs.
    if(incoming.startsWith("AI:BEGIN:"))
@@ -710,14 +714,14 @@ static void pollBLECommands(){
   return;
  }
  if(incoming=="A:VOICE"){
-  if(BrainC5OTA::updating() || BrainAudioTest::running || BrainVoiceSTT::running || BrainAI::busy || BrainTTS::running){
+  if(BrainC5OTA::updating() || BrainAudioTest::running || BrainVoiceSTT::running || BrainAI::busy || BrainTTS::running || BrainRealtimeDirect::active() || BrainRealtimeAudio::active()){
    proxyResult("ERR:AUDIO_BUSY");return;
   }
   proxyResult(BrainVoiceSTT::start()?"ACK:VOICE_STARTED":"ERR:VOICE_START");
   return;
  }
  if(incoming=="A:TEST"){
-  if(BrainAudioTest::running || BrainVoiceSTT::running || BrainTTS::running){proxyResult("ERR:AUDIO_BUSY");return;}
+  if(BrainAudioTest::running || BrainVoiceSTT::running || BrainTTS::running || BrainRealtimeDirect::active() || BrainRealtimeAudio::active()){proxyResult("ERR:AUDIO_BUSY");return;}
   if(BrainC5OTA::updating()){proxyResult("ERR:DISPLAY_UPDATING");return;}
   BrainAudioTest::start();
   proxyResult("ACK:AUDIO_TEST");
@@ -743,6 +747,11 @@ static void consoleCommand(String cmd){
  }
  if(cmd.startsWith("A:MIC:")||cmd.startsWith("A:SPK:")){
   BrainAudioTest::setLevel(cmd);return;
+ }
+ if(cmd=="audio diagnose"||cmd=="audio beep"||cmd=="audio test"){
+  if(BrainRealtimeDirect::active()||BrainRealtimeAudio::active()){
+   Serial.println("[AUDIO] Call Mode owns I2S; end call first");return;
+  }
  }
  if(cmd=="audio diagnose"){BrainAudioTest::diagnose();return;}
  if(cmd=="audio beep"){BrainAudioTest::beep();return;}
@@ -1078,11 +1087,12 @@ void setup(){
 }
 void loop(){
  static bool bootChirpDone=false;
- if(!bootChirpDone && millis()>4500 && !BrainAudioTest::running && !BrainC5OTA::updating()){
+ if(!bootChirpDone && millis()>4500 && !BrainAudioTest::running && !BrainC5OTA::updating() && !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active()){
   bootChirpDone=true;
   BrainAudioTest::beep(false);
  }
  BrainC5OTA::permitUpdate=!activeSeq && !lanAwaitingCommand &&
+    !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active() &&
     incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
  BrainC5OTA::tick(Serial1,faceOnline);
@@ -1106,12 +1116,14 @@ void loop(){
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
  BrainRealtimeDirect::tick(BrainVoiceSTT::running || BrainTTS::running ||
                            BrainAudioTest::running || BrainC5OTA::updating());
- if(pendingC5VoiceStart && !BrainTTS::running){
+ if(pendingC5VoiceStart && !BrainTTS::running &&
+    !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active()){
   pendingC5VoiceStart=false;
   if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy)
    BrainVoiceSTT::start();
  }
- BrainTTS::tick(BrainVoiceSTT::running || BrainAudioTest::running || BrainC5OTA::updating() || BrainAI::busy);
+ BrainTTS::tick(BrainVoiceSTT::running || BrainAudioTest::running || BrainC5OTA::updating() || BrainAI::busy ||
+                BrainRealtimeDirect::active() || BrainRealtimeAudio::active());
  static String priorActivity;
  static uint32_t lastActivitySend=0;
  String activity=BrainRealtimeDirect::active() || BrainRealtimeDirect::activity()=="CALL_ERROR"
