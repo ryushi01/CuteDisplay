@@ -78,19 +78,16 @@ No camera/SD integration is enabled in this experiment.
 2. With Call Mode OFF, run existing 'audio diagnose' and 'audio test' over S3 USB
    serial to confirm both microphone and speaker channels already work.
 3. Configure modest audio levels, e.g. mic=100%, speaker=25%, before the call.
-4. Safer first bench test: flash ONLY the experimental S3 firmware while keeping
-   stable C5 v21 unchanged; over USB Serial Monitor at 115200 baud use 'call start',
-   'call status', then 'call stop'. The USB commands never expose the saved key.
-   The C5 v21 button must not be used to toggle Call Mode in this interim test.
-   This dev S3 explicitly disables automatic embedded C5 OTA on boot. Verify
-   'c5 ota status' reports approved=0 in USB Serial Monitor.
-5. For the button milestone, after checking your v21 recovery path, issue the
-   explicit USB-only 'c5 ota enable' command. That opts in to transferring the
-   bundled C5 v22 update; approval does NOT persist across S3 restarts.
-   Flash dev S3 and C5 v22 as one matched pair ONLY
-   after reviewing CI artifacts and confirming a tested v21 recovery path.
-   Short-tap left button; expect Connecting -> Listening. Talk briefly, then
-   expect Thinking -> Speaking and audible response. Short tap ends immediately.
+4. Save your stable C5 v21 recovery image before uploading experimental
+   S3 combined firmware. Existing AUTOMATIC version-checked OTA is restored:
+   S3 will install embedded C5 v22 on a connected C5 v21 when the system is
+   idle, and confirm the updated version after reboot. There is no USB
+   permission command. This intentionally updates C5 too, as in prior releases.
+5. After both boards report the expected versions, use USB Serial Monitor at
+   115200 baud: 'c5 ota status', 'call diagnose', 'call start', 'call status',
+   'call stop'. Then use the C5 left short tap for Call Mode and verify
+   Connecting -> Listening -> Thinking -> Speaking. Long hold outside Call
+   Mode retains the manual voice push-to-talk behavior.
 6. Retest original PTT long-hold outside Call Mode; test Wi-Fi loss and reconnect.
 7. Verify that the iPhone app login still uses its usual 2FA only when needed;
    reconnecting a device needs no human password or one-time code.
@@ -102,6 +99,6 @@ No camera/SD integration is enabled in this experiment.
 - Real I2S, network latency, voice-event sizes, and board timing are still unverified.
 - Open WebUI upstream realtime voice engine is separately configured; the
   chosen cutedisplay-ai model is the authorized chat context, not a speaker.
-- No background C5 OTA rollout: stable v21 is preserved by default. v22 C5 OTA
-  requires the user to explicitly type 'c5 ota enable' on the S3 USB serial
-  console each S3 boot. Never issue that command for an S3-only audio test.
+- Automatic version-checked C5 OTA remains enabled as before. Uploading
+  an S3 build containing C5 v22 will upgrade a connected v21 automatically
+  once idle; keep the v21 recovery image until v22 is hardware-validated.
