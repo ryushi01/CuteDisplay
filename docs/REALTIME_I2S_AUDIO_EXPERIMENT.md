@@ -10,6 +10,31 @@ passed its health check, and the existing native /api/v1/audio/realtime
 WebSocket accepted the saved sk- user API key and replied to a ping.
 No gateway, new provider URL, login, password or TOTP needed on the S3.
 
+## Configure the shared API key from the iPhone (preferred)
+
+In the CuteDisplay iPhone app, go to **Kitty AI — Open WebUI**. The existing
+secure Open WebUI user API-key field is also the credential for realtime
+Call Mode. Enter the same revocable **sk-** user key that passed the Ubuntu
+probe, with https://ragnarok-project.com and model cutedisplay-ai.
+
+- **Save Open WebUI connection** updates URL, model and key together.
+- **Update API Key on S3** (new iPhone development UI) changes ONLY the saved
+  key, leaving the URL/model untouched. The key stays in iOS Keychain.
+- S3 must be connected over encrypted BLE; never send credentials via LAN,
+  URLs, serial consoles, transcripts or Github.
+- The app reports **Confirmed: API key saved on S3** only when the S3
+  acknowledges AI:END with ACK:AI_SAVED. A queued transfer alone is not proof.
+- The firmware re-reads the key from its brain-ai Preferences for the next
+  call. Browser login and 2FA settings remain unchanged.
+- If an old app build is installed, the existing **Save Open WebUI connection**
+  button still provisions the key to the S3. Rebuild the iOS app to get the
+  dedicated key-only update and S3 acknowledgment UI.
+
+If `call start` reports CALL_ERROR before socket/I2S startup, the experimental
+S3 USB console `call diagnose` command checks local prerequisites and does
+not print any secret. A periodic S3 TIME log does not by itself prove that
+clock sync caused the failure.
+
 ## Wiring — unchanged from BrainPinPlan.h
 
 | S3 pin | INMP441 mic | MAX98357A amp |
