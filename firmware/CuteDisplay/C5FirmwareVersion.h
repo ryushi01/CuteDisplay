@@ -4,4 +4,5 @@
 // v13: last hardware-tested baseline.
 // v14: expanded Unicode font coverage for French, Japanese, and symbols.
 // v15: uppercase accented Latin rendering and matched glyph visual size.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 15;
+// v16: colored inline emoji faces, hearts and special symbols.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 16;
