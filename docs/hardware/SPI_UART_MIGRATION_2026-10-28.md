@@ -46,3 +46,14 @@ That is **five new signal wires + two existing UART wires + common GND** (8 cond
 - `docs/hardware/s3-c5-breadboard-plan.md`: earlier candidate pin conflict review; physical S3 header assignments **not verified**.
 
 Never claim SPI is already working, and do not require removing existing UART wires during rollout.
+
+## Pinout review from photographed manufacturer diagrams (2026-10-28)
+
+**Decision: do not wire the proposed 5-line SPI yet.** The diagrams expose more severe free-pin constraints than the initial architecture assumed. This is a physical mapping review, not a schematic-level electrical or driver validation.
+
+- Freenove ESP32-S3 right header (top to bottom): 43,44,1,2,42,41,40,39,38,37,36,35,0,45,48,47,21,20,19,GND. Existing I2S audio uses 1/2/42/41; microSD 38/39/40; PSRAM 35/36/37; 0/45 boot strapping; 48 on-board LED; 47/21 UART; 19/20 native USB; 43/44 UART0 debug. There is no safely verified physically adjacent five-GPIO cluster without repurposing functions.
+- LILYGO C5 right header: GND, 3V3, TXD, RXD, GPIO4, GPIO5, GPIO6, GPIO10, GPIO23, GND, GND, 3V3. Left: 3V3, GPIO2, GPIO3, GPIO0, GPIO1, GPIO7, GPIO8, GPIO9, GPIO25, GPIO27, GND, 5V. LCD uses 7/8/9/23/25/26; PMIC 2/3 and IRQ 10; buttons 0/28; UART1 RX and 6 TX currently used; GPIO4, GPIO5, GPIO27 look like potential spare candidates only. TXD/RXD are programming/debug serial and not assumed free. No verified dedicated five-pin group for SPI alongside UART.
+- Candidate **optimized binary UART on current GPIO47/21 ↔ C5 GPIO1/6** remains the low-risk path to speed OTA: replace 40-byte ASCII-hex packets with larger binary chunks, CRC and bounded retransmits, keeping SHA256 and dual-slot OTA.
+- Alternative SPI requires schematic-level and board pinmux investigation, possible sharing/repurposing onboard microSD, UART0, GPIO10 or other special-function lines, plus electrical and boot/driver qualification; not authorized as-is. Could consider SPI with 4 lines and in-band ready polling if four conflict-free C5 pins can be demonstrated, but this remains unverified.
+- No production firmware, external wiring or hardware pin map was changed by this documentation update.
+
