@@ -276,7 +276,7 @@ static void processFace(const CuteLink::Frame &f){
              BrainAudioTest::running || BrainC5OTA::updating() ||
              BrainTTS::running || BrainRealtimeAudio::active();
   if(!BrainRealtimeDirect::toggle(busy))
-   Serial.println("[CALL] Start refused; verify WiFi, saved Open WebUI API key and server auth");
+   Serial.println("[CALL] C5 button start refused; run USB command call diagnose");
  } else if(f.type=="VOICE_INTERRUPT"){
   pendingC5VoiceStart=false;
   BrainTTS::interrupt();
@@ -743,7 +743,7 @@ static void pollBLECommands(){
 static void consoleCommand(String cmd){
  cmd.trim();
  if(cmd=="help"){
-  Serial.println("[S3] call status / call start / call stop (USB-only experimental realtime)");
+  Serial.println("[S3] call status / call diagnose / call start / call stop (USB-only experimental realtime)");
   Serial.println("[S3] c5 ota status / c5 ota enable (USB-only, THIS UPGRADES C5 to dev v22)");
   Serial.println("[S3] audio beep / audio diagnose / audio test");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
@@ -780,6 +780,17 @@ static void consoleCommand(String cmd){
   Serial.println("[S3 OTA] USER APPROVED development C5 OTA for this boot; update starts when idle");
   return;
  }
+ if(cmd=="call diagnose"){
+  bool busy=BrainVoiceSTT::running || BrainAI::busy ||
+    BrainAudioTest::running || BrainC5OTA::updating() ||
+    BrainTTS::running || BrainRealtimeAudio::active();
+  Serial.printf("[CALL] DIAG busy flags: legacy_stt=%d legacy_ai=%d audio_test=%d tts=%d c5_ota=%d i2s_owner=%d\n",
+   BrainVoiceSTT::running?1:0,BrainAI::busy?1:0,
+   BrainAudioTest::running?1:0,BrainTTS::running?1:0,
+   BrainC5OTA::updating()?1:0,BrainRealtimeAudio::active()?1:0);
+  BrainRealtimeDirect::diagnose(busy);
+  return;
+ }
  if(cmd=="call status"){
   Serial.printf("[CALL] state=%s socket_requested=%d i2s_owner=%d i2s_ready=%d playback_queued=%u mic_dropped=%lu\n",
    BrainRealtimeDirect::activity().c_str(),BrainRealtimeDirect::active()?1:0,
@@ -798,7 +809,10 @@ static void consoleCommand(String cmd){
   if(BrainTTS::running)BrainTTS::interrupt();
   bool busy=BrainVoiceSTT::running || BrainAI::busy || BrainAudioTest::running ||
             BrainC5OTA::updating() || BrainTTS::running || BrainRealtimeAudio::active();
-  if(!BrainRealtimeDirect::toggle(busy))Serial.println("[CALL] USB start refused: audio busy or missing WebUI config");
+  if(!BrainRealtimeDirect::toggle(busy)){
+   Serial.println("[CALL] USB start refused; run 'call diagnose' for exact safe reason");
+   BrainRealtimeDirect::diagnose(busy);
+  }
   return;
  }
  if(cmd=="ble bonds clear"){
