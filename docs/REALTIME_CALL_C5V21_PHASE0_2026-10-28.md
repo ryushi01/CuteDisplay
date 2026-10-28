@@ -141,3 +141,21 @@ PASS: two sequential voice turns over one authenticated realtime WebSocket.
 **Accepted:** WebSocket persists for two sequential microphone/VAD/transcription/assistant-audio turns; French transcription and audio playback API succeeded. **Not yet explicitly confirmed by user:** personally hearing both saved spoken answers / quality. **Not tested:** model delegation (`generate_chat_completion`), saved Open WebUI chat context, automatic ongoing hands-free loop, speech-triggered barge-in, ESP32 I2S/Wi-Fi, device auth, and C5 v21 regression on a new build. Maintain original hardware-tested v21 rollback unchanged.
 
 **Next gate:** exercise `cutedisplay-ai` model delegation with a substantive spoken question (instead of provider-only small talk), then design/review narrowly scoped gateway authentication that does not store the user's password, 2FA secret or session JWT on ESP32.
+
+
+## Phase 0.7 — verify selected chat-model delegation (source committed, user test pending)
+
+The two-turn call worked using the **Realtime provider** and no `generate_chat_completion` function call, which does not yet prove that substantive requests reach the selected `cutedisplay-ai` model.
+
+Diagnostic:
+- `tools/realtime_model_delegation_smoke.py`, launched by the interactive 2FA helper using `--model-delegation`.
+- Captures one **French substantive question** via 24kHz PCM with WebUI's VAD/STT; sends `bridge.respond`.
+- Requires the realtime provider to emit `response.output_item.done` with `generate_chat_completion`; if it answers directly, reports `INCOMPLETE` rather than pretending that the selected model was used.
+- Calls `POST /api/chat/completions` over **verified HTTPS** with the same in-memory, 2FA-verified JWT and `model=cutedisplay-ai`, a single transcribed user message, and `stream=false`. This minimal diagnostic does not mutate an existing chat, execute browser UI tools, or preserve chat history.
+- Sends `bridge.result` with the selected model's plain-text answer, then `bridge.respond` with the tool call ID so the existing Realtime provider can vocalize the text. Receives 24kHz voice PCM, plays and saves the provider's generated answer to `~/Downloads/CuteDisplay-model-delegation.wav`. Captured microphone audio is never persisted.
+- Run from macOS Terminal, in the existing `.venv-realtime` and after updating the branch:
+  `python tools/probe_openwebui_realtime_login.py --url "$OPENWEBUI_URL" --model cutedisplay-ai --model-delegation`
+- Speak a direct question such as **`Demande au modèle de chat : combien font dix-sept fois vingt-trois ?`**. Successful test should report provider delegation, successful selected model completion, and completed spoken response. The model's mathematical output is not guaranteed correct and should be checked separately. The diagnostic is **not** production browser-equivalent call logic.
+- Acceptance pending from user. No ESP32 firmware modifications.
+
+**Security:** Keep HTTPS certificate verification enabled, do not store JWT/password/TOTP in S3 firmware, and retain the C5 v21 immutable rollback.
