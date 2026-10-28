@@ -10,6 +10,8 @@ import argparse
 from getpass import getpass
 import json
 import os
+import socket
+import ssl
 from pathlib import Path
 import subprocess
 import sys
@@ -28,7 +30,21 @@ def post_json(url, fields, action):
         print(f"{action} failed (HTTP {exc.code}). Verify account settings and try again; no tokens were printed.",
               file=sys.stderr)
         return None
-    except (URLError, TimeoutError, ValueError) as exc:
+    except URLError as exc:
+        reason = exc.reason
+        if isinstance(reason, socket.gaierror):
+            msg = "Host name could not be resolved. Use the real Open WebUI URL from Safari."
+        elif isinstance(reason, (ssl.SSLError, ssl.SSLCertVerificationError)):
+            msg = "TLS certificate validation failed. Use the valid HTTPS host; do not disable verification."
+        elif isinstance(reason, (ConnectionRefusedError, ConnectionResetError)):
+            msg = "Connection refused or reset. Check server, port, VPN and reverse proxy."
+        elif isinstance(reason, (socket.timeout, TimeoutError)):
+            msg = "Connection timed out. Check Wi-Fi/VPN and the server."
+        else:
+            msg = f"Network error ({type(reason).__name__}); check URL, DNS and connectivity."
+        print(f"{action} failed: {msg}", file=sys.stderr)
+        return None
+    except (TimeoutError, ValueError) as exc:
         print(f"{action} failed ({type(exc).__name__}).", file=sys.stderr)
         return None
     if not isinstance(payload, dict):
@@ -44,7 +60,13 @@ def main():
     args = parser.parse_args()
     p = urlsplit(args.url.strip())
     if p.scheme != "https" or not p.hostname or p.username or p.password or p.query or p.fragment:
-        parser.error("Use the HTTPS Open WebUI base URL, without credentials, query or fragment")
+        parser.error("Use the real HTTPS Open WebUI base URL (from Safari), without credentials, query or fragment")
+    if p.hostname.upper() == "YOUR-OPENWEBUI-HOST" or p.hostname.endswith(".example.com"):
+        parser.error("The URL is a placeholder. Copy the real Open WebUI HTTPS address from Safari.")
+    if args.model.strip().upper().startswith("YOUR-") or not args.model.strip():
+        parser.error("The model ID is a placeholder. Use the real selected Kitty model ID.")
+    if p.path.rstrip("/").startswith(("/c/", "/chat/", "/admin/")):
+        parser.error("Use the Open WebUI base URL, not a chat or admin page URL.")
     base = urlunsplit((p.scheme, p.netloc, p.path.rstrip("/"), "", ""))
     email = input("Open WebUI login email: ").strip()
     password = getpass("Open WebUI password (hidden): ")
