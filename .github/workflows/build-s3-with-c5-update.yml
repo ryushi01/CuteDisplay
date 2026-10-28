@@ -48,11 +48,6 @@ jobs:
         run: |
           arduino-cli lib install "ESP8266Audio@2.4.1"
 
-      - name: Install verified-TLS WebSocket client for Realtime S3 prototype
-        shell: bash
-        run: |
-          arduino-cli lib install "WebSockets@2.7.2"
-
       - name: Show available C5 and S3 board menu options
         shell: bash
         run: |
