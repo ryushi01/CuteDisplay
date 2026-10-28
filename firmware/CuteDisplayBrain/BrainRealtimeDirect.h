@@ -120,7 +120,15 @@ inline void stop(){
  status("CALL_OFF");
 }
 inline void fail(const char *why){
- Serial.printf("[CALL] %s; verify Open WebUI key/call permission, TLS and patch\n",why);
+ const bool localAudio=(strcmp(why,"I2S_RUNTIME")==0 ||
+   strcmp(why,"AUDIO_TASK_ALLOC")==0 ||
+   strncmp(why,"NO_PSRAM",8)==0 ||
+   strncmp(why,"PSRAM_",6)==0 ||
+   strncmp(why,"STATIC_",7)==0);
+ if(localAudio)
+  Serial.printf("[CALL] LOCAL AUDIO FAULT: %s (no Open WebUI configuration change needed)\n",why);
+ else
+  Serial.printf("[CALL] %s (WebSocket / audio protocol or hardware; check detailed preceding log)\n",why);
  // Stop retries on rejected credentials, unexpected PCM or incompatible server.
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
@@ -171,7 +179,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   if(!cJSON_IsNumber(rate)||rate->valueint!=24000)failure="SAMPLE_RATE";
   else if(!BrainRealtimeAudio::start(BrainAudioTest::micGain,
                                      BrainAudioTest::speakerVolume))
-   failure="I2S_START";
+   failure=BrainRealtimeAudio::issue(); // precise local allocation reason
   else{
    ready=true;lastPing=millis();status("CALL_CONNECTING");
   }
@@ -394,7 +402,10 @@ inline void tick(bool audioBusy){
   }
  }
  if(ready){
-  if(BrainRealtimeAudio::failed()){fail("I2S_RUNTIME");return;}
+  if(BrainRealtimeAudio::failed()){
+   Serial.printf("[CALL] I2S driver fault: %s\n",BrainRealtimeAudio::issue());
+   fail("I2S_RUNTIME");return;
+  }
   if(BrainRealtimeAudio::initialized()){
    // 20ms mono little-endian PCM16, encoded as a native Open WebUI event.
    // Never send more than 2 frames per tick (40ms maximum).
