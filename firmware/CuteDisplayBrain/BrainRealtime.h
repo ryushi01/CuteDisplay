@@ -175,9 +175,16 @@ inline void init(){
  requested=autoStart;
 }
 inline void tick(bool audioBusy){
+ // A Wi-Fi dropout must NOT forget the saved user's Call Mode preference.
+ // The device automatically resumes connecting when Wi-Fi returns.
+ if(started && WiFi.status()!=WL_CONNECTED){
+  socket.disconnect();started=false;authenticated=false;ready=false;
+  state("CONNECTING");
+  return;
+ }
  if(requested && !started && !audioBusy && WiFi.status()==WL_CONNECTED)start();
  if(started){
-  if(!requested || WiFi.status()!=WL_CONNECTED){stop();return;}
+  if(!requested){stop();return;}
   socket.loop();
  }
 }
