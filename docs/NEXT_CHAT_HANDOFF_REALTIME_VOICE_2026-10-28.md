@@ -38,3 +38,10 @@ User wants **natural real-time, low-latency voice conversation**, akin to Open W
 
 ## Safety and workflow
 Work on a new `feature/realtime-voice` branch from `main`; keep the tested stable branch immutable. Build both C5 and S3 via GitHub Actions and verify physical device after each stage. Never label merely compiled firmware stable. Update this handoff after significant changes.
+
+## 2026-10-28 ADDENDUM — Robust MP3 TTS service checkpoint
+See [CHECKPOINT_ROBUST_MP3_TTS_2026-10-28.md](CHECKPOINT_ROBUST_MP3_TTS_2026-10-28.md) for the verified production architecture, service managers, rollback, testing and known limits.
+
+**Most recent service state:** MacBook Qwen3-TTS now runs `server_robust:app` on port 8321 with `local.kittychan.qwen3tts` LaunchAgent; Ubuntu `kitty-tts.service` on 8322 provides FFmpeg-encoded MP3 (32 kbps mono) to Open WebUI; MacKitty Realtime on 8765 and Open WebUI Docker are managed services. User confirmed production MP3 speaker-button playback and service cleanup checks. Previous TTS `uuuu` humming was mitigated with per-sentence retries and heuristic audio validation, but more live use is needed to establish long-term reliability.
+
+**Source gap:** The deployed MacBook `server_robust.py` and Ubuntu `/opt/kitty-tts/adapter.py` were not directly fetched into GitHub in this checkpoint. Obtain exact files from the respective hosts before claiming reproducible TTS source backup. Never commit `/etc/kitty-tts.env` or other keys. **Firmware real-time conversation is still planned, not implemented**, and the stable hardware-tested firmware branch must remain untouched.
