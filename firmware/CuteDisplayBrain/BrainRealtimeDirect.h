@@ -118,6 +118,16 @@ inline bool bridgeRespond(const char *which,const String &id){
  cJSON_AddStringToObject(event,which,id.c_str());
  return sendEvent(event);
 }
+// Open WebUI has a DIFFERENT continuation event for avatar/expression tools
+// than for chat-model delegation. The wrong command closes the WebSocket.
+inline bool bridgeAnimationRespond(const String &responseId){
+ if(responseId.isEmpty()||responseId.length()>160)return false;
+ cJSON *event=cJSON_CreateObject();
+ if(!event)return false;
+ cJSON_AddStringToObject(event,"type","bridge.animation.respond");
+ cJSON_AddStringToObject(event,"response_id",responseId.c_str());
+ return sendEvent(event);
+}
 inline bool bridgeResult(const String &id,const char *outcome,const String &answer){
  if(id.isEmpty()||id.length()>160 || answer.length()>1600)return false;
  cJSON *event=cJSON_CreateObject();
@@ -272,7 +282,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    cJSON *response=cJSON_GetObjectItem(json,"response");
    cJSON *rid=cJSON_GetObjectItem(response,"id");
    if(cJSON_IsString(rid) && animationResponseId==rid->valuestring){
-    if(!bridgeRespond("response_id",animationResponseId))
+    if(!bridgeAnimationRespond(animationResponseId))
       failure="ANIMATION_CONTINUE";
     animationResponseId="";
    }
