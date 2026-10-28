@@ -67,6 +67,39 @@ A second attempt failed an assertion **before the script stops Open WebUI**. In 
 
 After pulling the latest development branch, run `bash server/deploy_existing_openwebui.sh --check` and verify **both original and candidate** configuration passes before executing `--deploy`. The `--deploy` command will stop Open WebUI briefly to back up its persistent volume.
 
+## Verified backup before deployment (revised after truncated archive)
+
+On 2026-10-28, the original long offline `tar -czf` process ended before writing a gzip trailer. Its output `/home/ryushi/openwebui-rollback-aq21l830/openwebui-data.tar.gz` is **CORRUPT**, confirmed by `gzip: unexpected end of file`, and must never be used for restoration. The original Open WebUI container recovered, passed Docker health, and served HTTP `200` at `/health`. The corrupted archive cannot itself damage the original Docker volume.
+
+**The old combined `--deploy` backup process is retired.** Use the new standalone script instead. It first pre-copies data while Open WebUI remains online, briefly stops ONLY Open WebUI for a consistent rsync delta (including SQLite/WAL), restarts the original app, then creates and validates the gzip archive while Open WebUI is ONLINE. It writes only `.partial` files until full gzip, tar and SHA256 checks pass; it creates `BACKUP_VERIFIED` only at the end.
+
+```bash
+cd "$HOME/CuteDisplay-realtime-server"
+git switch feature/realtime-call-c5v21
+git pull --ff-only
+
+# Do not continue if the original service is not healthy.
+sudo docker inspect open-webui --format 'Status: {{.State.Status}}, Image: {{.Config.Image}}'
+curl -fsS --max-time 10 http://127.0.0.1:8080/health
+
+# Backup only: creates no replacement image, changes no Compose config.
+# Requires rsync. Keep the SSH session open, or use an existing tmux session.
+command -v rsync
+bash server/create_verified_openwebui_backup.sh --backup
+```
+
+The only valid success marker is `BACKUP VERIFIED: /home/ryushi/openwebui-verified-.../openwebui-data.tar.gz`. If SSH disconnects during compression, the original app has already restarted; an abandoned `.partial` archive is NOT a valid backup.
+
+**Do not deploy until the independent backup succeeds.** The corrected deployment command now requires the just-verified backup directory and refuses a missing, corrupt, or older-than-six-hours archive:
+
+```bash
+# EXAMPLE ONLY — replace with the exact fresh directory printed above:
+bash server/deploy_existing_openwebui.sh --check
+bash server/deploy_existing_openwebui.sh --deploy /home/ryushi/openwebui-verified-XXXXXXXX
+```
+
+Never supply the older `openwebui-rollback-aq21l830` directory. The deployment rechecks the checksum, gzip trailer and archived manifest BEFORE stopping the original app.
+
 ## Step 2 — controlled deployment, not automatic
 
 Before switching Compose/container to the new image:
