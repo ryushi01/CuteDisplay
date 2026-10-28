@@ -3,7 +3,7 @@ name: Build combined S3 + C5 firmware
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/s3-ai-streaming, feature/wav-only-baseline-candidate, feature/c5-unicode-font-coverage, feature/c5-color-emoji-v16, feature/uart-ota-fast-v17, feature/c5-uniform-chat-font-v18, feature/c5-v19-selective-font-fix, feature/c5-v20-latin-glyph-priority, feature/c5-v21-latin-composed-accents]
+    branches: [main, feature/s3-ai-streaming, feature/wav-only-baseline-candidate, feature/c5-unicode-font-coverage, feature/c5-color-emoji-v16, feature/uart-ota-fast-v17, feature/c5-uniform-chat-font-v18, feature/c5-v19-selective-font-fix, feature/c5-v20-latin-glyph-priority, feature/c5-v21-latin-composed-accents, feature/realtime-call-c5v21]
     paths:
       - ".github/workflows/build-s3-with-c5-update.yml"
       - "tools/build_s3_with_c5_update.sh"
@@ -47,6 +47,11 @@ jobs:
         shell: bash
         run: |
           arduino-cli lib install "ESP8266Audio@2.4.1"
+
+      - name: Install verified-TLS WebSocket client for Realtime S3 prototype
+        shell: bash
+        run: |
+          arduino-cli lib install "WebSockets@2.7.2"
 
       - name: Show available C5 and S3 board menu options
         shell: bash
