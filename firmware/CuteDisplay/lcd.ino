@@ -691,8 +691,13 @@ uint32_t decodeUTF8(const String &s, int &offset) {
  }
  return value;
 }
+// Keep Latin accented glyphs the same width as ordinary ASCII.
+bool narrowUnicodeGlyph(uint32_t cp) {
+ return (cp >= 0x00A0 && cp <= 0x024F) ||
+        (cp >= 0x1E00 && cp <= 0x1EFF);
+}
 int utfWidth(uint32_t cp, int asciiScale, int jpScale) {
- return cp < 128 ? 6*asciiScale : 16*jpScale;
+ return (cp < 128 || narrowUnicodeGlyph(cp)) ? 6*asciiScale : 16*jpScale;
 }
 int richWidth(const String &s, int asciiScale, int jpScale) {
  int maxWidth=0, current=0;
@@ -1027,8 +1032,12 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
       uint8_t lo=bitmap?bitmap[row*2+1]:pgm_read_byte(&embedded->bitmap[row*2+1]);
       uint16_t bits=((uint16_t)hi<<8)|lo;
       for(int col=0;col<16;col++)if(bits&(0x8000>>col)){
-       int xx=x+col*jpScale;
-       if(xx+jpScale<=clipRight)rect(xx,y+row*jpScale,jpScale,jpScale,color);
+       // Scale the 16px source horizontally into its measured advance.
+       // Accented Latin letters therefore align with unaccented ASCII.
+       int left=x+(col*width)/16;
+       int right=x+((col+1)*width)/16;
+       if(right>left && right<=clipRight)
+        rect(left,y+row*jpScale,right-left,jpScale,color);
       }
      }
     }
