@@ -69,3 +69,24 @@ A test Mac running Python 3.11 could open the Open WebUI site in Safari but the 
 Both the interactive login and the WebSocket probe now use `truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)` to validate TLS using the operating system's trusted certificates without suppressing verification. Install `python -m pip install truststore 'websockets>=14,<17'` in `.venv-realtime` first. Run `curl -sS -o /dev/null -w 'HTTP %{http_code}, certificate verify result %{ssl_verify_result}\\n' "$OPENWEBUI_URL/"` to compare macOS native TLS verification. Never use `curl -k`, `ssl.CERT_NONE`, `verify=False` or `PYTHONHTTPSVERIFY=0`; if native macOS verification fails, repair the HTTPS certificate chain or trust configuration instead.
 
 This adjustment only affects the **local Mac diagnostic scripts**; neither ESP32 firmware nor Open WebUI server was modified. Realtime WebSocket authorization and device-side authentication remain an open design gate.
+
+
+## Phase 0 acceptance — user-verified Mac browser transport
+User ran the diagnostic against their actual Open WebUI public HTTPS endpoint from a MacBook, using model `cutedisplay-ai`. The server accepted interactive account login with TOTP 2FA; the authenticated WebSocket returned:
+- `bridge.ready` at **24,000 Hz**, provider model **`local`**.
+- `bridge.pong` in response to the application ping.
+- `curl` HTTP 200 and TLS verification result 0 using native macOS certificate trust.
+
+This verifies the *control plane* only; do not infer that live PCM audio transport, microphone/speaker playback, conversation persistence or device authentication was tested.
+
+## Phase 0.5 — real audio round-trip on MacBook, implementation committed, test pending
+- `tools/realtime_audio_smoke.py` runs a one-turn **Mac** microphone capture and speaker playback, connecting to the same authenticated WebSocket using a session JWT held in child-process memory.
+- `tools/probe_openwebui_realtime_login.py --audio-smoke` handles interactive password + TOTP, then launches the one-turn audio test (requires `python -m pip install sounddevice truststore 'websockets>=14,<17'`).
+- Use the same `--url` and `--model cutedisplay-ai` as the passing control-plane probe; run only in the environment that already passed 2FA.
+- Captures 100 ms 24 kHz signed 16-bit mono PCM chunks to `input_audio_buffer.append`. After server-side VAD + transcription completion it sends `bridge.respond` and stops microphone capture, then receives `response.output_audio.delta` and streams PCM to macOS speakers. Saves **received assistant speech only** to `~/Downloads/CuteDisplay-realtime-smoke.wav`. Captured microphone audio is not saved to disk.
+- Speak a greeting such as `こんにちは、キティちゃん。元気？`, then pause. This smoke test does **not** delegate `generate_chat_completion` to the selected model, update Open WebUI chat history, or validate barge-in; choose short ordinary small talk rather than substantive tasks. It is not the production call implementation.
+- User must physically confirm mic permission (Terminal) and speaker output; consider `python -m sounddevice` when an audio device cannot open at 24 kHz.
+- Do not flash any S3/C5 firmware based on a Mac-only smoke test. All firmware changes remain future work, starting with a secure device authentication/proxy design.
+
+## JWT and 2FA architecture warning
+Open WebUI's tested `/api/v1/audio/realtime` bridge expects an authenticated WebUI **session JWT**, rather than the preexisting `sk-` Open WebUI API key. The Mac diagnostic uses a transient JWT after explicit 2FA verification; **do not copy that user JWT, account password, or TOTP secret into ESP32 NVS, firmware or GitHub**. A practical autonomous device requires a narrowly scoped, revocable device identity and a server-side intermediary/session delegation path that respects existing 2FA. Design, secure, and test that gateway before connecting the S3 directly; never disable 2FA or relax TLS verification.
