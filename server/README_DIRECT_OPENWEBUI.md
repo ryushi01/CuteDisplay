@@ -61,6 +61,12 @@ bash server/deploy_existing_openwebui.sh --deploy
 
 Only proceed with deployment if `--check` passes. The script preserves the original image and volume and attempts automatic rollback if the candidate fails its health test. A successful deployment prints `PASS: candidate image active and original /health responding.` and a private backup/rollback directory.
 
+### Compose volume-name correction (second safe pre-stop failure)
+
+A second attempt failed an assertion **before the script stops Open WebUI**. In the original Compose config, the logical volume alias resolves to the real Docker volume `open-webui`; the secondary candidate validation had incorrectly compared the alias to the physical name. `server/check_openwebui_compose_config.py` now validates the effective volume name, port 8080 and image for **both original and override Compose**. Regression tests cover a logical name differing from the actual physical volume name, and `--check` now also verifies the candidate override, before any deployment is attempted. This failure did not modify the running server; the incomplete backup folders from preflight failures contain no database snapshots and should not be used for restoration.
+
+After pulling the latest development branch, run `bash server/deploy_existing_openwebui.sh --check` and verify **both original and candidate** configuration passes before executing `--deploy`. The `--deploy` command will stop Open WebUI briefly to back up its persistent volume.
+
 ## Step 2 — controlled deployment, not automatic
 
 Before switching Compose/container to the new image:
