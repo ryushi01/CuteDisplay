@@ -28,6 +28,7 @@
 #include "CuteLink.h"
 #include "C5FirmwareVersion.h"
 #include "C5JapaneseFont.h"
+#include "C5LatinUpper.h"
 #include "C5UARTOTA.h"
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
@@ -1009,6 +1010,7 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
  int lineH=max(7*ascScale,16*jpScale)+4;
  for(int p=0;p<(int)str.length();) {
   uint32_t cp=decodeUTF8(str,p);
+  cp=c5LatinUpper(cp);
   if(cp=='\r')continue;
   if(cp=='\n'){x=startX;y+=lineH;continue;}
   if(cp=='\t'){x+=24*ascScale;continue;}
