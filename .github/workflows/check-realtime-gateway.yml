@@ -52,6 +52,19 @@ jobs:
         run: python -m py_compile server/patch_openwebui_realtime_api_key.py
       - name: Validate existing-Compose safe deployment and rollback script shell syntax
         run: bash -n server/deploy_existing_openwebui.sh
+      - name: Regression — root-owned Compose backup must not block unprivileged chmod
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          trap 'sudo rm -rf "$scratch"' EXIT
+          sudo install -m 600 /dev/null "$scratch/docker-compose.yaml"
+          touch "$scratch/candidate.yaml" "$scratch/rollback.yaml"
+          chmod 600 "$scratch/candidate.yaml" "$scratch/rollback.yaml"
+          test "$(stat -c '%a' "$scratch/candidate.yaml")" = 600
+          test "$(sudo stat -c '%a' "$scratch/docker-compose.yaml")" = 600
+          grep -Fq 'chmod 600 "$BACKUP/candidate.yaml" "$BACKUP/rollback.yaml"' server/deploy_existing_openwebui.sh
+          ! grep -Fq 'chmod 600 "$BACKUP"/*.yaml' server/deploy_existing_openwebui.sh
       - name: Test version guard and API-key permission delegation
         run: python -m unittest discover -s server -p 'test_*.py' -v
       - name: Compile patch against actual upstream Open WebUI source
