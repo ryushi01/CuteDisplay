@@ -174,9 +174,9 @@ def patch_expressions(source):
     return result
 
 
-def patch(source):
-    # Preserve an existing auth patch when building on the already-deployed
-    # Open WebUI image; never reapply auth and accidentally double-modify it.
+def patch_authentication(source):
+    # Auth security can be unit-tested on its own minimal fixture. The full
+    # realtime/gesture integration gets separate upstream protocol tests.
     if MARKER in source:
         if source.count(MARKER) != 1:
             raise ValueError("Multiple authorization patch markers")
@@ -192,6 +192,12 @@ def patch(source):
         result = source
         for name in ("fastapi", "auth", "router", "initial", "renew"):
             result = result.replace(OLD[name], NEW[name], 1)
+    compile(result, TARGET, "exec")
+    return result
+
+
+def patch(source):
+    result = patch_authentication(source)
     result = patch_expressions(result)
     compile(result, TARGET, "exec")
     return result
