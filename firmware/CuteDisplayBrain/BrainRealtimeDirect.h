@@ -336,19 +336,34 @@ inline bool toggle(bool audioBusy){
   status("CALL_ERROR");return false;
  }
  reload();
- if(!valid()){status("CALL_ERROR");return false;}
+ const char *reason=preflightError();
+ // Network and SNTP are transient. Do not require the user to repeatedly
+ // press Call while the S3 is finishing startup after a firmware upload.
+ if(reason && strcmp(reason,"S3_WIFI_OFFLINE")!=0 &&
+    strcmp(reason,"S3_CLOCK_UNSYNCED")!=0){
+  Serial.printf("[CALL] PREFLIGHT REFUSED: %s\n",reason);
+  status("CALL_ERROR");return false;
+ }
  requested=true;
- if(!connect()){
-  requested=false; // Failed first start is OFF, not a hidden active session.
+ if(!reason && !connect()){
+  requested=false; // Permanent validation failure is OFF, not a hidden session.
   status("CALL_ERROR");
   return false;
  }
+ if(reason)status("CALL_CONNECTING");
  return true;
 }
 inline void tick(bool audioBusy){
  if(!requested)return;
  if(WiFi.status()!=WL_CONNECTED){
   if(started){BrainRealtimeAudio::stop();ws.disconnect();started=false;connected=false;ready=false;}
+  status("CALL_CONNECTING");return;
+ }
+ if(!BrainClock::valid()){
+  if(started){
+   BrainRealtimeAudio::stop();ws.disconnect();
+   started=false;connected=false;ready=false;
+  }
   status("CALL_CONNECTING");return;
  }
  if(!started){
