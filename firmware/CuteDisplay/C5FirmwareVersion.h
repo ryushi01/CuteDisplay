@@ -6,4 +6,5 @@
 // v15: uppercase accented Latin rendering and matched glyph visual size.
 // v16: colored inline emoji faces, hearts and special symbols.
 // v17: negotiated 160-byte UART OTA packets, backwards-compatible receiver.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 17;
+// v18: unified bold chat font for ASCII and accented Latin.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 18;
