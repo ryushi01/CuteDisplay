@@ -1039,6 +1039,11 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
        if(right>left && right<=clipRight)
         rect(left,y+row*jpScale,right-left,jpScale,color);
       }
+     }else{
+      // Never silently hide unsupported Unicode (e.g. emoji outside BMP).
+      // Show a visible fallback until a dedicated glyph is supplied.
+      int markWidth=6*ascScale;
+      glyph(x+max(0,(width-markWidth)/2),y,'?',ascScale,color);
      }
     }
    }
