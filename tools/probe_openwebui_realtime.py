@@ -2,14 +2,21 @@
 """Read-only handshake check for Open WebUI's *Realtime* call bridge.
 
 No microphone, audio playback, chat completion, or device firmware modification.
-Requires: python -m pip install 'websockets>=14,<17'
+Requires: python -m pip install 'websockets>=14,<17' truststore
 """
 import argparse
 import asyncio
 import json
 import os
 import sys
+import ssl
 from urllib.parse import urlsplit, urlunsplit
+
+try:
+    import truststore  # OS-native certificate validation (macOS Keychain)
+except ImportError:
+    print("Install TLS dependency first: python -m pip install truststore", file=sys.stderr)
+    raise SystemExit(2)
 
 try:
     from websockets.asyncio.client import connect
@@ -20,8 +27,8 @@ except ImportError:
 
 def websocket_url(base):
     parts = urlsplit(base.strip())
-    if parts.scheme not in ("http", "https", "ws", "wss") or not parts.hostname:
-        raise ValueError("Provide a valid Open WebUI base URL")
+    if parts.scheme not in ("https", "wss") or not parts.hostname:
+        raise ValueError("Provide a valid HTTPS or WSS Open WebUI URL; never send session JWT over plaintext WebSocket")
     if parts.username or parts.password or parts.query or parts.fragment:
         raise ValueError("Do not put credentials or query strings in the URL")
     scheme = "wss" if parts.scheme in ("https", "wss") else "ws"
@@ -39,7 +46,8 @@ async def probe(args):
     endpoint = websocket_url(args.url)
     # Do not print the token or URL credentials. TLS verification is on by default.
     print("Connecting to Open WebUI Realtime voice bridge (no audio will be sent).")
-    async with connect(endpoint, open_timeout=args.timeout, close_timeout=5, max_size=524288) as ws:
+    secure_ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    async with connect(endpoint, ssl=secure_ctx, open_timeout=args.timeout, close_timeout=5, max_size=524288) as ws:
         auth = {"type": "auth", "token": token, "model_id": model}
         if args.chat_id:
             auth["chat_id"] = args.chat_id
