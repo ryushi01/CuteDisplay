@@ -102,8 +102,9 @@ cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
 cat > "$OUT/READ_ME_FIRST.txt" <<EOF
 CuteDisplay combined firmware build: S3 Brain + C5 v$VERSION
 =======================================================
-EXPERIMENTAL 24 kHz voice on S3 and C5 v22: NOT YET HARDWARE TESTED.
-Hardware-tested C5 v21 checkpoint MUST be preserved for recovery.
+Realtime voice transport was hardware-validated at commit 78d4abd9.
+NEW: C5 v$VERSION panoramic Kitty Call Face is experimental.
+Preserve the previous tested S3+C5 v22 archive for recovery.
 
 NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
 1. Open CuteDisplayBrain/CuteDisplayBrain.ino FROM THIS ARTIFACT.
@@ -119,13 +120,13 @@ NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
    Core: Espressif esp32 3.3.12. Recording uses WAV only.
 4. Upload ONLY the S3 sketch, then open Serial Monitor at 115200.
 5. As in previous CuteDisplay combined firmware builds, S3 automatically
-   sends the embedded C5 v22 image if C5 currently runs an older version.
-   This may upgrade C5 v21 to v22 on your first S3 boot after uploading.
+   sends the embedded C5 v$VERSION image if C5 currently runs an older version.
+   This may upgrade older C5 to v$VERSION on your first S3 boot after uploading.
    OTA waits for the system to be idle and verifies the resulting version.
 6. Expect: [S3 OTA] SUCCESS: new display firmware confirmed after reboot.
    USB Serial Monitor: c5 ota status / call diagnose / call start / call stop.
-   There is NO manual c5 ota enable command; save your C5 v21 recovery
-   firmware before first upload because v22 is not yet hardware-tested.
+   There is NO manual c5 ota enable command; save your previous stable firmware
+   firmware before upload because full-screen face v$VERSION is new.
 
 The CombinedFirmwareImage.h from the normal repository is deliberately EMPTY.
 Never upload the repository's S3 sketch as a combined firmware release;
@@ -148,6 +149,7 @@ cp "$ROOT/ios/CuteDisplay/ContentView.swift" "$OUT/iPhone-app/ContentView.swift"
 cp "$ROOT/ios/CuteDisplay/BluetoothManager.swift" "$OUT/iPhone-app/BluetoothManager.swift"
 cp "$ROOT/docs/INSTALL_REALTIME_COMPLETE.md" "$OUT/README_STEP_BY_STEP.md"
 cp "$ROOT/docs/REALTIME_I2S_AUDIO_EXPERIMENT.md" "$OUT/REALTIME_I2S_AUDIO_EXPERIMENT.md"
+cp "$ROOT/docs/REALTIME_KITTY_FACE_V23.md" "$OUT/REALTIME_KITTY_FACE_V23.md"
 python3 - "$OUT" <<'PY'
 from pathlib import Path
 import hashlib
@@ -155,14 +157,16 @@ import sys
 root = Path(sys.argv[1])
 targets = [
     root / "CuteDisplay-CombinedFirmware.bin",
-    root / "S3-Brain-includes-C5-v22-application.bin",
-    root / "C5-v22-application.bin",
+    root / f"S3-Brain-includes-C5-v{(root / 'lcd' / 'C5FirmwareVersion.h').read_text().split('C5_FIRMWARE_VERSION = ')[1].split(';')[0]}-application.bin",
+    root / f"C5-v{(root / 'lcd' / 'C5FirmwareVersion.h').read_text().split('C5_FIRMWARE_VERSION = ')[1].split(';')[0]}-application.bin",
     root / "iPhone-app/ContentView.swift",
     root / "iPhone-app/BluetoothManager.swift",
     root / "CuteDisplayBrain/CuteDisplayBrain.ino",
     root / "CuteDisplayBrain/BrainAI.h",
     root / "CuteDisplayBrain/BrainRealtimeDirect.h",
     root / "CuteDisplayBrain/BrainRealtimeAudio.h",
+    root / "lcd/C5CallFace.h",
+    root / "lcd/C5FirmwareVersion.h",
 ]
 lines = []
 for path in targets:
