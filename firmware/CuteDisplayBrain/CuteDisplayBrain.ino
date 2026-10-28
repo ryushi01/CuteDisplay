@@ -784,6 +784,11 @@ static void consoleCommand(String cmd){
    BrainRealtimeAudio::active()?1:0,BrainRealtimeAudio::initialized()?1:0,
    BrainRealtimeAudio::speakerQueue?(unsigned)uxQueueMessagesWaiting(BrainRealtimeAudio::speakerQueue):0,
    (unsigned long)BrainRealtimeAudio::droppedMic);
+  Serial.printf("[CALL AUDIO] last_stage=%s psram_found=%d internal_free=%lu largest_internal=%lu psram_free=%lu\n",
+   BrainRealtimeAudio::issue(),psramFound()?1:0,
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+   (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   return;
  }
  if(cmd=="call stop"){
