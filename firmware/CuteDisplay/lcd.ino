@@ -29,6 +29,7 @@
 #include "C5FirmwareVersion.h"
 #include "C5JapaneseFont.h"
 #include "C5LatinUpper.h"
+#include "C5LatinAccent.h"
 #include "C5Emoji.h"
 #include "C5UARTOTA.h"
 #include "driver/spi_master.h"
@@ -693,6 +694,17 @@ uint32_t decodeUTF8(const String &s, int &offset) {
  }
  return value;
 }
+// Unify precomposed and decomposed French letters for CHAT layout/drawing.
+uint32_t decodeChatLatin(const String &s,int &offset){
+ uint32_t cp=c5LatinUpper(decodeUTF8(s,offset));
+ if(cp>='A' && cp<='Z' && offset<(int)s.length()){
+  int peek=offset;
+  uint32_t mark=decodeUTF8(s,peek);
+  uint32_t merged=c5LatinCompose(cp,mark);
+  if(merged){offset=peek;return merged;}
+ }
+ return cp;
+}
 // Keep Latin accented glyphs the same width as ordinary ASCII.
 bool narrowUnicodeGlyph(uint32_t cp) {
  return (cp >= 0x00A0 && cp <= 0x024F) ||
@@ -1005,14 +1017,28 @@ String cleanText(String s,int limit) {
  }
  return out;
 }
+// Accent geometry is drawn over/under an UNMODIFIED 5x7 ASCII letter.
+// Thus É has exactly the E body, Ç exactly the C body, and so on.
+void drawLatinAccent(int x,int y,int scale,uint8_t mark,uint16_t color,int clipRight){
+ auto px=[&](int col,int row){
+  int xx=x+col*scale, yy=y+row*scale;
+  if(xx>=0 && xx+scale<=clipRight)rect(xx,yy,scale,scale,color);
+ };
+ if(mark==6){ px(2,7);px(3,8);return; } // cedilla
+ if(mark==7){px(2,-3);px(1,-2);px(3,-2);px(2,-1);return;}
+ if(mark==4){px(1,-2);px(3,-2);return;}
+ if(mark==3){px(1,-1);px(2,-2);px(3,-1);return;}
+ if(mark==5){px(0,-1);px(1,-2);px(2,-1);px(3,-2);px(4,-1);return;}
+ if(mark==1){px(2,-2);px(3,-3);return;} // acute
+ if(mark==2){px(2,-2);px(1,-3);return;} // grave
+}
 void drawSmoothGlyph(const SmoothGlyph &g,int x,int y,int w,int h,uint16_t ink,int clipRight);
 void richText(const String &str, int x, int y, int ascScale, int jpScale,
               uint16_t color, int clipRight) {
  int startX=x;
  int lineH=max(7*ascScale,16*jpScale)+4;
  for(int p=0;p<(int)str.length();) {
-  uint32_t cp=decodeUTF8(str,p);
-  cp=c5LatinUpper(cp);
+  uint32_t cp=decodeChatLatin(str,p);
   if(cp=='\r')continue;
   if(cp=='\n'){x=startX;y+=lineH;continue;}
   if(cp=='\t'){x+=24*ascScale;continue;}
@@ -1038,6 +1064,15 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
    }else if(cp < 128) {
     if(x + width <= clipRight) glyph(x,y,(char)cp,ascScale,color);
    }else {
+    char latinBase=0;uint8_t latinMark=0;
+    if(c5LatinAccent(cp,latinBase,latinMark)){
+     if(x+width<=clipRight) {
+      glyph(x,y,latinBase,ascScale,color);
+      drawLatinAccent(x,y,ascScale,latinMark,color,clipRight);
+     }
+     x+=width;
+     continue;
+    }
     const uint8_t *bitmap=nullptr;
     // Western Latin always uses the shipped font, not a smaller saved
     // 16x16 custom glyph. Leave Japanese and other Unicode cache untouched.
@@ -2006,7 +2041,7 @@ void drawSpeechBubble() {
  int totalLines=1, measureX=innerLeft;
  if(aiScrollMode){
   for(int t=0;t<(int)shown.length();){
-   uint32_t cp=decodeUTF8(shown,t);
+   uint32_t cp=decodeChatLatin(shown,t);
    if(cp=='\r')continue;
    if(cp=='\n'){totalLines++;measureX=innerLeft;continue;}
    int cw=utfWidth(cp,a,j);
@@ -2017,7 +2052,7 @@ void drawSpeechBubble() {
  const int firstLine=aiScrollMode?min(aiFirstVisibleLine,max(0,totalLines-visibleLines)):0;
  int x=innerLeft,y=by+13-firstLine*lineH;
  for(int p=0;p<(int)shown.length();) {
-  int begin=p;uint32_t cp=decodeUTF8(shown,p);
+  int begin=p;uint32_t cp=decodeChatLatin(shown,p);
   if(cp=='\r')continue;
   if(cp=='\n'){x=innerLeft;y+=lineH;continue;}
   if(cp=='\t'){x+=24*a;continue;}
