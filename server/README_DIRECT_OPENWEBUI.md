@@ -45,6 +45,22 @@ BUILD_CANDIDATE
 
 A command that merely prints `BUILD COMPLETE` does **not** prove Docker succeeded. Only the final `PATCH_IMAGE_BUILT_AND_VERIFIED` line from the guarded block means the image was created. The source patch runs a strict source-version check; Docker build **fails** if the installed Open WebUI Python module has changed incompatibly. At this point the running container is **not** touched, users' chats and settings remain available, and the original image has a local backup tag.
 
+## Step 1.5 — existing Compose safety checks and deployment
+
+The original Ubuntu `ryushi` account needs `sudo` to access Docker. A previous `--deploy` attempt failed during the **pre-stop** snapshot setup: `sudo install` created `docker-compose.yaml` owned by root and unprivileged `chmod` then failed. This caused **no service restart, no volume backup and no container replacement**. That ownership mistake is fixed; a CI regression test now reproduces it before release. The deployment script also explicitly sets the Compose project working directory to `/home/ryushi` so existing `.env` interpolation remains consistent.
+
+```bash
+cd "$HOME/CuteDisplay-realtime-server"
+git switch feature/realtime-call-c5v21
+git pull --ff-only
+sudo docker inspect open-webui --format 'Open WebUI currently: {{.State.Status}}'
+bash server/deploy_existing_openwebui.sh --check
+# This step briefly stops ONLY Open WebUI for a consistent data backup.
+bash server/deploy_existing_openwebui.sh --deploy
+```
+
+Only proceed with deployment if `--check` passes. The script preserves the original image and volume and attempts automatic rollback if the candidate fails its health test. A successful deployment prints `PASS: candidate image active and original /health responding.` and a private backup/rollback directory.
+
 ## Step 2 — controlled deployment, not automatic
 
 Before switching Compose/container to the new image:
