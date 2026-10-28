@@ -4,7 +4,7 @@
 The password, MFA code and resulting session token are kept in process memory.
 Supports local password + already-enrolled TOTP MFA (or no MFA). SSO,
 unconfigured MFA, and administrator MFA resets require separate login workflows.
-Requires tools/probe_openwebui_realtime.py and websockets>=14,<17.
+Requires tools/probe_openwebui_realtime.py, truststore and websockets>=14,<17.
 """
 import argparse
 from getpass import getpass
@@ -19,12 +19,19 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
+try:
+    import truststore  # macOS Keychain / OS-native certificate verification
+except ImportError:
+    print("Install TLS dependency first: python -m pip install truststore", file=sys.stderr)
+    raise SystemExit(2)
+
 
 def post_json(url, fields, action):
     body = json.dumps(fields).encode("utf-8")
     request = Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urlopen(request, timeout=30) as response:
+        with urlopen(request, timeout=30,
+                     context=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)) as response:
             payload = json.load(response)
     except HTTPError as exc:
         print(f"{action} failed (HTTP {exc.code}). Verify account settings and try again; no tokens were printed.",
@@ -35,7 +42,7 @@ def post_json(url, fields, action):
         if isinstance(reason, socket.gaierror):
             msg = "Host name could not be resolved. Use the real Open WebUI URL from Safari."
         elif isinstance(reason, (ssl.SSLError, ssl.SSLCertVerificationError)):
-            msg = "TLS certificate validation failed. Use the valid HTTPS host; do not disable verification."
+            msg = "TLS certificate validation failed using macOS native trust. Check the server certificate chain, hostname and Keychain trust; never disable TLS verification."
         elif isinstance(reason, (ConnectionRefusedError, ConnectionResetError)):
             msg = "Connection refused or reset. Check server, port, VPN and reverse proxy."
         elif isinstance(reason, (socket.timeout, TimeoutError)):
