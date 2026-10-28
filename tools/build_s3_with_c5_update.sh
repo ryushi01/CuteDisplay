@@ -150,6 +150,12 @@ cp "$ROOT/ios/CuteDisplay/BluetoothManager.swift" "$OUT/iPhone-app/BluetoothMana
 cp "$ROOT/docs/INSTALL_REALTIME_COMPLETE.md" "$OUT/README_STEP_BY_STEP.md"
 cp "$ROOT/docs/REALTIME_I2S_AUDIO_EXPERIMENT.md" "$OUT/REALTIME_I2S_AUDIO_EXPERIMENT.md"
 cp "$ROOT/docs/REALTIME_KITTY_FACE_V23.md" "$OUT/REALTIME_KITTY_FACE_V23.md"
+cp "$ROOT/docs/REALTIME_KITTY_EXPRESSION_TOOL.md" "$OUT/REALTIME_KITTY_EXPRESSION_TOOL.md"
+mkdir -p "$OUT/server"
+cp "$ROOT/server/upgrade_kitty_expressions.sh" "$OUT/server/upgrade_kitty_expressions.sh"
+cp "$ROOT/server/patch_openwebui_realtime_api_key.py" "$OUT/server/patch_openwebui_realtime_api_key.py"
+cp "$ROOT/server/Dockerfile.openwebui-realtime-apikey" "$OUT/server/Dockerfile.openwebui-realtime-apikey"
+cp "$ROOT/server/check_openwebui_compose_config.py" "$OUT/server/check_openwebui_compose_config.py"
 python3 - "$OUT" <<'PY'
 from pathlib import Path
 import hashlib
@@ -167,6 +173,9 @@ targets = [
     root / "CuteDisplayBrain/BrainRealtimeAudio.h",
     root / "lcd/C5CallFace.h",
     root / "lcd/C5FirmwareVersion.h",
+    root / "server/upgrade_kitty_expressions.sh",
+    root / "server/patch_openwebui_realtime_api_key.py",
+    root / "REALTIME_KITTY_EXPRESSION_TOOL.md",
 ]
 lines = []
 for path in targets:
