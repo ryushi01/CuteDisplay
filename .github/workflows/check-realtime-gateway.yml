@@ -84,8 +84,8 @@ jobs:
           chmod 600 "$scratch/candidate.yaml" "$scratch/rollback.yaml"
           test "$(stat -c '%a' "$scratch/candidate.yaml")" = 600
           test "$(sudo stat -c '%a' "$scratch/docker-compose.yaml")" = 600
-          grep -Fq 'chmod 600 "$BACKUP/candidate.yaml" "$BACKUP/rollback.yaml"' server/deploy_existing_openwebui.sh
-          ! grep -Fq 'chmod 600 "$BACKUP"/*.yaml' server/deploy_existing_openwebui.sh
+          grep -Fq 'chmod 600 "$BACKUP/rollback.yaml" "$BACKUP/candidate.yaml"' server/create_verified_openwebui_backup.sh
+          ! grep -Fq 'chmod 600 "$BACKUP"/*.yaml' server/create_verified_openwebui_backup.sh
       - name: Test version guard and API-key permission delegation
         run: python -m unittest discover -s server -p 'test_*.py' -v
       - name: Compile patch against actual upstream Open WebUI source
