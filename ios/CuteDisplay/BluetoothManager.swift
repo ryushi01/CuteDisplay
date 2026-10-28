@@ -35,6 +35,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var isScanning = false
     @Published var status = "Starting Bluetooth..."
     @Published var aiLiveStatus = "Idle"
+    // Indicates an actual S3 NVS commit ACK (not merely queued BLE commands).
+    @Published var brainAIKeyStatus = "Not verified on S3 in this session"
     @Published var brightness = 75
     @Published var batteryLevel: Int? = nil
     @Published var batteryVoltage: Double?
@@ -96,6 +98,8 @@ final class BluetoothManager: NSObject, ObservableObject {
     private var awaitingBrainAck = false
     private var brainWriteComplete = false
     private var brainResponse: String?
+    private var aiProvisioningField: String?
+    private var activeKeyCommit = false
     private var brainReadyReadAttempts = 0
     private var bleCommandGeneration = 0
 
@@ -683,6 +687,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             return
         }
         let fields = [("U", server), ("M", modelID), ("K", secret)]
+        brainAIKeyStatus = "Sending key to S3 over Bluetooth"
         var commands: [String] = []
         for (field, value) in fields {
             let bytes = Array(value.utf8)
@@ -716,6 +721,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             status = "Use a complete, revocable Open WebUI user API key beginning with sk-"
             return
         }
+        brainAIKeyStatus = "Sending key to S3 over Bluetooth"
         var commands = ["AI:BEGIN:K:\(bytes.count)"]
         for offset in stride(from: 0, to: bytes.count, by: 40) {
             let part = bytes[offset..<min(bytes.count, offset + 40)]
@@ -948,6 +954,11 @@ final class BluetoothManager: NSObject, ObservableObject {
             if brainProxy && !characteristic.isNotifying { return }
             let next = pendingCommands.removeFirst()
             guard let data = next.data(using: .utf8) else { return }
+            if next.hasPrefix("AI:BEGIN:") {
+                aiProvisioningField = String(next.dropFirst("AI:BEGIN:".count)
+                    .split(separator: ":", maxSplits: 1).first ?? "")
+            }
+            activeKeyCommit = next == "AI:END" && aiProvisioningField == "K"
             waitingForWrite = true
             awaitingBrainAck = brainProxy
             brainWriteComplete = false
@@ -1356,8 +1367,18 @@ extension BluetoothManager: CBPeripheralDelegate {
               let response = brainResponse else { return }
         awaitingBrainAck = false
         if response.hasPrefix("ACK:") {
+            if activeKeyCommit && response == "ACK:AI_SAVED" {
+                brainAIKeyStatus = "Confirmed: API key saved on S3"
+            }
+            if activeKeyCommit { aiProvisioningField = nil }
+            activeKeyCommit = false
             commandCompleted(errorMessage: nil)
         } else {
+            if activeKeyCommit || aiProvisioningField == "K" {
+                brainAIKeyStatus = "S3 did not confirm the API key update"
+            }
+            activeKeyCommit = false
+            aiProvisioningField = nil
             commandCompleted(errorMessage: "Brain rejected command: \(response)")
         }
     }
@@ -1370,6 +1391,11 @@ extension BluetoothManager: CBPeripheralDelegate {
         bleCommandGeneration += 1
         if let errorMessage {
             pendingCommands.removeAll()
+            if activeKeyCommit || aiProvisioningField == "K" {
+                brainAIKeyStatus = "S3 did not confirm the API key update"
+            }
+            activeKeyCommit = false
+            aiProvisioningField = nil
             status = "Send failed: \(errorMessage)"
             return
         }
