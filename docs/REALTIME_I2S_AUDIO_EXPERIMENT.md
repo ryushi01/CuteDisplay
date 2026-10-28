@@ -57,7 +57,12 @@ No camera/SD integration is enabled in this experiment.
    stable C5 v21 unchanged; over USB Serial Monitor at 115200 baud use 'call start',
    'call status', then 'call stop'. The USB commands never expose the saved key.
    The C5 v21 button must not be used to toggle Call Mode in this interim test.
-5. For the button milestone, flash dev S3 and C5 v22 as one matched pair ONLY
+   This dev S3 explicitly disables automatic embedded C5 OTA on boot. Verify
+   'c5 ota status' reports approved=0 in USB Serial Monitor.
+5. For the button milestone, after checking your v21 recovery path, issue the
+   explicit USB-only 'c5 ota enable' command. That opts in to transferring the
+   bundled C5 v22 update; approval does NOT persist across S3 restarts.
+   Flash dev S3 and C5 v22 as one matched pair ONLY
    after reviewing CI artifacts and confirming a tested v21 recovery path.
    Short-tap left button; expect Connecting -> Listening. Talk briefly, then
    expect Thinking -> Speaking and audible response. Short tap ends immediately.
@@ -72,4 +77,6 @@ No camera/SD integration is enabled in this experiment.
 - Real I2S, network latency, voice-event sizes, and board timing are still unverified.
 - Open WebUI upstream realtime voice engine is separately configured; the
   chosen cutedisplay-ai model is the authorized chat context, not a speaker.
-- No background OTA rollout; stable v21 never auto-updates from this experiment.
+- No background C5 OTA rollout: stable v21 is preserved by default. v22 C5 OTA
+  requires the user to explicitly type 'c5 ota enable' on the S3 USB serial
+  console each S3 boot. Never issue that command for an S3-only audio test.
