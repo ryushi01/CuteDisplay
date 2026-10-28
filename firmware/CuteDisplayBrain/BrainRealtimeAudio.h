@@ -20,6 +20,14 @@ static constexpr uint32_t RATE=24000;
 static constexpr size_t SAMPLES=480; // 20ms at 24kHz
 static constexpr uint32_t TAIL_MUTE_MS=300;
 struct Frame { int16_t pcm[SAMPLES]; };
+// Allocate the 2x 3.8KB DMA staging arrays and audio frames in PSRAM,
+// avoiding a large internal task stack after Wi-Fi/BLE/TLS handshake.
+struct Buffers {
+ int32_t capture[SAMPLES*2];
+ int32_t output[SAMPLES*2];
+ Frame mic,speaker,discard;
+};
+static Buffers *work=nullptr;
 static QueueHandle_t micQueue=nullptr, speakerQueue=nullptr;
 // ESP-IDF's dynamically created FreeRTOS queues use internal memory.
 // 16+48 audio frames = 60KB; this can exhaust SRAM after Wi-Fi/WSS TLS.
@@ -82,8 +90,11 @@ static void audioTask(void *){
  bool txOn=false,rxOn=false;
  do {
   i2s_chan_config_t channel=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
+  // 8 x 480 stereo 32-bit frames would reserve ~30KB internal DMA per
+  // direction (60KB duplex). After TLS that frequently exhausts DRAM.
+  // 8 x 120 is ~7.5KB/direction and still gives 40ms DMA slack.
   channel.dma_desc_num=8;
-  channel.dma_frame_num=SAMPLES;
+  channel.dma_frame_num=120;
   esp_err_t rc=i2s_new_channel(&channel,&tx,&rx);
   if(rc!=ESP_OK){reportError("CHANNEL_ALLOC",rc);break;}
   i2s_std_config_t config={
@@ -110,18 +121,15 @@ static void audioTask(void *){
   Serial.printf("[CALL] I2S 24kHz duplex active: BCLK=%d WS=%d MIC=%d SPK=%d\n",
    BrainPinPlan::I2S_BCLK,BrainPinPlan::I2S_WS,
    BrainPinPlan::I2S_DIN,BrainPinPlan::I2S_DOUT);
-  // Fixed-size buffers on the audio task stack; no per-frame allocation.
-  int32_t capture[SAMPLES*2];
-  int32_t output[SAMPLES*2];
-  Frame mic={};
-  Frame speaker={};
+  // Work buffers live in PSRAM, never in the audio task's internal stack.
+  // The pinned task is the only writer to these buffers.
   while(!stopping){
    size_t read=0;
-   esp_err_t readError=i2s_channel_read(rx,capture,sizeof(capture),&read,160);
-   if(readError!=ESP_OK || read!=sizeof(capture)){
+   esp_err_t readError=i2s_channel_read(rx,work->capture,sizeof(work->capture),&read,160);
+   if(readError!=ESP_OK || read!=sizeof(work->capture)){
     reportError("MIC_READ",readError);break;
    }
-   bool hasAudio=xQueueReceive(speakerQueue,&speaker,0)==pdTRUE;
+   bool hasAudio=xQueueReceive(speakerQueue,&work->speaker,0)==pdTRUE;
    playing=hasAudio;
    if(hasAudio)lastPlaybackMs=millis();
    // Wait until provider has stopped responding AND acoustic tail is gone.
@@ -131,29 +139,28 @@ static void audioTask(void *){
     int32_t value=0;
     if(!mute){
      // INMP441 L/R wired to GND => left slot; 24-bit left-aligned input.
-     int32_t raw=capture[i*2]>>16;
+     int32_t raw=work->capture[i*2]>>16;
      value=(raw*(int32_t)micGain)/100;
      if(value>32767)value=32767;
      if(value< -32768)value=-32768;
     }
-    mic.pcm[i]=(int16_t)value;
-    int32_t out=hasAudio?(int32_t)speaker.pcm[i]*speakerVolume/100:0;
+    work->mic.pcm[i]=(int16_t)value;
+    int32_t out=hasAudio?(int32_t)work->speaker.pcm[i]*speakerVolume/100:0;
     // Bound first hardware tests to ~38% full scale even at volume=100.
     if(out>12500)out=12500;
     if(out< -12500)out=-12500;
-    output[2*i]=(int32_t)((int64_t)out*65536LL);
-    output[2*i+1]=(int32_t)((int64_t)out*65536LL);
+    work->output[2*i]=(int32_t)((int64_t)out*65536LL);
+    work->output[2*i+1]=(int32_t)((int64_t)out*65536LL);
    }
-   if(xQueueSend(micQueue,&mic,0)!=pdTRUE){
+   if(xQueueSend(micQueue,&work->mic,0)!=pdTRUE){
     // Prefer freshest audio instead of accumulating latency on a slow Wi-Fi link.
-    Frame old={};
-    (void)xQueueReceive(micQueue,&old,0);
-    (void)xQueueSend(micQueue,&mic,0);
+    (void)xQueueReceive(micQueue,&work->discard,0);
+    (void)xQueueSend(micQueue,&work->mic,0);
     droppedMic++;
    }
    size_t written=0;
-   esp_err_t writeError=i2s_channel_write(tx,output,sizeof(output),&written,160);
-   if(writeError!=ESP_OK || written!=sizeof(output)){
+   esp_err_t writeError=i2s_channel_write(tx,work->output,sizeof(work->output),&written,160);
+   if(writeError!=ESP_OK || written!=sizeof(work->output)){
     reportError("SPEAKER_WRITE",writeError);break;
    }
   }
@@ -172,8 +179,11 @@ inline bool start(uint16_t gain,uint8_t volume){
  if(running || owner)return false;
  // Allocate 60KB of queue payloads in PSRAM, not scarce internal SRAM.
  if(!psramFound()){
-  reportError("NO_PSRAM");return false;
+  reportError("NO_PSRAM_ENABLE_OPI");return false;
  }
+ if(!work)
+  work=(Buffers*)heap_caps_calloc(1,sizeof(Buffers),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!work){reportError("PSRAM_AUDIO_BUFFERS");return false;}
  if(!micQueueStorage)
   micQueueStorage=(uint8_t*)heap_caps_malloc(MIC_FRAMES*sizeof(Frame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
  if(!speakerQueueStorage)
@@ -197,7 +207,9 @@ inline bool start(uint16_t gain,uint8_t volume){
  lastPlaybackMs=millis()-TAIL_MUTE_MS;
  droppedMic=0;fault=false;ready=false;stopping=false;lastError="STARTING";
  playing=false;remoteReply=false;running=true;
- if(xTaskCreatePinnedToCore(audioTask,"call_i2s",16384,nullptr,3,&owner,0)!=pdPASS){
+ // Less than half the previous internal stack; fixed PCM buffers now live
+ // in external PSRAM, so the stack only handles driver calls and scalars.
+ if(xTaskCreatePinnedToCore(audioTask,"call_i2s",8192,nullptr,3,&owner,0)!=pdPASS){
   running=false;owner=nullptr;fault=true;reportError("AUDIO_TASK_ALLOC");return false;
  }
  return true;
