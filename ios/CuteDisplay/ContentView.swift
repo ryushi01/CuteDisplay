@@ -25,38 +25,6 @@ private enum CuteAISecret {
     }
 }
 
-private enum CuteRealtimeSecret {
-    // Device-scoped key is NOT an Open WebUI API key, password, 2FA secret or JWT.
-    static let service = "CuteDisplay.RealtimeGateway"
-    static let account = "paired-device-key"
-    static func load() -> String {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let bytes = item as? Data else { return "" }
-        return String(data: bytes, encoding: .utf8) ?? ""
-    }
-    static func save(_ secret: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(query as CFDictionary)
-        guard !secret.isEmpty else { return }
-        var value = query
-        value[kSecValueData as String] = Data(secret.utf8)
-        value[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(value as CFDictionary, nil)
-    }
-}
-
 enum CuteMood: Int, CaseIterable, Identifiable {
     case neutral = 0, happy, sad, angry, hungry, sleepy, excited, shy
     var id: Int { rawValue }
@@ -147,13 +115,8 @@ struct ContentView: View {
     private let clockZones = ["Japan (JST)", "UTC", "Central Europe (CET/CEST)",
                               "US Eastern", "US Pacific", "United Kingdom", "Australia Sydney"]
     @State private var aiServer = UserDefaults.standard.string(forKey: "cuteAIServer") ?? ""
-    @State private var aiModel = UserDefaults.standard.string(forKey: "cuteAIModel") ?? ""
+    @State private var aiModel = UserDefaults.standard.string(forKey: "cuteAIModel") ?? "cutedisplay-ai"
     @State private var aiAPIKey = CuteAISecret.load()
-    @State private var realtimeGatewayURL = UserDefaults.standard.string(forKey: "cuteRTGatewayURL") ?? ""
-    @State private var realtimeDeviceKey = CuteRealtimeSecret.load()
-    @State private var realtimeCertificate = UserDefaults.standard.string(forKey: "cuteRTGatewayCA") ?? ""
-    @State private var realtimeAutoJoin = UserDefaults.standard.bool(forKey: "cuteRTAutoJoin")
-    @State private var realtimeSetupStatus = "Not paired"
     @State private var aiQuestion = ""
     @State private var lastSubmittedAIQuestion = ""
     @State private var aiResponse = ""
@@ -859,82 +822,26 @@ struct ContentView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
-            Button("Save AI connection") {
-                UserDefaults.standard.set(aiServer, forKey: "cuteAIServer")
-                UserDefaults.standard.set(aiModel, forKey: "cuteAIModel")
-                CuteAISecret.save(aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
-                aiStatus = "Connection settings saved on iPhone"
-            }
-            .buttonStyle(.bordered)
-            sectionTitle("REALTIME CALL — ONE-TIME PAIRING")
-            Text("The S3 reconnects using a saved device key. You do not need to enter your Open WebUI password or 2FA code when it starts.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            TextField("wss://your-gateway.example:8766/", text: $realtimeGatewayURL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
-            SecureField("64-character device pairing secret", text: $realtimeDeviceKey)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
-            Text("Public gateway CA certificate (PEM, not private key)")
-                .font(.caption)
-            TextEditor(text: $realtimeCertificate)
-                .font(.system(.caption, design: .monospaced))
-                .frame(height: 84)
-                .scrollContentBackground(.hidden)
-                .background(.white.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            Toggle("Auto-connect Call Mode after power-on", isOn: $realtimeAutoJoin)
-                .tint(.pink)
-            Text("Auto-connect contacts the gateway after power-on. Realtime microphone capture is not implemented in this status-only firmware; enabling it does not start listening yet.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Button("Pair realtime gateway to S3") {
-                let key = realtimeDeviceKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard key.utf8.count == 64, key.allSatisfy({ $0.isHexDigit }) else {
-                    realtimeSetupStatus = "Invalid device pairing key"
+            Button("Save Open WebUI connection") {
+                let server = aiServer.trimmingCharacters(in: .whitespacesAndNewlines)
+                let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+                let key = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard server.hasPrefix("https://"), !server.contains("@"),
+                      !model.isEmpty, key.hasPrefix("sk-") else {
+                    aiStatus = "Enter Open WebUI HTTPS URL, model ID and API key"
                     return
                 }
-                UserDefaults.standard.set(realtimeGatewayURL, forKey: "cuteRTGatewayURL")
-                UserDefaults.standard.set(realtimeCertificate, forKey: "cuteRTGatewayCA")
-                UserDefaults.standard.set(realtimeAutoJoin, forKey: "cuteRTAutoJoin")
-                CuteRealtimeSecret.save(key)
-                bluetooth.provisionRealtimeGateway(
-                    url: realtimeGatewayURL, deviceSecret: key,
-                    caCertificate: realtimeCertificate, autoJoin: realtimeAutoJoin
-                )
-                realtimeSetupStatus = "Pairing commands queued. Watch Bluetooth status for completion."
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!bluetooth.bluetoothBrainConnected)
-            HStack {
-                Button("Connect gateway") {
-                    bluetooth.sendControlCommand("RT:START")
-                    realtimeSetupStatus = "Gateway connection requested"
-                }
-                Button("Disconnect") {
-                    bluetooth.sendControlCommand("RT:STOP")
-                    realtimeSetupStatus = "Gateway disconnected"
-                }
-                Button("Status") {
-                    bluetooth.sendControlCommand("RT:STATUS")
+                UserDefaults.standard.set(server, forKey: "cuteAIServer")
+                UserDefaults.standard.set(model, forKey: "cuteAIModel")
+                CuteAISecret.save(key)
+                if bluetooth.bluetoothBrainConnected {
+                    bluetooth.saveBrainAIConnection(url: server, model: model, key: key)
+                    aiStatus = "Saving Open WebUI connection directly to S3 over encrypted BLE"
+                } else {
+                    aiStatus = "Saved on iPhone. Connect S3 over Bluetooth and tap Save again to transfer."
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(!bluetooth.bluetoothBrainConnected)
-            Button("Forget gateway pairing on S3") {
-                bluetooth.sendControlCommand("RT:CLEAR")
-                CuteRealtimeSecret.save("")
-                realtimeDeviceKey = ""
-                realtimeSetupStatus = "Requested deletion of S3 gateway pairing"
-            }
-            .buttonStyle(.bordered)
-            .disabled(!bluetooth.bluetoothBrainConnected)
-            Text(realtimeSetupStatus).font(.caption2).foregroundStyle(.secondary)
-            Text("Current build verifies gateway identity and connects only. S3 microphone and speaker streaming are the next firmware stage; existing manual PTT is unchanged.")
-                .font(.caption2).foregroundStyle(.secondary)
             HStack(spacing: 10) {
                 Label("Conversation", systemImage: "bubble.left.and.bubble.right")
                     .font(.subheadline.bold())
