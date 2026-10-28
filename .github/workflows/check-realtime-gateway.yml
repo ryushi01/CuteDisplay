@@ -122,6 +122,9 @@ jobs:
           assert installed.count(mod.MARKER)==1
           assert installed.count(mod.EXPRESSION_MARKER)==1
           assert mod.patch(installed)==installed
-          print("PASS: auth + expression patch idempotent")
+          pristine=Path("/tmp/owui-src/backend/open_webui/routers/audio/realtime.py.cutedisplay-original").read_text()
+          already_authenticated=mod.patch_authentication(pristine)
+          assert mod.patch(already_authenticated)==installed
+          print("PASS: pristine and already-auth-patched server both produce identical expression extension")
           PY
           CUTEDISPLAY_PATCHED_REALTIME=/tmp/owui-src/backend/open_webui/routers/audio/realtime.py python -m unittest server.test_realtime_expression_contract -v
