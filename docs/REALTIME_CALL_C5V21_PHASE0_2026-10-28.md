@@ -159,3 +159,19 @@ Diagnostic:
 - Acceptance pending from user. No ESP32 firmware modifications.
 
 **Security:** Keep HTTPS certificate verification enabled, do not store JWT/password/TOTP in S3 firmware, and retain the C5 v21 immutable rollback.
+
+
+## Phase 0.7 first user attempt — no provider delegation (2026-10-28)
+
+The user ran the 2FA-authenticated `--model-delegation` test. The voice transport and STT succeeded; recorded question was:
+
+```text
+Transcribed: combien font 17 x 23
+INCOMPLETE: provider answered without delegating to cutedisplay-ai.
+```
+
+**Interpretation:** This indicates the realtime voice provider completed a response without emitting `generate_chat_completion` for a basic multiplication question. The upstream Open WebUI realtime session advertises the chat tool with `tool_choice: auto`; it is not forced on each turn. This is *not* a failure of 2FA, the network or microphone, and does not itself prove `cutedisplay-ai` HTTP connectivity is broken. The user's transcribed question omitted the suggested literal introductory phrase, so the voice backend did not receive a direct request to route to the selected model. The multiplication answer is **391**, but that is not evidence of which model performed it.
+
+**New diagnostic:** `tools/realtime_model_delegation_smoke.py` now suggests the stronger spoken phrase **`Quels outils sont disponibles dans mon modèle de chat ?`**, a case explicitly identified in Open WebUI's default prompt as requiring model delegation. If no tool call occurs, the script prints response status/output types and independently calls `POST /api/chat/completions` with the same ephemeral 2FA-verified user JWT and model ID `cutedisplay-ai`. The direct call is a *separate* connectivity check and never counts as a successful realtime tool delegation; the script continues to return nonzero in that case.
+
+**Security:** No credentials in Git; no bypassing 2FA or TLS; no S3 firmware changes. C5 v21 stable remains the immutable baseline. If tool delegation still fails despite the stronger question and the direct model check passes, do not claim native Open WebUI Call Mode is delivering model-backed answers; investigate real-time provider tool-call capability and server-side call prompt or consider a purpose-built gateway with deterministic transcript→selected-chat-model→TTS routing.
