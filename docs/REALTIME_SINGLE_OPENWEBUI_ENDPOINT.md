@@ -39,3 +39,26 @@ Long-lived `sk-` credentials on S3 are sensitive: use a dedicated low-privilege 
 - Only then add guarded 24kHz duplex I2S and streaming audio on S3, respecting shared GPIO41/GPIO42 clocks, BLE/OTA/manual PTT compatibility and 24-hour memory requirements.
 
 **Active simplified architecture:** `iPhone (one-time setup) -> S3 Wi-Fi -> one Open WebUI HTTPS/WSS URL -> selected chat model and existing voice stack -> S3 audio + C5 display`.
+
+
+## Hardware button controls — experimental C5 v22 (committed, not flashed)
+
+The **existing C5 left BOOT GPIO28 Push-to-Talk button** doubles as the Call Mode control:
+
+| Gesture | Call OFF | Call ON |
+| --- | --- | --- |
+| **Short tap, release before 320 ms** | Send UART `CALL_TOGGLE` to S3 to start native Open WebUI Realtime | Send `CALL_TOGGLE` to end Call Mode and disconnect WSS |
+| **Hold 320 ms or longer** | Keep the current manual WAV recording PTT; release stops and uploads | No manual PTT, and no call toggle — ignored |
+| S3 reboots / Wi-Fi fails | Manual PTT remains fallback | C5 resets/syncs activity; S3 reconnects while session is requested |
+
+On short tap, C5 no longer sends a legacy `VOICE_CANCEL`/interrupt by default; it sends only `CALL_TOGGLE` on release. The S3 is authoritative, returns `CALL_CONNECTING`, `CALL_READY`, `CALL_ERROR`, or `CALL_OFF` through the existing UART `ACTIVITY` status path (also resends every 15 seconds/HELLO for reboot recovery). A call rejected due to missing configuration/busy hardware does not remain secretly enabled.
+
+**Status-only first safety gate:** `BrainRealtimeDirect.h` establishes a CA-verified WSS connection to the same Open WebUI origin using the existing NVS `brain-ai` URL, model ID `cutedisplay-ai` and `sk-` API key; it never stores or asks for a user password/2FA/JWT. `CALL_READY` confirms transport only; 24 kHz mic capture and speaker PCM are NOT implemented in this firmware. Do not claim live audio or flash until current CI and server authorization are verified. C5 v22 is experimental and separate from the immutable hardware-tested C5 v21.
+
+## Realtime API-key server support — prepared, deployment pending
+
+- `server/patch_openwebui_realtime_api_key.py`: version-guarded source patch to existing `/api/v1/audio/realtime` handler, using built-in API-key permissions with 60-second revocation revalidation. Does not disable human MFA.
+- `server/Dockerfile.openwebui-realtime-apikey`: opt-in custom image based on the **same running Open WebUI image**, replacing one Python module in the container image. Never patches an ephemeral production container or auto-deploys. Its source anchors must match the instance build; this has not been validated against the user's exact currently running container.
+- `tools/probe_openwebui_realtime_key.py`: Mac diagnostic: enter only the existing WebUI HTTPS URL and model, enter `sk-` key in hidden prompt; checks `bridge.ready`, `bridge.pong`. Human password/2FA not needed after one-time key provisioning. Test must fail on an unpatched server or revoked/wrong key.
+
+**Do not flash firmware or change running Docker service until the patch has been validated against the exact container image and a replacement/rollback plan exists.** Preserve old Compose configuration, database volume, image tag/digest, and existing service entrypoint.
