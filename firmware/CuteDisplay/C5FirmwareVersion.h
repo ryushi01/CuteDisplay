@@ -5,4 +5,4 @@
 // v6 adds inactivity-based receiver recovery for stalled OTA sessions.
 // the C5 binary and bundles it into the S3 firmware automatically.
 // v11 restores the persisted regular message after AI completion + 2 minutes.
-static constexpr uint32_t C5_FIRMWARE_VERSION=13;
+// v14 adds French/Latin accents, broad Japanese BMP kanji and Unicode fallback.\nstatic constexpr uint32_t C5_FIRMWARE_VERSION=14;
