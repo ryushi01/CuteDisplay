@@ -36,10 +36,18 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Parse SwiftUI source (syntax only; no Xcode project in repository)
+      - name: Parse SwiftUI source (existing Xcode project is not in repository)
         run: |
           xcrun swiftc -frontend -parse ios/CuteDisplay/ContentView.swift
           xcrun swiftc -frontend -parse ios/CuteDisplay/BluetoothManager.swift
+      - name: Typecheck the paired iPhone source files against iOS Simulator SDK
+        run: |
+          SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun swiftc -typecheck \
+            -target arm64-apple-ios18.0-simulator \
+            -sdk "$SDK" \
+            ios/CuteDisplay/BluetoothManager.swift \
+            ios/CuteDisplay/ContentView.swift
 
   server-auth-patch:
     runs-on: ubuntu-24.04
