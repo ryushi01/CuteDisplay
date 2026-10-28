@@ -16,10 +16,26 @@ def repertoire():
             except UnicodeDecodeError: continue
             if len(c)==1 and ord(c)>=128:
                 chars.add(ord(c))
-    # Japanese typographic characters plus fullwidth forms.
-    chars.update(range(0x3040,0x30FF+1))
-    chars.update(range(0x3000,0x303F+1))
-    chars.update(range(0xFF01,0xFF60))
+    # Western European text: precomposed French accents (é, è, ê, ë,
+    # à, â, î, ï, ô, ù, û, ü, ç, œ, æ, ÿ), extended Latin, and phonetics.
+    chars.update(range(0x00A0,0x0250))
+    chars.update(range(0x1E00,0x1F00))
+    # Smart quotes, dashes, ellipses, currency, arrows and math symbols.
+    # Include common symbols without depending on glyphs supplied by iOS.
+    for start, end in (
+        (0x2000,0x2070), (0x20A0,0x20D0), (0x2100,0x2150),
+        (0x2190,0x2300), (0x2460,0x2500),
+    ):
+        chars.update(range(start,end))
+    # Full BMP CJK Unified Ideographs and Extension A, so Japanese kanji
+    # outside the smaller Shift-JIS/CP932 repertoire also have a fallback.
+    # Bitmap data is stored in program flash (not runtime PSRAM).
+    chars.update(range(0x3400,0xA000))
+    chars.update(range(0xF900,0xFB00))  # CJK compatibility ideographs
+    chars.update(range(0x3040,0x3100))  # Hiragana + Katakana
+    chars.update(range(0x31F0,0x3200))  # Katakana phonetic extensions
+    chars.update(range(0x3000,0x3040))  # Japanese punctuation
+    chars.update(range(0xFF01,0xFFA0))  # Fullwidth / halfwidth forms
     return sorted(x for x in chars if x<=0xFFFF)
 
 def main():
