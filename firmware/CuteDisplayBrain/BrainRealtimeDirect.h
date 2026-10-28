@@ -30,6 +30,62 @@ static String delegatedCallId, animationResponseId;
 // The provider must finish the initial tool-call response before bridge.respond.
 static bool toolResponseFinished=false;
 static String failedCallId, failedCallAnswer;
+// Temporary 0..7 Kitty expression selected by realtime avatar gestures or
+// assistant speech. No change to the model, account, or persistent C5 mood.
+static int pendingMood=-1;
+static uint8_t currentMood=1;
+static uint32_t moodUpdatedAt=0;
+inline int emotionForText(String phrase){
+ phrase.toLowerCase();
+ // English, French and Japanese. Sentiment fallback is intentionally
+ // conservative; explicitly AI-selected play_animation gestures have priority.
+ if(phrase.indexOf("angry")>=0 || phrase.indexOf("furious")>=0 ||
+    phrase.indexOf("fâché")>=0 || phrase.indexOf("怒")>=0)return 3;
+ if(phrase.indexOf("sad")>=0 || phrase.indexOf("sorry")>=0 ||
+    phrase.indexOf("triste")>=0 || phrase.indexOf("悲し")>=0 ||
+    phrase.indexOf("ごめん")>=0)return 2;
+ if(phrase.indexOf("excited")>=0 || phrase.indexOf("amazing")>=0 ||
+    phrase.indexOf("wonderful")>=0 || phrase.indexOf("génial")>=0 ||
+    phrase.indexOf("やった")>=0 || phrase.indexOf("すごい")>=0 ||
+    phrase.indexOf("楽し")>=0)return 6;
+ if(phrase.indexOf("sleepy")>=0 || phrase.indexOf("tired")>=0 ||
+    phrase.indexOf("眠")>=0)return 5;
+ if(phrase.indexOf("shy")>=0 || phrase.indexOf("blush")>=0 ||
+    phrase.indexOf("恥ずかし")>=0 || phrase.indexOf("照れ")>=0)return 7;
+ if(phrase.indexOf("hungry")>=0 || phrase.indexOf("お腹")>=0)return 4;
+ if(phrase.indexOf("happy")>=0 || phrase.indexOf("嬉し")>=0 ||
+    phrase.indexOf("ありがとう")>=0)return 1;
+ return -1;
+}
+inline int emotionForGesture(String name){
+ name.toLowerCase();
+ if(name.indexOf("angry")>=0||name.indexOf("mad")>=0||
+    name.indexOf("frown")>=0)return 3;
+ if(name.indexOf("sad")>=0||name.indexOf("cry")>=0||
+    name.indexOf("disappoint")>=0)return 2;
+ if(name.indexOf("excite")>=0||name.indexOf("cheer")>=0||
+    name.indexOf("celebrat")>=0||name.indexOf("jump")>=0)return 6;
+ if(name.indexOf("sleep")>=0||name.indexOf("tired")>=0)return 5;
+ if(name.indexOf("shy")>=0||name.indexOf("blush")>=0||
+    name.indexOf("embarrass")>=0)return 7;
+ if(name.indexOf("hungry")>=0)return 4;
+ if(name.indexOf("happy")>=0||name.indexOf("smile")>=0||
+    name.indexOf("wave")>=0||name.indexOf("laugh")>=0)return 1;
+ if(name.indexOf("neutral")>=0||name.indexOf("nod")>=0||
+    name.indexOf("think")>=0||name.indexOf("look")>=0)return 0;
+ return -1;
+}
+inline void chooseMood(int m,bool explicitGesture){
+ if(m<0 || m>7 || !requested)return;
+ uint32_t now=millis();
+ if(!explicitGesture && (uint32_t)(now-moodUpdatedAt)<1400UL)return;
+ if(m==currentMood && !explicitGesture)return;
+ currentMood=(uint8_t)m;pendingMood=m;moodUpdatedAt=now;
+}
+inline bool takeMood(uint8_t &result){
+ if(pendingMood<0 || !requested)return false;
+ result=(uint8_t)pendingMood;pendingMood=-1;return true;
+}
 // C5 does not have to implement any new server protocol; only S3 owns it.
 static constexpr size_t MAX_EVENT_BYTES=65536;
 static uint32_t lastAttempt=0, lastPing=0;
@@ -111,6 +167,7 @@ inline void diagnose(bool audioBusy){
   key.startsWith("sk-")&&key.length()>20?1:0,audioBusy?1:0);
 }
 inline void stop(){
+ pendingMood=-1;currentMood=1;moodUpdatedAt=0;
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -120,6 +177,7 @@ inline void stop(){
  status("CALL_OFF");
 }
 inline void fail(const char *why){
+ pendingMood=-1;currentMood=1;moodUpdatedAt=0;
  const bool localAudio=(strcmp(why,"I2S_RUNTIME")==0 ||
    strcmp(why,"AUDIO_TASK_ALLOC")==0 ||
    strncmp(why,"NO_PSRAM",8)==0 ||
@@ -140,6 +198,7 @@ inline void fail(const char *why){
 }
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
+  pendingMood=-1;currentMood=1;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
   failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
@@ -255,14 +314,40 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
      status("CALL_THINKING");
     }
    }else if(strcmp(name->valuestring,"play_animation")==0){
+    // Open WebUI exposes model-authorized avatar gestures (if configured).
+    // Honor ONLY gestures explicitly validated by the existing bridge;
+    // never send unsolicited function/tool calls to the model.
+    cJSON *arg=cJSON_GetObjectItem(item,"arguments");
+    cJSON *args=cJSON_IsString(arg)?cJSON_Parse(arg->valuestring):nullptr;
+    cJSON *nameParam=cJSON_GetObjectItem(args,"name");
+    int mood=cJSON_IsString(nameParam)?emotionForGesture(nameParam->valuestring):-1;
+    const bool allowed=cJSON_IsTrue(cJSON_GetObjectItem(json,"animation_valid"));
+    if(args)cJSON_Delete(args);
+    const bool started=allowed && mood>=0;
+    if(started)chooseMood(mood,true);
     cJSON *out=cJSON_CreateObject();
-    cJSON_AddStringToObject(out,"type","bridge.animation.result");
-    cJSON_AddStringToObject(out,"call_id",callId.c_str());
-    cJSON_AddStringToObject(out,"status","unavailable");
-    cJSON *rid=cJSON_GetObjectItem(json,"response_id");
-    if(cJSON_IsString(rid))animationResponseId=rid->valuestring;
-    if(!sendEvent(out))failure="ANIMATION_RESULT";
+    if(out){
+     cJSON_AddStringToObject(out,"type","bridge.animation.result");
+     cJSON_AddStringToObject(out,"call_id",callId.c_str());
+     cJSON_AddStringToObject(out,"status",started?"started":"unavailable");
+     cJSON *rid=cJSON_GetObjectItem(json,"response_id");
+     if(cJSON_IsString(rid))animationResponseId=rid->valuestring;
+     if(!sendEvent(out))failure="ANIMATION_RESULT";
+    }else failure="ANIMATION_ALLOC";
    }
+  }
+ }else if(strcmp(type,"response.output_audio_transcript.delta")==0 ||
+          strcmp(type,"response.output_audio_transcript.done")==0){
+  // Optional provider-generated spoken transcript: use only local hints,
+  // never upload text to an additional service. Full motion still works when
+  // the upstream provider supplies audio but no transcript events.
+  cJSON *speech=cJSON_GetObjectItem(json,"delta");
+  if(!cJSON_IsString(speech))speech=cJSON_GetObjectItem(json,"transcript");
+  if(cJSON_IsString(speech) && speech->valuestring){
+   String excerpt(speech->valuestring);
+   if(excerpt.length()>400)excerpt=excerpt.substring(0,400);
+   int mood=emotionForText(excerpt);
+   if(mood>=0)chooseMood(mood,false);
   }
  }else if(strcmp(type,"response.output_audio.delta")==0 ||
           strcmp(type,"response.audio.delta")==0){
@@ -345,6 +430,7 @@ inline bool connect(){
  return true;
 }
 inline void init(){
+ pendingMood=-1;currentMood=1;moodUpdatedAt=0;
  requested=false;started=false;connected=false;ready=false;
  remoteResponse=false;streamedSpeech=false;delegatedCallId="";animationResponseId="";
  toolResponseFinished=false;failedCallId="";failedCallAnswer="";
