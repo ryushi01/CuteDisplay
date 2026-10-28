@@ -50,6 +50,8 @@ jobs:
           python-version: '3.11'
       - name: Compile direct WebUI realtime auth patch
         run: python -m py_compile server/patch_openwebui_realtime_api_key.py
+      - name: Validate existing-Compose safe deployment and rollback script shell syntax
+        run: bash -n server/deploy_existing_openwebui.sh
       - name: Test version guard and API-key permission delegation
         run: python -m unittest discover -s server -p 'test_*.py' -v
       - name: Compile patch against actual upstream Open WebUI source
