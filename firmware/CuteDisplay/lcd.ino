@@ -29,6 +29,7 @@
 #include "C5FirmwareVersion.h"
 #include "C5JapaneseFont.h"
 #include "C5LatinUpper.h"
+#include "C5Emoji.h"
 #include "C5UARTOTA.h"
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
@@ -698,6 +699,7 @@ bool narrowUnicodeGlyph(uint32_t cp) {
         (cp >= 0x1E00 && cp <= 0x1EFF);
 }
 int utfWidth(uint32_t cp, int asciiScale, int jpScale) {
+ if(cp==0xFE0E || cp==0xFE0F || cp==0x200D) return 0;
  return (cp < 128 || narrowUnicodeGlyph(cp)) ? 6*asciiScale : 16*jpScale;
 }
 int richWidth(const String &s, int asciiScale, int jpScale) {
@@ -1015,7 +1017,16 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
   if(cp=='\n'){x=startX;y+=lineH;continue;}
   if(cp=='\t'){x+=24*ascScale;continue;}
   int width=utfWidth(cp,ascScale,jpScale);
+  if(width==0)continue;
   if(x + width > 0 && x < clipRight) {
+   if(c5EmojiSupported(cp)){
+    c5DrawEmoji(cp,x,y,jpScale,[&](int px,int py,uint16_t ink){
+     if(px>=0 && px<clipRight && py>=0 && py<LCD_H)
+      rect(px,py,1,1,ink);
+    });
+    x+=width;
+    continue;
+   }
    int smooth=findSmoothGlyph(cp);
    if(smooth>=0){
     int h=cp<128?7*ascScale:16*jpScale;
