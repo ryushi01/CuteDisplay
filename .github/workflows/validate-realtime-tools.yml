@@ -36,4 +36,5 @@ jobs:
              tools/probe_openwebui_realtime.py \
              tools/probe_openwebui_realtime_login.py \
              tools/realtime_audio_smoke.py \
-             tools/realtime_two_turn_smoke.py
+             tools/realtime_two_turn_smoke.py \
+             tools/realtime_model_delegation_smoke.py
