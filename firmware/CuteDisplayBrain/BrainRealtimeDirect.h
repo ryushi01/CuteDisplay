@@ -153,7 +153,12 @@ inline bool toggle(bool audioBusy){
  reload();
  if(!valid()){status("CALL_ERROR");return false;}
  requested=true;
- return connect();
+ if(!connect()){
+  requested=false; // Failed first start is OFF, not a hidden active session.
+  status("CALL_ERROR");
+  return false;
+ }
+ return true;
 }
 inline void tick(bool audioBusy){
  if(!requested)return;
