@@ -92,6 +92,7 @@ static constexpr size_t MAX_FACTS=256;
 static Fact *facts=nullptr; // PSRAM catalog; SD remains durable
 // Future lifecycle metadata will be stored alongside the catalog.
 static uint32_t *factUpdated=nullptr;
+static uint32_t *factExpires=nullptr;
 static volatile uint32_t sdTotalKB=0, sdUsedKB=0;
 inline uint32_t capacityKB(){return sdTotalKB;}
 inline uint32_t usedKB(){return sdUsedKB;}
@@ -376,6 +377,7 @@ inline void mergeFact(const String &key,const String &value){
    // Repeating an unchanged fact is not a new memory event.
    if(entry==String(facts[i].value)){xSemaphoreGive(cacheMutex);return;}
    entry.toCharArray(facts[i].value,sizeof(facts[i].value));
+   if(factUpdated)factUpdated[i]=(uint32_t)time(nullptr);
    factRevision++;
    xSemaphoreGive(cacheMutex);return;
   }
@@ -388,6 +390,7 @@ inline void mergeFact(const String &key,const String &value){
  if(factCount<MAX_FACTS){
   finalKey.toCharArray(facts[factCount].key,sizeof(facts[factCount].key));
   stored.toCharArray(facts[factCount].value,sizeof(facts[factCount].value));
+  if(factUpdated)factUpdated[factCount]=(uint32_t)time(nullptr);
   factCount++;factRevision++;
  }else{
   // Fixed memory budget: rotate episodic notes first, preserving identity
@@ -688,6 +691,7 @@ inline void task(void*){
  if(!facts)facts=(Fact*)heap_caps_calloc(MAX_FACTS,sizeof(Fact),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
  if(!facts)Serial.println("[MEMORY] ERROR: PSRAM fact catalog unavailable");
  if(!factUpdated)factUpdated=(uint32_t*)heap_caps_calloc(MAX_FACTS,sizeof(uint32_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!factExpires)factExpires=(uint32_t*)heap_caps_calloc(MAX_FACTS,sizeof(uint32_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
  SD_MMC.setPins(39,38,40);
  mounted=SD_MMC.begin("/sdcard",true,false,20000,5);
  cardState=mounted?1:2;
