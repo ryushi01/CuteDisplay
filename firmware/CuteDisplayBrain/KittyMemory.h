@@ -454,20 +454,48 @@ inline bool isEpisodic(const String &key){
 // not at the time it is recalled days later. History remains on SD.
 inline bool anchorDatedPlan(const String &source,String &key,String &value){
  if(key!="context_upcoming_plan")return false;
- time_t now=time(nullptr);
- if(now<1735689600LL)return false;
- String text=source;text.toLowerCase();
- int days=0;
- if(text.indexOf("tomorrow")>=0||text.indexOf("demain")>=0||text.indexOf("明日")>=0)days=1;
- else if(text.indexOf("yesterday")>=0||text.indexOf("hier")>=0||text.indexOf("昨日")>=0)days=-1;
- else if(text.indexOf("today")>=0||text.indexOf("aujourd")>=0||text.indexOf("今日")>=0)days=0;
- else return false;
- tm local={};localtime_r(&now,&local);
- local.tm_mday+=days;local.tm_isdst=-1;
- (void)mktime(&local);
+ time_t now=time(nullptr);if(now<1735689600LL)return false;
+ String t=source;t.toLowerCase();
+ tm day={};localtime_r(&now,&day);
+ int offset=0;bool found=true;
+ if(t.indexOf("day after tomorrow")>=0||t.indexOf("après-demain")>=0||t.indexOf("明後日")>=0)offset=2;
+ else if(t.indexOf("tomorrow")>=0||t.indexOf("demain")>=0||t.indexOf("明日")>=0)offset=1;
+ else if(t.indexOf("yesterday")>=0||t.indexOf("hier")>=0||t.indexOf("昨日")>=0)offset=-1;
+ else if(t.indexOf("today")>=0||t.indexOf("aujourd")>=0||t.indexOf("今日")>=0)offset=0;
+ else if(t.indexOf("next week")>=0||t.indexOf("semaine prochaine")>=0||t.indexOf("来週")>=0)offset=7;
+ else if(t.indexOf("next month")>=0||t.indexOf("mois prochain")>=0||t.indexOf("来月")>=0){
+  day.tm_mon++;day.tm_isdst=-1;mktime(&day);
+ }else{
+  found=false;
+  const char *en[]={"sunday","monday","tuesday","wednesday","thursday","friday","saturday"};
+  const char *fr[]={"dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"};
+  const char *jp[]={"日曜","月曜","火曜","水曜","木曜","金曜","土曜"};
+  for(int i=0;i<7;i++)if(t.indexOf(en[i])>=0||t.indexOf(fr[i])>=0||t.indexOf(jp[i])>=0){
+   int delta=(i-day.tm_wday+7)%7;
+   bool next=t.indexOf("next ")>=0||t.indexOf("prochain")>=0||t.indexOf("来週")>=0;
+   offset=next?(delta==0?7:delta+7):(delta==0?7:delta);
+   found=true;break;
+  }
+  if(!found){
+   int n=0;
+   for(int i=1;i<=30;i++){
+    String q=String("in ")+i+" days";
+    String qfr=String("dans ")+i+" jours";
+    if(t.indexOf(q)>=0||t.indexOf(qfr)>=0){n=i;break;}
+   }
+   if(n){offset=n;found=true;}
+  }
+ }
+ if(!found)return false;
+ day.tm_mday+=offset;day.tm_isdst=-1;mktime(&day);
  char date[16];snprintf(date,sizeof(date),"%04d-%02d-%02d",
-    local.tm_year+1900,local.tm_mon+1,local.tm_mday);
- key=String("dated_plan_")+date;
+   day.tm_year+1900,day.tm_mon+1,day.tm_mday);
+ // Hash the normalized description to retain independent plans on one day.
+ String normalized=value;normalized.toLowerCase();normalized.trim();
+ uint32_t hash=2166136261UL;
+ for(size_t i=0;i<normalized.length();i++)hash=(hash^(uint8_t)normalized[i])*16777619UL;
+ char suffix[12];snprintf(suffix,sizeof(suffix),"%08lx",(unsigned long)hash);
+ key=String("dated_plan_")+date+"_"+suffix;
  value=String("Plan for ")+date+" (completion not confirmed): "+value;
  return true;
 }
