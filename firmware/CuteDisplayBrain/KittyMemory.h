@@ -137,7 +137,7 @@ inline bool persistFacts(){
   if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(50))!=pdTRUE){ok=false;break;}
   item=facts[i];
   xSemaphoreGive(cacheMutex);
-  if(f.printf("%s\\t%s\\n",item.key,item.value)<=0){ok=false;break;}
+  if(f.printf("%s\t%s\n",item.key,item.value)<=0){ok=false;break;}
   if((i&31)==0)vTaskDelay(1);
  }
  f.flush();f.close();
