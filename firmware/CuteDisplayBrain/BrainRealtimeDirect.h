@@ -26,6 +26,7 @@ extern const uint8_t ca_bundle_end[] asm("_binary_x509_crt_bundle_end");
 static WebSocketsClient ws;
 static bool requested=false, started=false, connected=false, ready=false;
 static bool remoteResponse=false, streamedSpeech=false;
+static bool bargeCancelling=false;
 static String delegatedCallId, animationResponseId;
 // The provider must finish the initial tool-call response before bridge.respond.
 static bool toolResponseFinished=false;
@@ -271,10 +272,11 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   lastPing=millis();
  }else if(strcmp(type,"response.created")==0){
   remoteResponse=true;streamedSpeech=false;expressionIdleSince=0;
+  bargeCancelling=false;
   BrainRealtimeAudio::setRemoteReply(true);
   status("CALL_THINKING");
  }else if(strcmp(type,"response.done")==0){
-  remoteResponse=false;
+  remoteResponse=false;bargeCancelling=false;
   // Keep the microphone muted during the chat-model handoff; otherwise the
   // provider might transcribe the user again while a tool answer is pending.
   const bool waitingForTool=!delegatedCallId.isEmpty() || !failedCallId.isEmpty();
@@ -392,6 +394,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   }
  }else if(strcmp(type,"response.output_audio.delta")==0 ||
           strcmp(type,"response.audio.delta")==0){
+  if(bargeCancelling){cJSON_Delete(json);return;}
   cJSON *delta=cJSON_GetObjectItem(json,"delta");
   if(!ready || !cJSON_IsString(delta))failure="BAD_AUDIO_FRAME";
   else{
@@ -547,6 +550,21 @@ inline void tick(bool audioBusy){
    fail("I2S_RUNTIME");return;
   }
   if(BrainRealtimeAudio::initialized()){
+   if(BrainRealtimeAudio::takeBargeRequest()){
+    Serial.println("[CALL] BARGE_IN: local speech detected, stopping Kitty");
+    BrainRealtimeAudio::clearSpeaker();
+    BrainAI::cancelCallDelegation();
+    // The backend should forward this standard Realtime command upstream.
+    // If the provider already finished, leave the open session intact.
+    bargeCancelling=remoteResponse;
+    if(remoteResponse && !ws.sendTXT("{\"type\":\"response.cancel\"}")){
+     fail("BARGE_CANCEL_SEND");return;
+    }
+    remoteResponse=false;streamedSpeech=false;
+    expressionIdleSince=0;pendingMood=1;currentMood=1;
+    BrainRealtimeAudio::setRemoteReply(false);
+    status("CALL_LISTENING");
+   }
    // 20ms mono little-endian PCM16, encoded as a native Open WebUI event.
    // Never send more than 2 frames per tick (40ms maximum).
    for(int n=0;n<2;n++){
