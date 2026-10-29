@@ -305,7 +305,9 @@ inline void run(void*){
  // Keep identity facts first, and cap archive contributions before appending.
  // Only the low-priority AI task performs this bounded retrieval.
  uint32_t searchId=KittyMemory::requestSearch(prompt);
- String remembered=KittyMemory::factSummary(360);
+ String remembered=KittyMemory::factSummary(340);
+ String brief=KittyMemory::latestSummaryContext(160);
+ if(!brief.isEmpty()){if(!remembered.isEmpty())remembered+='\n';remembered+="recent_summary: "+brief;}
  String related=KittyMemory::semanticFactRecall(prompt,240);
  if(!related.isEmpty()){
   if(!remembered.isEmpty())remembered+='\n';
