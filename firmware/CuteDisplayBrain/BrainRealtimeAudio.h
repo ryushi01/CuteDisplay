@@ -244,8 +244,11 @@ static void audioTask(void *){
     }else bargeFrames=0;
     if(bargeFrames>=6){bargeActive=true;bargeRequested=true;overlapTriggers++;}
    }
-   bool mute=!bargeActive && (remoteReply || hasAudio ||
-     (uint32_t)(millis()-lastPlaybackMs)<TAIL_MUTE_MS);
+   // Continuous capture while Kitty speaks. The server's VAD may now
+   // transcribe an overlapping turn; preserve its item until output drains.
+   // Physical echo is unavoidable without calibrated AEC; gate residual
+   // energy against the speaker reference rather than blanket muting.
+   bool mute=false;
    for(size_t i=0;i<SAMPLES;i++){
     int32_t value=0;
     if(!mute){
