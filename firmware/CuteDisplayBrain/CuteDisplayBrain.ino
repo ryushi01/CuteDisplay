@@ -762,6 +762,14 @@ static void consoleCommand(String cmd){
   else BrainAudioTest::start();
   return;
  }
+ if(cmd.startsWith("memory recall ")){
+  String query=cmd.substring(14);
+  String recent=KittyMemory::recall(query);
+  Serial.printf("[MEMORY] recent recall: %s\n",recent.isEmpty()?"NO MATCH":recent.c_str());
+  uint32_t id=KittyMemory::requestSearch(query);
+  Serial.printf("[MEMORY] archive search request=%lu (try again after 100ms if needed)\n",(unsigned long)id);
+  return;
+ }
  if(cmd=="memory format CONFIRM"){
   bool accepted=KittyMemory::requestFormat();
   Serial.println(accepted?
