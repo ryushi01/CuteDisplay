@@ -71,6 +71,14 @@ inline String recall(const String &question){
 
 struct Fact { char key[32]; char value[96]; };
 static Fact facts[24]={};
+static volatile uint32_t sdTotalKB=0, sdUsedKB=0;
+inline uint32_t capacityKB(){return sdTotalKB;}
+inline uint32_t usedKB(){return sdUsedKB;}
+inline void updateStorage(){
+ if(!mounted)return;
+ uint64_t total=SD_MMC.totalBytes(),used=SD_MMC.usedBytes();
+ sdTotalKB=(uint32_t)(total/1024ULL);sdUsedKB=(uint32_t)(used/1024ULL);
+}
 static uint8_t factCount=0;
 inline String factSummary(){
  String out;
@@ -96,7 +104,7 @@ inline bool extractFact(String utterance,String &key,String &value){
   // Keep the exact statement as the value to avoid hallucinated facts.
   const char *signals[]={"tomorrow","next week","next month","after tomorrow","day after tomorrow",
     "yesterday","last week","going to","i will ","i'm going","i have ","we will ",
-    "my project","i started","i bought","i visited","i met ","i prefer",
+    "my project","i started","i bought","i visited","i met ","i prefer","remember this","remember that","i plan","i am planning","we are going","we plan",
     "明日","明後日","来週","来月","昨日","予定","行く","食べる","買った","会った",
     "demain","apres-demain","après-demain","semaine prochaine","je vais","j'aime"};
   bool relevant=false;
@@ -290,6 +298,7 @@ inline void task(void*){
   Serial.println("[MEMORY] SD mount failed: card may need FAT formatting, be damaged, or be missing; no auto erase");
  }else{
   SD_MMC.mkdir("/kitty");
+  updateStorage();
   File factFile=SD_MMC.open("/kitty/facts.tsv",FILE_READ);
   if(factFile){while(factFile.available()){String line=factFile.readStringUntil('\n');int t=line.indexOf('\t');if(t>0)mergeFact(line.substring(0,t),line.substring(t+1));}factFile.close();}
   indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -339,6 +348,8 @@ inline void task(void*){
  Entry e={};
  SearchRequest query={};
  while(true){
+  static uint32_t lastStorageAt=0;
+  if(mounted && (uint32_t)(millis()-lastStorageAt)>30000UL){updateStorage();lastStorageAt=millis();}
   if(formatRequested && cardState==2){
    formatRequested=false;
    cardState=3;
@@ -346,7 +357,7 @@ inline void task(void*){
    SD_MMC.end();
    mounted=SD_MMC.begin("/sdcard",true,true,20000,5);
    if(mounted && SD_MMC.cardType()!=CARD_NONE){
-    cardState=1;SD_MMC.mkdir("/kitty");
+    cardState=1;SD_MMC.mkdir("/kitty");updateStorage();
     if(!indexRows)indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     indexCount=0;readIndex();
     Serial.println("[MEMORY] FORMAT COMPLETE: SD ready");
@@ -372,6 +383,7 @@ inline void task(void*){
     if(ff){ff.print(factSummary());ff.close();}
    }
   }else failed++;
+  updateStorage();
   if((saved%20)==0)
    Serial.printf("[MEMORY] saved=%lu failed=%lu queue=%u\n",
      (unsigned long)saved,(unsigned long)failed,(unsigned)uxQueueMessagesWaiting(writes));
