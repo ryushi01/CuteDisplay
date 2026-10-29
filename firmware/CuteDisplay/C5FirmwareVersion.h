@@ -17,4 +17,5 @@
 // v25: AI-selected emotions appear only during CALL_SPEAKING, never THINKING/LISTENING.
 // v26: compact live transcription caption at bottom of full-screen Call Mode.
 // v27: always-visible compact user/Kitty transcript strip in realtime Call Mode.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 27;
+// v28: two-line top conversation monitor, black text without a dark panel.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 28;
