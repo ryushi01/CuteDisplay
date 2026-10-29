@@ -22,6 +22,7 @@ struct SummaryCandidate {char turns[768];};
 struct SummaryResult {char text[256];};
 static QueueHandle_t summaryCandidates=nullptr, summaryResults=nullptr;
 static String latestSummary;
+static volatile uint32_t summaryRevision=0;
 static uint32_t latestSummaryAt=0;
 inline bool takeSummaryCandidate(String &out){
  SummaryCandidate c={};
@@ -900,7 +901,7 @@ inline void task(void*){
    File f=SD_MMC.open("/kitty/summaries.tsv",FILE_APPEND);
    if(f){f.printf("%lu\\t%s\\n",(unsigned long)time(nullptr),item.c_str());f.close();
     if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
-     latestSummary=item;latestSummaryAt=(uint32_t)time(nullptr);xSemaphoreGive(cacheMutex);
+     latestSummary=item;latestSummaryAt=(uint32_t)time(nullptr);summaryRevision++;xSemaphoreGive(cacheMutex);
     }
    }
   }
