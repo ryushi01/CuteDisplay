@@ -110,7 +110,15 @@ EXPRESSION_ANCHORS = {
 
 def patch_expressions(source):
     if EXPRESSION_MARKER in source:
-        return source
+        # Upgrade an already-installed v1 expression tool in place.
+        # The original auth/observer plumbing stays untouched.
+        begin = source.find("KITTY_EXPRESSIONS = (")
+        end = source.find(EXPRESSION_MARKER, begin)
+        if begin < 0 or end < 0:
+            raise ValueError("Previous expression block not found")
+        end += len(EXPRESSION_MARKER)
+        fresh = EXPRESSION_TOOL.rstrip("\\n")
+        return source[:begin] + fresh + source[end:]
     for name, anchor in EXPRESSION_ANCHORS.items():
         if source.count(anchor) != 1:
             raise ValueError(
