@@ -441,6 +441,22 @@ inline void mergeFact(const String &key,const String &value){
 }
 
 
+// Explicit weekday work statements share a stable key across EN/FR/JA.
+inline bool parseWorkday(String phrase,String &key,String &value){
+ phrase.toLowerCase();
+ const char* labels[]={"monday","tuesday","wednesday","thursday","friday","saturday","sunday"};
+ const char* french[]={"lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"};
+ const char* japanese[]={"月曜","火曜","水曜","木曜","金曜","土曜","日曜"};
+ bool work=phrase.indexOf("work")>=0||phrase.indexOf("travail")>=0||phrase.indexOf("働")>=0||phrase.indexOf("仕事")>=0;
+ if(!work)return false;
+ for(int i=0;i<7;i++)if(phrase.indexOf(labels[i])>=0||phrase.indexOf(french[i])>=0||phrase.indexOf(japanese[i])>=0){
+  bool neg=phrase.indexOf("no longer")>=0||phrase.indexOf("don't")>=0||phrase.indexOf("do not")>=0||
+    phrase.indexOf("ne travaille plus")>=0||phrase.indexOf("ne travaille pas")>=0||
+    phrase.indexOf("働かない")>=0||phrase.indexOf("働きません")>=0||phrase.indexOf("仕事はない")>=0;
+  key=String("routine_work_")+labels[i];value=neg?"not working":"working";return true;
+ }
+ return false;
+}
 inline bool gymCancellation(const String &utterance){
  String s=utterance;s.toLowerCase();
  return s.indexOf("gym")>=0 && (s.indexOf("cancel")>=0 ||
@@ -873,6 +889,19 @@ inline void task(void*){
     }
    }
    uint32_t revisionBefore=factRevision;
+   String routineKey,routineValue;
+   if(parseWorkday(String(e.question),routineKey,routineValue)){
+    String oldValue;
+    if(facts && cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
+     for(size_t i=0;i<factCount;i++)if(routineKey==facts[i].key){oldValue=facts[i].value;break;}
+     xSemaphoreGive(cacheMutex);
+    }
+    if(!oldValue.isEmpty() && oldValue!=routineValue){
+     File history=SD_MMC.open("/kitty/corrections.tsv",FILE_APPEND);
+     if(history){history.printf("%lu\\t%s\\t%s\\t%s\\n",(unsigned long)ts,routineKey.c_str(),oldValue.c_str(),routineValue.c_str());history.close();}
+    }
+    mergeFact(routineKey,routineValue);
+   }
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
     // Persist parsed facts on the SD worker, never on the audio callback.
