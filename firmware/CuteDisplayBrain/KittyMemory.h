@@ -69,7 +69,7 @@ inline String recall(const String &question){
  return clipUTF8(result,540);
 }
 
-struct Fact { char key[32]; char value[96]; };
+struct Fact { char key[32]; char value[192]; };
 static Fact facts[24]={};
 static volatile uint32_t sdTotalKB=0, sdUsedKB=0;
 inline uint32_t capacityKB(){return sdTotalKB;}
@@ -83,7 +83,7 @@ static uint8_t factCount=0;
 inline String factSummary(){
  String out;
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
- for(int i=0;i<factCount;i++){out+=String(facts[i].key)+"\t"+facts[i].value+"\n";if(out.length()>650)break;}
+ for(int i=0;i<factCount;i++){out+=String(facts[i].key)+"\t"+facts[i].value+"\n";if(out.length()>700)break;}
  xSemaphoreGive(cacheMutex);return out;
 }
 inline bool extractFact(String utterance,String &key,String &value){
@@ -104,7 +104,7 @@ inline bool extractFact(String utterance,String &key,String &value){
   // Keep the exact statement as the value to avoid hallucinated facts.
   const char *signals[]={"tomorrow","next week","next month","after tomorrow","day after tomorrow",
     "yesterday","last week","going to","i will ","i'm going","i have ","we will ",
-    "my project","i started","i bought","i visited","i met ","i prefer","remember this","remember that","i plan","i am planning","we are going","we plan",
+    "remember this","please remember","in two days","the day after","on saturday","on sunday","my project","i started","i bought","i visited","i met ","i prefer","remember this","remember that","i plan","i am planning","we are going","we plan",
     "明日","明後日","来週","来月","昨日","予定","行く","食べる","買った","会った",
     "demain","apres-demain","après-demain","semaine prochaine","je vais","j'aime"};
   bool relevant=false;
@@ -116,7 +116,7 @@ inline bool extractFact(String utterance,String &key,String &value){
  if(key!="event")for(const char *tail:{"。","、",".","!","！","です","だよ","だわ","よ","って呼んで"}){
   int x=value.indexOf(tail);if(x>=0)value=value.substring(0,x);
  }
- value.trim();return !value.isEmpty() && value.length()<90;
+ value.trim();return !value.isEmpty() && value.length()<(key=="event"?180:90);
 }
 inline void mergeFact(const String &key,const String &value){
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
@@ -381,6 +381,7 @@ inline void task(void*){
     if(key=="event")key="event_"+String(ts%1000000UL)+"_"+String(saved%100UL);
     mergeFact(key,value);File ff=SD_MMC.open("/kitty/facts.tsv","w");
     if(ff){ff.print(factSummary());ff.close();}
+    Serial.printf("[MEMORY] saved fact key=%s total=%u\n",key.c_str(),(unsigned)factCount);
    }
   }else failed++;
   updateStorage();
