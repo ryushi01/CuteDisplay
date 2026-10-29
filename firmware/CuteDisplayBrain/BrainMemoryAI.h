@@ -12,6 +12,7 @@ static constexpr uint32_t IDLE_MS=20000UL;
 static constexpr uint32_t RETRY_GAP_MS=10000UL;
 static uint32_t lastAttempt=0;
 static String pending;
+static bool pendingSummary=false;
 // No more than one inference at once. Model is shared with live conversation.
 inline void tick(bool busy){
  uint32_t now=millis();
@@ -20,21 +21,26 @@ inline void tick(bool busy){
  if(running || WiFi.status()!=WL_CONNECTED ||
     (uint32_t)(now-lastInteractiveAt)<IDLE_MS ||
     (uint32_t)(now-lastAttempt)<RETRY_GAP_MS)return;
- if(pending.isEmpty() && !KittyMemory::takeConsolidationCandidate(pending))return;
+ if(pending.isEmpty()){
+  // Summaries only run after conversational work is idle, never during calls.
+  pendingSummary=KittyMemory::takeSummaryCandidate(pending);
+  if(!pendingSummary && !KittyMemory::takeConsolidationCandidate(pending))return;
+ }
  lastAttempt=now;abortRequested=false;
  running=true;
  if(xTaskCreatePinnedToCore([](void*){
    // Take only one bounded user utterance from the SD worker's RAM queue.
    String utterance=pending;pending="";
+   bool summarize=pendingSummary;pendingSummary=false;
    auto finish=[](){running=false;worker=nullptr;vTaskDelete(nullptr);};
    if(abortRequested || interactive || utterance.length()<12){finish();return;}
    String l=utterance;l.toLowerCase();
    // Conservative candidate filter: avoid Ollama requests for jokes,
    // questions, greetings and the majority of ordinary conversation.
-   if(l.indexOf('?')>=0 || l.indexOf("？")>=0 ||
+   if(!summarize && (l.indexOf('?')>=0 || l.indexOf("？")>=0 ||
       (l.indexOf("i ")<0 && l.indexOf("my ")<0 && l.indexOf("im ")<0 &&
        l.indexOf("je ")<0 && l.indexOf("j'")<0 &&
-       l.indexOf("私は")<0 && l.indexOf("私の")<0 && l.indexOf("今日は")<0)){
+       l.indexOf("私は")<0 && l.indexOf("私の")<0 && l.indexOf("今日は")<0))){
      finish();return;
    }
    Preferences prefs;String url,model,key;
@@ -53,7 +59,12 @@ inline void tick(bool busy){
    cJSON *messages=cJSON_AddArrayToObject(root,"messages");
    cJSON *system=cJSON_CreateObject();
    cJSON_AddStringToObject(system,"role","system");
-   cJSON_AddStringToObject(system,"content",
+   cJSON_AddStringToObject(system,"content",summarize?
+    "Summarize these user statements into ONE compact, factual memory of at most 180 characters. "
+    "Preserve explicitly mentioned project decisions, changes, and future plans. "
+    "Never invent details, never infer identities, and avoid speculative facts. "
+    "Respond with JSON only: {\\\"summary\\\":\\\"...\\\"}. "
+    "If nothing meaningful was discussed, return {\\\"summary\\\":\\\"\\\"}." :
     "Extract ONLY explicitly stated personal facts from the user utterance in English, French, or Japanese. "
     "Return compact JSON only: {\"facts\":[{\"kind\":\"likes\",\"subject\":\"chocolate\"}]}. "
     "Allowed kind: likes, dislikes, situation. For situation use subject as " 
@@ -109,6 +120,12 @@ inline void tick(bool busy){
       String body(raw);int start=body.indexOf('{'),end=body.lastIndexOf('}');
       if(start>=0 && end>start){
        cJSON *parsed=cJSON_Parse(body.substring(start,end+1).c_str());
+       if(summarize){
+        cJSON *sentence=cJSON_GetObjectItem(parsed,"summary");
+        if(cJSON_IsString(sentence) && sentence->valuestring &&
+           !abortRequested && !interactive)
+          (void)KittyMemory::proposeSummary(String(sentence->valuestring));
+       }
        cJSON *facts=cJSON_GetObjectItem(parsed,"facts");
        if(cJSON_IsArray(facts) && cJSON_GetArraySize(facts)<=3){
         int accepted=0;
