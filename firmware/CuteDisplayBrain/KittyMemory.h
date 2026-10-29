@@ -18,6 +18,20 @@ struct ConsolidationCandidate { char utterance[256]; };
 static QueueHandle_t consolidationCandidates=nullptr;
 struct ConsolidatedFact { char key[32]; char value[128]; };
 static QueueHandle_t consolidatedFacts=nullptr;
+struct SummaryCandidate {char turns[768];};
+struct SummaryResult {char text[256];};
+static QueueHandle_t summaryCandidates=nullptr, summaryResults=nullptr;
+static String latestSummary;
+inline bool takeSummaryCandidate(String &out){
+ SummaryCandidate c={};
+ if(!summaryCandidates || xQueueReceive(summaryCandidates,&c,0)!=pdTRUE)return false;
+ out=String(c.turns);return !out.isEmpty();
+}
+inline bool proposeSummary(const String &text){
+ if(!summaryResults || text.length()<12 || text.length()>220)return false;
+ SummaryResult r={};text.toCharArray(r.text,sizeof(r.text));
+ return xQueueSend(summaryResults,&r,0)==pdTRUE;
+}
 inline bool takeConsolidationCandidate(String &value){
  ConsolidationCandidate item={};
  if(!consolidationCandidates || xQueueReceive(consolidationCandidates,&item,0)!=pdTRUE)return false;
@@ -61,6 +75,11 @@ inline void addCache(const String &question,const String &answer){
  recentNext=(recentNext+1)%8;
  if(recentCount<8)recentCount++;
  xSemaphoreGive(cacheMutex);
+}
+inline String latestSummaryContext(size_t maxBytes=180){
+ if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(2))!=pdTRUE)return "";
+ String value=clipUTF8(latestSummary,maxBytes);
+ xSemaphoreGive(cacheMutex);return value;
 }
 inline String recall(const String &question){
  // RAM-only recall: no SD access on the model request path.
