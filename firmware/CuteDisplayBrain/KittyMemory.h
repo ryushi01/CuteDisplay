@@ -862,8 +862,13 @@ inline void task(void*){
      detail.length()<=90 && detail.indexOf('?')<0;
    if(preference || situation){
     uint32_t before=factRevision;
+    String effectiveKey=preference?preferenceKey(kind,subject):"context_"+topic;
     if(preference)mergeFact(kind,subject);
     else mergeFact("context_"+topic,detail);
+    if(factConfidence && cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
+     for(size_t i=0;i<factCount;i++)if(effectiveKey==facts[i].key){factConfidence[i]=70;break;}
+     xSemaphoreGive(cacheMutex);
+    }
     if(factRevision!=before){
      if(persistFacts())memorizedNoticeSeq++;
      Serial.printf("[MEMORY AI] consolidated %s\n",kind.c_str());
