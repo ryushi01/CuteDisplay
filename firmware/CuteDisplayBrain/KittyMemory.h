@@ -88,8 +88,8 @@ inline String recall(const String &question){
 }
 
 struct Fact { char key[32]; char value[192]; };
-static Fact facts[24]={};
-static constexpr uint8_t MAX_FACTS=24;
+static constexpr size_t MAX_FACTS=256;
+static Fact *facts=nullptr; // PSRAM catalog; SD remains durable
 static volatile uint32_t sdTotalKB=0, sdUsedKB=0;
 inline uint32_t capacityKB(){return sdTotalKB;}
 inline uint32_t usedKB(){return sdUsedKB;}
@@ -98,11 +98,11 @@ inline void updateStorage(){
  uint64_t total=SD_MMC.totalBytes(),used=SD_MMC.usedBytes();
  sdTotalKB=(uint32_t)(total/1024ULL);sdUsedKB=(uint32_t)(used/1024ULL);
 }
-static uint8_t factCount=0;
+static size_t factCount=0;
 static volatile uint32_t factRevision=0, memorizedNoticeSeq=0;
 inline String factSummary(size_t maxLen=700){
  String out;
- if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
+ if(!facts || !cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
  // Keep realtime memory bounded and multilingual-topic context visible,
  // even when many older preference slots are occupied.
  for(int pass=0;pass<3;pass++){
@@ -124,7 +124,7 @@ inline String factSummary(size_t maxLen=700){
 }
 // Recoverable SD fact snapshots: never truncate the only good copy.
 inline bool persistFacts(){
- String data=factSummary(6000);
+ String data=factSummary(MAX_FACTS*sizeof(Fact));
  if(data.isEmpty())return false; // never replace a non-empty cache with an empty file
  const char *tmp="/kitty/facts.next",*main="/kitty/facts.tsv",*backup="/kitty/facts.bak";
  SD_MMC.remove(tmp);
@@ -148,7 +148,7 @@ inline void restoreFactSnapshots(){
  const char* candidates[]={"/kitty/facts.tsv","/kitty/facts.bak"};
  for(const char *path:candidates){
   File f=SD_MMC.open(path,FILE_READ);if(!f)continue;
-  uint8_t before=factCount;
+  size_t before=factCount;
   while(f.available()){
    String line=f.readStringUntil('\n');int tab=line.indexOf('\t');
    if(tab>0 && tab<32 && line.length()<240)
@@ -351,7 +351,7 @@ inline bool isEpisodic(const String &key){
 }
 inline bool meaningfulPreferenceSubject(String subject);
 inline void mergeFact(const String &key,const String &value){
- if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
+ if(!facts || !cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
  // Consolidate exact duplicates and corrections: dislikes replace likes
  // for the same subject, while different preferences coexist.
  String normalized=normalizeSubject(value);
@@ -636,6 +636,8 @@ inline String takeSearch(uint32_t serial){
 }
 
 inline void task(void*){
+ if(!facts)facts=(Fact*)heap_caps_calloc(MAX_FACTS,sizeof(Fact),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!facts)Serial.println("[MEMORY] ERROR: PSRAM fact catalog unavailable");
  SD_MMC.setPins(39,38,40);
  mounted=SD_MMC.begin("/sdcard",true,false,20000,5);
  cardState=mounted?1:2;
@@ -753,7 +755,7 @@ inline void task(void*){
    if(mounted){
     SD_MMC.mkdir("/kitty");
     if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(500))==pdTRUE){
-     memset(facts,0,sizeof(facts));factCount=0;factRevision++;
+     if(facts)memset(facts,0,MAX_FACTS*sizeof(Fact));factCount=0;factRevision++;
      for(auto &v:recent)v="";
      recentCount=0;recentNext=0;
      xSemaphoreGive(cacheMutex);
