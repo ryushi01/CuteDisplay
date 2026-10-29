@@ -47,6 +47,10 @@ static String failedCallId, failedCallAnswer;
 // Temporary 0..7 Kitty expression selected by realtime avatar gestures or
 // assistant speech. No change to the model, account, or persistent C5 mood.
 static int pendingMood=-1;
+static uint8_t explicitMoodQueue[8];
+static uint8_t moodQueueHead=0,moodQueueCount=0;
+static uint32_t lastQueuedMoodSentAt=0;
+inline void clearMoodQueue(){moodQueueHead=0;moodQueueCount=0;lastQueuedMoodSentAt=0;}
 static uint8_t currentMood=1;
 static uint32_t moodUpdatedAt=0;
 static uint32_t lastExplicitMoodAt=0; // AI tool is authoritative over text heuristics
@@ -101,11 +105,37 @@ inline void chooseMood(int m,bool explicitGesture){
  if(!explicitGesture && (uint32_t)(now-moodUpdatedAt)<1400UL)return;
  if(explicitGesture)lastExplicitMoodAt=now;
  if(m==currentMood && !explicitGesture)return;
- currentMood=(uint8_t)m;pendingMood=m;moodUpdatedAt=now;
- expressionIdleSince=0;
+ currentMood=(uint8_t)m;
+ if(explicitGesture){
+  // Preserve all model-selected moods even when multiple tool calls complete
+  // in one Arduino loop iteration. Display them sequentially during speech.
+  if(moodQueueCount<8){
+   explicitMoodQueue[(moodQueueHead+moodQueueCount)%8]=(uint8_t)m;
+   moodQueueCount++;
+  }else{
+   // Keep the most recent instruction if the provider exceeds the queue.
+   explicitMoodQueue[(moodQueueHead+7)%8]=(uint8_t)m;
+  }
+  pendingMood=-1;
+ }else if(moodQueueCount==0)pendingMood=m;
+ moodUpdatedAt=now;expressionIdleSince=0;
 }
 inline bool takeMood(uint8_t &result){
- if(pendingMood<0 || !requested)return false;
+ if(!requested)return false;
+ if(moodQueueCount){
+  // C5 only shows AI moods when SPEAKING; do not drain the queue while
+  // thinking. 850ms minimum per mood makes rapid tool calls visible.
+  if(!BrainRealtimeAudio::hasSpeakerAudio() &&
+     !(streamedSpeech && remoteResponse))return false;
+  if(lastQueuedMoodSentAt && (uint32_t)(millis()-lastQueuedMoodSentAt)<850UL)
+   return false;
+  result=explicitMoodQueue[moodQueueHead];
+  moodQueueHead=(moodQueueHead+1)%8;
+  moodQueueCount--;
+  lastQueuedMoodSentAt=millis();
+  return true;
+ }
+ if(pendingMood<0)return false;
  result=(uint8_t)pendingMood;pendingMood=-1;return true;
 }
 // C5 does not have to implement any new server protocol; only S3 owns it.
@@ -199,7 +229,7 @@ inline void diagnose(bool audioBusy){
   key.startsWith("sk-")&&key.length()>20?1:0,audioBusy?1:0);
 }
 inline void stop(){
- pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
+ clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
  requested=false;ready=false;connected=false;started=false;
  deferredVoiceItem="";playbackSpeechDetected=false;
  remoteResponse=false;streamedSpeech=false;
@@ -210,7 +240,7 @@ inline void stop(){
  status("CALL_OFF");
 }
 inline void fail(const char *why){
- pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
+ clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
  const bool localAudio=(strcmp(why,"I2S_RUNTIME")==0 ||
    strcmp(why,"AUDIO_TASK_ALLOC")==0 ||
    strncmp(why,"NO_PSRAM",8)==0 ||
