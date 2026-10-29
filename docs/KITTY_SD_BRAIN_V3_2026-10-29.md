@@ -9,7 +9,7 @@ This experiment builds on `feature/kitty-temporal-awareness`. Recovery branch: `
 - `/kitty/factsmeta.tsv` with backup: fact update timestamps, confidence and expiration metadata.
 - `/kitty/corrections.tsv`: append-only explicit weekday-work corrections.
 - `/kitty/summaries.tsv`: append-only successful idle conversation summaries.
-- **New:** `/kitty/dated_plans.tsv`: append-only dated plan history, including date and unique per-subject key, to preserve prior plans even if the 256-fact working cache rotates.
+- **New:** `/kitty/dated_plans.tsv`: append-only dated plan history, including date and unique per-subject key, to preserve prior plans even if the 256-fact working cache rotates. Date-related memory searches read up to the most recent 16 KiB of this archive on the SD worker, returning up to three plan matches.
 - All SD card writes remain owned by low-priority Core 0 worker. WebSocket/audio callback code never performs SD I/O. No formatting or destructive migration.
 
 ## Improved calendar interpretation
@@ -20,7 +20,7 @@ This experiment builds on `feature/kitty-temporal-awareness`. Recovery branch: `
 - An old plan stays historical with **outcome unconfirmed**. Neither a passed date nor silence confirms completion.
 
 ## Limits
-- The full SD conversation/archive/history is not loaded into the realtime model. Compact RAM/PSRAM caches and bounded summaries are injected. Historical `dated_plans.tsv` is durable but does not yet have a full random-access date index or backfill into the 256-slot cache, so recalling very old plans may require later SD indexing work.
+- The full SD conversation/archive/history is not loaded into the realtime model. Compact RAM/PSRAM caches and bounded summaries are injected. Historical `dated_plans.tsv` is durable and has bounded recent-tail date lookup but no full random-access index; plans older than the most recent 16 KiB may require later SD indexing work.
 - This is a deterministic EN/FR/JA date-phrase parser, not a comprehensive calendar grammar. It does not reliably extract all spoken plans, dates, corrections, negated dates or non-English/Japanese/French expressions.
 - `facts.tsv` remains limited to 256 current cached facts; the append-only dated-plan archive enables long-term persistence but **does not** make every historical entry immediately searchable.
 - Memory refresh during live calls requires the separate guarded Open WebUI gateway extension from Memory v2 to be deployed and tested on the user's actual server.
