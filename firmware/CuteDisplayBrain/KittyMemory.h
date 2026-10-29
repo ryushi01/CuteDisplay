@@ -71,6 +71,7 @@ inline String recall(const String &question){
 
 struct Fact { char key[32]; char value[192]; };
 static Fact facts[24]={};
+static constexpr uint8_t MAX_FACTS=24;
 static volatile uint32_t sdTotalKB=0, sdUsedKB=0;
 inline uint32_t capacityKB(){return sdTotalKB;}
 inline uint32_t usedKB(){return sdUsedKB;}
@@ -83,6 +84,7 @@ static uint8_t factCount=0;
 inline String factSummary(size_t maxLen=700){
  String out;
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
+ // Prioritize stable facts and newest entries without increasing context size.
  for(int i=0;i<factCount;i++){
   String record=String(facts[i].key)+"\t"+facts[i].value+"\n";
   if(out.length()+record.length()>maxLen)break;
@@ -96,6 +98,9 @@ inline bool extractFact(String utterance,String &key,String &value){
  int pos=-1,skip=0;
  for(const char* marker:{"my name is ","call me ","i am called ","私の名前は","名前は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
+ }
+ if(pos<0)for(const char* marker:{"i no longer like ","i don't like ","i do not like ","i dislike ","i hate ","je n'aime pas ","もう好きじゃない"}){
+  pos=lower.indexOf(marker);if(pos>=0){key="dislikes";skip=strlen(marker);break;}
  }
  if(pos<0)for(const char* marker:{"i like ","i love ","my favorite food is ","好きな食べ物は","好きなのは"}){
   pos=lower.indexOf(marker);if(pos>=0){key="likes";skip=strlen(marker);break;}
@@ -141,25 +146,59 @@ inline bool extractFact(String utterance,String &key,String &value){
  if(value.length()>112)value=clipUTF8(value,112);
  return value.length()>=2;
 }
+// Stable compact identity for related preference subjects. No embeddings on the S3.
+inline String normalizeSubject(String value){
+ value.trim();value.toLowerCase();
+ while(value.endsWith(".")||value.endsWith("!")||value.endsWith("。"))value.remove(value.length()-1);
+ return clipUTF8(value,72);
+}
+inline String preferenceKey(const String &kind,const String &value){
+ String normalized=normalizeSubject(value);
+ uint32_t h=2166136261UL;
+ for(size_t i=0;i<normalized.length();i++)h=(h^(uint8_t)normalized[i])*16777619UL;
+ char buf[16];snprintf(buf,sizeof(buf),"%08lx",(unsigned long)h);
+ return String("pref_")+buf;
+}
+inline bool isEpisodic(const String &key){
+ return key.startsWith("note_")||key.startsWith("event_");
+}
 inline void mergeFact(const String &key,const String &value){
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
- for(int i=0;i<factCount;i++)if(key==facts[i].key){
-  value.toCharArray(facts[i].value,sizeof(facts[i].value));
-  xSemaphoreGive(cacheMutex);return;
+ // Consolidate exact duplicates and corrections: dislikes replace likes
+ // for the same subject, while different preferences coexist.
+ String normalized=normalizeSubject(value);
+ String finalKey=key;
+ if(key=="likes"||key=="dislikes")finalKey=preferenceKey(key,value);
+ for(int i=0;i<factCount;i++){
+  if(finalKey==facts[i].key){
+   // Keep multiple likes; a correction to the same subject supersedes it.
+   String existing(facts[i].value);
+   if(key=="dislikes"||key=="likes"){
+    String entry=key+":"+value;
+    entry.toCharArray(facts[i].value,sizeof(facts[i].value));
+   }else value.toCharArray(facts[i].value,sizeof(facts[i].value));
+   xSemaphoreGive(cacheMutex);return;
+  }
+  if(isEpisodic(key) && isEpisodic(String(facts[i].key)) &&
+      normalizeSubject(String(facts[i].value))==normalized){
+   xSemaphoreGive(cacheMutex);return;
+  }
  }
- if(factCount<24){
-  key.toCharArray(facts[factCount].key,sizeof(facts[factCount].key));
-  value.toCharArray(facts[factCount].value,sizeof(facts[factCount].value));
+ String stored=(key=="likes"||key=="dislikes")?key+":"+value:value;
+ if(factCount<MAX_FACTS){
+  finalKey.toCharArray(facts[factCount].key,sizeof(facts[factCount].key));
+  stored.toCharArray(facts[factCount].value,sizeof(facts[factCount].value));
   factCount++;
  }else{
-  // Rotate oldest episodic memory, never evict stable profile facts.
+  // Fixed memory budget: rotate episodic notes first, preserving identity
+  // and known preferences until new information needs the slots.
   int victim=-1;
-  for(int i=0;i<factCount;i++)
-   if(strncmp(facts[i].key,"note_",5)==0 || strncmp(facts[i].key,"event_",6)==0){victim=i;break;}
+  for(int i=0;i<factCount;i++)if(isEpisodic(String(facts[i].key))){victim=i;break;}
+  if(victim<0 && finalKey!="name")victim=0;
   if(victim>=0){
    for(int i=victim;i<factCount-1;i++)facts[i]=facts[i+1];
-   key.toCharArray(facts[factCount-1].key,sizeof(facts[0].key));
-   value.toCharArray(facts[factCount-1].value,sizeof(facts[0].value));
+   finalKey.toCharArray(facts[factCount-1].key,sizeof(facts[0].key));
+   stored.toCharArray(facts[factCount-1].value,sizeof(facts[0].value));
   }
  }
  xSemaphoreGive(cacheMutex);
