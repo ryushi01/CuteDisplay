@@ -80,10 +80,10 @@ inline void updateStorage(){
  sdTotalKB=(uint32_t)(total/1024ULL);sdUsedKB=(uint32_t)(used/1024ULL);
 }
 static uint8_t factCount=0;
-inline String factSummary(){
+inline String factSummary(size_t maxLen=700){
  String out;
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
- for(int i=0;i<factCount;i++){out+=String(facts[i].key)+"\t"+facts[i].value+"\n";if(out.length()>700)break;}
+ for(int i=0;i<factCount;i++){out+=String(facts[i].key)+"\t"+facts[i].value+"\n";if(out.length()>=maxLen)break;}
  xSemaphoreGive(cacheMutex);return out;
 }
 inline bool extractFact(String utterance,String &key,String &value){
@@ -380,7 +380,7 @@ inline void task(void*){
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="event")key="event_"+String(ts%1000000UL)+"_"+String(saved%100UL);
     mergeFact(key,value);File ff=SD_MMC.open("/kitty/facts.tsv","w");
-    if(ff){ff.print(factSummary());ff.close();}
+    if(ff){ff.print(factSummary(6000));ff.close();}
     Serial.printf("[MEMORY] saved fact key=%s total=%u\n",key.c_str(),(unsigned)factCount);
    }
   }else failed++;
