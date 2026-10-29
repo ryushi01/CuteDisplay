@@ -225,14 +225,14 @@ static void audioTask(void *){
     if(micLevel<(uint32_t)(noiseFloor*3+300))
      noiseFloor=(noiseFloor*31+(int32_t)micLevel)/32;
    }
-   uint32_t threshold=max((uint32_t)1800,(uint32_t)(noiseFloor*5+900));
+   uint32_t threshold=max((uint32_t)900,(uint32_t)(noiseFloor*4+500));
    // Avoid accidental triggers at the start of TTS or from loudspeaker echo.
    if((remoteReply || hasAudio) && !bargeActive &&
       (int32_t)(millis()-bargeCooldownUntil)>=0){
-    if(micLevel>threshold && micLevel>spkLevel*2+1000){
+    if(micLevel>threshold && micLevel>spkLevel*3/2+450){
      if(bargeFrames<16)bargeFrames++;
     }else bargeFrames=0;
-    if(bargeFrames>=10){bargeActive=true;bargeRequested=true;}
+    if(bargeFrames>=7){bargeActive=true;bargeRequested=true;}
    }
    bool mute=!bargeActive && (remoteReply || hasAudio ||
      (uint32_t)(millis()-lastPlaybackMs)<TAIL_MUTE_MS);
