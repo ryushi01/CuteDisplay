@@ -29,6 +29,7 @@ static bool requested=false, started=false, connected=false, ready=false;
 // gateway explicitly advertises support. Never require them for a voice call.
 static bool memoryRefreshSupported=false;
 static uint32_t memoryFactSeen=0,memorySummarySeen=0,memoryRefreshSeq=0,memoryLastAttempt=0;
+static uint32_t memoryDaySeen=0;
 static bool remoteResponse=false, streamedSpeech=false;
 static bool bargeCancelling=false;
 static String deferredVoiceItem;
@@ -347,8 +348,11 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   memoryRefreshSupported=false;memoryRefreshSeq=0;
   memoryFactSeen=KittyMemory::factRevision;
   memorySummarySeen=KittyMemory::summaryRevision;
+  memoryDaySeen=BrainClock::localDayKey();
   // Only ephemeral facts travel with this authenticated session. No server storage.
-  String facts=KittyMemory::factSummary(580);
+  String facts=BrainClock::calendarContext();
+  String profile=KittyMemory::factSummary(480);
+  if(!profile.isEmpty()){if(!facts.isEmpty())facts+='\n';facts+=profile;}
   String summary=KittyMemory::latestSummaryContext(170);
   if(!summary.isEmpty()){if(!facts.isEmpty())facts+='\n';facts+="recent_summary: "+summary;}
   if(!facts.isEmpty())cJSON_AddStringToObject(auth,"kitty_sd_memory",facts.c_str());
@@ -699,11 +703,15 @@ inline void tick(bool audioBusy){
     animationResponseId.isEmpty() && deferredVoiceItem.isEmpty() &&
     (uint32_t)(millis()-memoryLastAttempt)>=3000UL &&
     (KittyMemory::factRevision!=memoryFactSeen ||
-     KittyMemory::summaryRevision!=memorySummarySeen)){
+     KittyMemory::summaryRevision!=memorySummarySeen ||
+     BrainClock::localDayKey()!=memoryDaySeen)){
   memoryLastAttempt=millis();
   uint32_t factVersion=KittyMemory::factRevision;
   uint32_t summaryVersion=KittyMemory::summaryRevision;
-  String context=KittyMemory::factSummary(550);
+  uint32_t dayVersion=BrainClock::localDayKey();
+  String context=BrainClock::calendarContext();
+  String currentFacts=KittyMemory::factSummary(420);
+  if(!currentFacts.isEmpty()){if(!context.isEmpty())context+='\n';context+=currentFacts;}
   String brief=KittyMemory::latestSummaryContext(160);
   if(!brief.isEmpty()){if(!context.isEmpty())context+='\n';context+="recent_summary: "+brief;}
   context=KittyMemory::clipUTF8(context,790);
@@ -714,7 +722,7 @@ inline void tick(bool audioBusy){
    cJSON_AddStringToObject(message,"memory",context.c_str());
    char *wire=cJSON_PrintUnformatted(message);
    if(wire){
-    if(ws.sendTXT(wire)){memoryFactSeen=factVersion;memorySummarySeen=summaryVersion;}
+    if(ws.sendTXT(wire)){memoryFactSeen=factVersion;memorySummarySeen=summaryVersion;memoryDaySeen=dayVersion;}
     free(wire);
    }
    cJSON_Delete(message);
