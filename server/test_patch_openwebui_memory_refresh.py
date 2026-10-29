@@ -10,16 +10,19 @@ spec.loader.exec_module(module)
 
 SOURCE = """
 async def realtime_call(ws):
-    auth = {'kitty_sd_memory': '', 'kitty_memory_refresh': True}
-    kitty_expressions = True
-    kitty_sd_memory = auth.get('kitty_sd_memory', '')
-    await ws.send_json({'type': 'bridge.ready', 'model': voice_model, 'voice': voice, 'sample_rate': 24000})
-    async def client_events():
-        while True:
-            raw = await ws.receive_text()
-            event = loads(raw)
-            command = protocol.command(event)
-            await upstream.send_json(command)
+    try:
+        auth = {'kitty_sd_memory': '', 'kitty_memory_refresh': True}
+        kitty_expressions = True
+        kitty_sd_memory = auth.get('kitty_sd_memory', '')
+        await ws.send_json({'type': 'bridge.ready', 'model': voice_model, 'voice': voice, 'sample_rate': 24000})
+        async def client_events():
+            while True:
+                raw = await ws.receive_text()
+                event = loads(raw)
+                command = protocol.command(event)
+                await upstream.send_json(command)
+    except Exception:
+        pass
 """
 patched = module.patch(SOURCE)
 assert "kitty_memory_refresh_enabled" in patched
