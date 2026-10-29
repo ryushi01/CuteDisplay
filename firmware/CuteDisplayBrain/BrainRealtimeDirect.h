@@ -401,13 +401,16 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  }else if(strcmp(type,"conversation.item.input_audio_transcription.completed")==0){
   cJSON *id=cJSON_GetObjectItem(json,"item_id");
   cJSON *transcript=cJSON_GetObjectItem(json,"transcript");
-  if(cJSON_IsString(id) && cJSON_IsString(transcript) &&
+  if(cJSON_IsString(transcript) &&
      transcript->valuestring && transcript->valuestring[0]){
+   Serial.println("[MEMORY] Realtime user transcript received");
+   bool archived=KittyMemory::queue(String(transcript->valuestring),String("[voice transcript]"));
+   Serial.printf("[MEMORY] transcript queued=%d\n",archived?1:0);
    queueCaption("YOU: ",transcript->valuestring);
    // Realtime voice often responds without delegated BrainAI chat;
    // archive the transcript independently of whether delegation occurs.
    // The answer may arrive later, but user facts must not be dropped.
-   KittyMemory::queue(String(transcript->valuestring),String("[voice transcript]"));
+   if(!cJSON_IsString(id)){cJSON_Delete(json);return;}
    String item(id->valuestring);
    if(remoteResponse || BrainRealtimeAudio::hasSpeakerAudio() ||
       !delegatedCallId.isEmpty() || !animationResponseId.isEmpty()){
