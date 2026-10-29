@@ -192,10 +192,10 @@ inline bool extractFact(String utterance,String &key,String &value){
    }
   }
  }
- if(pos==-1)for(const char* marker:{"i no longer like ","i don't like ","i do not like ","i dislike ","i hate ","je n'aime pas ","もう好きじゃない"}){
+ if(pos==-1)for(const char* marker:{"i no longer like ","i don't like ","i do not like ","i dislike ","i hate ","je n'aime pas ","je déteste ","je deteste ","もう好きじゃない"}){
   pos=lower.indexOf(marker);if(pos>=0){key="dislikes";skip=strlen(marker);break;}
  }
- if(pos==-1)for(const char* marker:{"i like ","i love ","my favorite food is ","好きな食べ物は","好きなのは"}){
+ if(pos==-1)for(const char* marker:{"i like ","i love ","j'aime ","j’adore ","j'adore ","my favorite food is ","好きな食べ物は","好きなのは"}){
   pos=lower.indexOf(marker);if(pos>=0){key="likes";skip=strlen(marker);break;}
  }
  if(pos==-1 && lower.indexOf("が好き")>0){
