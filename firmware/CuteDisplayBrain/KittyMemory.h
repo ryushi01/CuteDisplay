@@ -455,10 +455,20 @@ inline uint32_t expiryForFact(const String &key,const String &value){
  if(now<1700000000)return 0; // Do not expire anything before NTP sync.
  if(key!="context_upcoming_plan" && !key.startsWith("event_"))return 0;
  String text=value;text.toLowerCase();
+ // Local calendar boundaries, not rolling 24/48 hour timers: a "today"
+ // plan becomes historical at next midnight even when recorded at 23:55.
+ int days=0;
  if(text.indexOf("tomorrow")>=0 || text.indexOf("demain")>=0 ||
-    text.indexOf("明日")>=0)return (uint32_t)now+48UL*3600UL;
- if(text.indexOf("today")>=0 || text.indexOf("aujourd")>=0 ||
-    text.indexOf("今日")>=0)return (uint32_t)now+24UL*3600UL;
+    text.indexOf("明日")>=0)days=2;
+ else if(text.indexOf("today")>=0 || text.indexOf("aujourd")>=0 ||
+    text.indexOf("今日")>=0)days=1;
+ if(days){
+  struct tm local={};localtime_r(&now,&local);
+  local.tm_hour=0;local.tm_min=0;local.tm_sec=0;
+  local.tm_mday+=days;
+  time_t end=mktime(&local);
+  return end>now?(uint32_t)end:0;
+ }
  // No guessed expiry for undated plans: they require explicit correction.
  return 0;
 }
