@@ -302,21 +302,31 @@ inline void run(void*){
   cJSON_AddStringToObject(a,"content",history[i].assistant.c_str());
   cJSON_AddItemToArray(msgs,a);
  }
- // Search the entire SD index asynchronously; wait at most 40ms.
- // A slow or busy card never blocks the model beyond this fixed deadline.
+ // Keep identity facts first, and cap archive contributions before appending.
+ // Only the low-priority AI task performs this bounded retrieval.
  uint32_t searchId=KittyMemory::requestSearch(prompt);
- String remembered=KittyMemory::factSummary()+KittyMemory::recall(prompt);
- if(searchId){
+ String remembered=KittyMemory::factSummary(520);
+ String recent=KittyMemory::recall(prompt);
+ if(!recent.isEmpty()){
+  if(!remembered.isEmpty())remembered+='\n';
+  remembered+=KittyMemory::clipUTF8(recent,200);
+ }
+ if(searchId && remembered.length()<760){
   uint32_t began=millis();
-  while((uint32_t)(millis()-began)<40UL){
+  while((uint32_t)(millis()-began)<25UL){
    String old=KittyMemory::takeSearch(searchId);
    if(!old.isEmpty()){
-    // Do not discard structured facts when a search result arrives.\n    if(!remembered.isEmpty())remembered+="\n";\n    remembered+=old;break;
+    if(!remembered.isEmpty())remembered+='\n';
+    remembered+=KittyMemory::clipUTF8(old,760-remembered.length());
+    break;
    }
    vTaskDelay(pdMS_TO_TICKS(5));
   }
  }
- remembered=KittyMemory::clipUTF8(remembered,850);\n if(delegated)Serial.printf("[AI MEMORY] delegated facts=%u memory_bytes=%u search_id=%lu internal_free=%lu\\n",\n   (unsigned)KittyMemory::factCount,(unsigned)remembered.length(),(unsigned long)searchId,\n   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+ remembered=KittyMemory::clipUTF8(remembered,760);
+ if(delegated)Serial.printf("[AI MEMORY] facts=%u bytes=%u search=%lu internal=%lu\n",
+   (unsigned)KittyMemory::factCount,(unsigned)remembered.length(),(unsigned long)searchId,
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
  if(!remembered.isEmpty()){
   cJSON *memory=cJSON_CreateObject();
   cJSON_AddStringToObject(memory,"role","system");
