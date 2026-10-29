@@ -229,20 +229,33 @@ static void drawFullScreenKittyFace(){
  oval(x+8,160,8,8,CF_INK);oval(x+width-8,160,8,8,CF_INK);
  rect(x+8,152,width-16,17,CF_INK);
  textAt(label,x+12,155,1,CF_WHITE);
- // Two lines of chronological conversation at the top. New lines arrive
- // at the lower row and push the older line upward (speech-bubble style).
- // Black text directly on the bright face, without any caption panel.
- auto showLine=[&](const String &source,int y){
-  if(source.isEmpty())return;
-  String shown=source;
-  // Clip from the UTF-8 leading edge to keep the newest part of a line.
-  if(shown.length()>49){
-   int cut=shown.length()-49;
-   while(cut<shown.length() && ((uint8_t)shown[cut]&0xC0)==0x80)cut++;
-   shown=shown.substring(cut);
+ // Width-aware UTF-8 wrap of the latest caption. Only two rows are
+ // visible; older wrapped rows scroll off the top as new text arrives.
+ // Unlike fixed byte clipping, no part of a long sentence is discarded.
+ if(!callCaption.isEmpty()){
+  String lines[2];
+  String current="";
+  int width=0;
+  const int maxWidth=306;
+  for(int pos=0;pos<(int)callCaption.length();){
+   int begin=pos;
+   uint32_t cp=decodeUTF8(callCaption,pos);
+   if(cp=='\\r')continue;
+   if(cp=='\\n'){
+    lines[0]=lines[1];lines[1]=current;
+    current="";width=0;continue;
+   }
+   int glyph=utfWidth(cp,1,1);
+   if(width+glyph>maxWidth && current.length()){
+    lines[0]=lines[1];lines[1]=current;
+    current="";width=0;
+   }
+   current+=callCaption.substring(begin,pos);
+   width+=glyph;
   }
-  richText(shown,6,y,1,1,CF_INK,316);
- };
- showLine(callCaptionPrevious,3);
- showLine(callCaption,16);
+  // Bring the newest wrapped line into the lower row.
+  if(current.length()){lines[0]=lines[1];lines[1]=current;}
+  if(lines[0].length())richText(lines[0],6,3,1,1,CF_INK,316);
+  if(lines[1].length())richText(lines[1],6,16,1,1,CF_INK,316);
+ }
 }
