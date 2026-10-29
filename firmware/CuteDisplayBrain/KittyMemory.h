@@ -16,7 +16,7 @@ static bool mounted=false;
 static volatile uint32_t saved=0, failed=0;
 static String recent[8];
 static uint8_t recentCount=0,recentNext=0;
-static portMUX_TYPE cacheLock=portMUX_INITIALIZER_UNLOCKED;
+static SemaphoreHandle_t cacheMutex=nullptr;
 
 // ASCII-safe UTF-8 truncation. Writes are bounded and never persist API keys.
 inline String clipUTF8(const String &s,size_t maxBytes){
@@ -31,11 +31,11 @@ inline String sanitize(String s,size_t maxBytes){
 }
 inline void addCache(const String &question,const String &answer){
  String line=sanitize(question,110)+" => "+sanitize(answer,160);
- portENTER_CRITICAL(&cacheLock);
+ if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return;
  recent[recentNext]=line;
  recentNext=(recentNext+1)%8;
  if(recentCount<8)recentCount++;
- portEXIT_CRITICAL(&cacheLock);
+ xSemaphoreGive(cacheMutex);
 }
 inline String recall(const String &question){
  // RAM-only recall: no SD access on the model request path.
@@ -43,7 +43,7 @@ inline String recall(const String &question){
  String q=question;q.toLowerCase();
  String result;
  // Search fragments longer than 3 characters for a conservative match.
- portENTER_CRITICAL(&cacheLock);
+ if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return "";
  for(int i=0;i<recentCount && result.length()<540;i++){
   int index=(recentNext+8-1-i)%8;
   String candidate=recent[index];
@@ -58,7 +58,7 @@ inline String recall(const String &question){
   }
   if(match)result+=candidate+"\n";
  }
- portEXIT_CRITICAL(&cacheLock);
+ xSemaphoreGive(cacheMutex);
  return clipUTF8(result,540);
 }
 inline bool queue(const String &question,const String &answer){
@@ -113,6 +113,7 @@ inline void task(void*){
  }
 }
 inline void init(){
+ if(!cacheMutex)cacheMutex=xSemaphoreCreateMutex();
  if(!writes)writes=xQueueCreate(10,sizeof(Entry));
  if(writes && !worker)
   xTaskCreatePinnedToCore(task,"kitty_sd",6144,nullptr,1,&worker,0);
