@@ -569,6 +569,16 @@ inline void tick(bool audioBusy){
              !failedCallId.isEmpty()){
     status("CALL_THINKING");
    }else{
+    // The provider has completed its response AND speaker PCM has drained.
+    // Restore the gentle default only now, never on a ten-second timer.
+    // Keep pendingMood until the main loop forwards it to the C5.
+    if(currentMood!=1){
+     currentMood=1;
+     pendingMood=1;
+     moodUpdatedAt=millis();
+     lastExplicitMoodAt=0;
+     Serial.println("[CALL FACE] response playback complete; reset mood=1");
+    }
     streamedSpeech=false;
     status("CALL_LISTENING");
    }
