@@ -28,4 +28,10 @@ RUN python /tmp/cutedisplay-memory-refresh.py --source-root /app --check && \
     python /tmp/cutedisplay-memory-refresh.py --source-root /app --apply && \
     python -m py_compile /app/backend/open_webui/routers/audio/realtime.py && \
     rm /tmp/cutedisplay-memory-refresh.py
+# Safe diagnostic classification: never log upstream provider exceptions or memory text.
+COPY server/patch_openwebui_bridge_diagnostics.py /tmp/kitty-bridge-diagnostics.py
+RUN python /tmp/kitty-bridge-diagnostics.py --source-root /app --check && \
+    python /tmp/kitty-bridge-diagnostics.py --source-root /app --apply && \
+    python -m py_compile /app/backend/open_webui/routers/audio/realtime.py && \
+    rm /tmp/kitty-bridge-diagnostics.py
 USER ${ORIGINAL_USER}
