@@ -85,10 +85,19 @@ inline String factSummary(size_t maxLen=700){
  String out;
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
  // Prioritize stable facts and newest entries without increasing context size.
- for(int i=0;i<factCount;i++){
-  String record=String(facts[i].key)+"\t"+facts[i].value+"\n";
-  if(out.length()+record.length()>maxLen)break;
-  out+=record;
+ // Keep stable identity and preferences ahead of the newest episodic notes.
+ // Fixed byte budget is unchanged as the archive grows.
+ for(int pass=0;pass<2;pass++){
+  int count=(int)factCount;
+  for(int n=0;n<count;n++){
+   int i=pass==0?n:(count-1-n);
+   String k(facts[i].key);
+   bool episodic=k.startsWith("note_")||k.startsWith("event_");
+   if((pass==0 && episodic)||(pass==1 && !episodic))continue;
+   String record=k+"\t"+facts[i].value+"\n";
+   if(out.length()+record.length()>maxLen)continue;
+   out+=record;
+  }
  }
  xSemaphoreGive(cacheMutex);return out;
 }
