@@ -514,6 +514,8 @@ const unsigned long WIFI_HOLD_MS = 1400UL;
 unsigned long wifiToastUntil = 0;
 bool wifiToastEnabled = false;
 static String kittyActivity; // short S3-reported status at bottom-left
+static uint32_t factSavedToastUntil=0;
+static constexpr uint32_t FACT_SAVED_TOAST_MS=3500UL;
 static String brainWifiToastLabel; // GUI feedback from S3, never from local C5 Wi-Fi.
 
 unsigned long lastScroll = 0;
@@ -2116,6 +2118,10 @@ void drawMessage() {
  if(!beginDrawing())return;
  if(callModeActive && !C5UARTOTA::active()){
   drawFullScreenKittyFace();
+  if(factSavedToastUntil && (int32_t)(factSavedToastUntil-millis())>0){
+   rect(119,LCD_H-18,116,17,0x18C3);
+   textAt("FACT MEMORIZED",124,LCD_H-14,1,0x07E0);
+  }
   drawBatteryOverlay(); // Right-button status remains available in Call Mode.
   drawBrainLinkOverlay();
   drawSDCardNotice();
@@ -2142,6 +2148,10 @@ void drawMessage() {
   else if(label=="CALL_ERROR")label="Call error";
   rect(0,LCD_H-13,104,13,BLACK);
   textAt(label,3,LCD_H-11,1,0x07FF);
+ }
+ if(factSavedToastUntil && (int32_t)(factSavedToastUntil-millis())>0){
+  rect(117,LCD_H-14,123,13,BLACK);
+  textAt("FACT MEMORIZED",123,LCD_H-11,1,0x07E0);
  }
  // Must be LAST so the warning cannot be covered by any other overlay,
  // including battery/charging popups or mascot animations.
@@ -2917,6 +2927,10 @@ static void serviceBrain() {
    wifiToastUntil=millis()+2500UL;
    if(lcdReady)redrawCurrent();
   }
+  else if(f.type=="FACT_SAVED"){
+   factSavedToastUntil=millis()+FACT_SAVED_TOAST_MS;
+   if(lcdReady)redrawCurrent();
+  }
   else if(f.type=="ACTIVITY"){
    String next=f.payload.substring(0,18);
    bool wasActive=callModeActive;
@@ -3228,6 +3242,9 @@ void loop(){
  }
  if(batteryOverlayUntil && (int32_t)(now-batteryOverlayUntil)>=0){
   batteryOverlayUntil=0;redrawCurrent();
+ }
+ if(factSavedToastUntil && (int32_t)(now-factSavedToastUntil)>=0){
+  factSavedToastUntil=0;if(lcdReady)redrawCurrent();
  }
  if(sdCardNoticeState && (int32_t)(now-sdCardNoticeUntil)>=0){
   sdCardNoticeState=0;if(lcdReady)redrawCurrent();
