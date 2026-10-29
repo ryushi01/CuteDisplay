@@ -36,6 +36,26 @@ inline bool configure(const String &cmd){
  Serial.printf("[S3 TIME] Zone selection=%u (POSIX TZ rule), clock remains UTC internally\n",(unsigned)zone);
  return true;
 }
+// Local calendar context is generated only from verified SNTP time.
+// The date (not seconds) changes the memory context once at local midnight.
+inline uint32_t localDayKey(){
+ if(!valid())return 0;
+ time_t now=time(nullptr);tm d={};localtime_r(&now,&d);
+ return (uint32_t)((d.tm_year+1900)*10000+(d.tm_mon+1)*100+d.tm_mday);
+}
+inline String calendarContext(){
+ if(!valid())return "";
+ time_t now=time(nullptr);tm d={};localtime_r(&now,&d);
+ static const char *weekdays[]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
+ char date[20];snprintf(date,sizeof(date),"%04d-%02d-%02d",d.tm_year+1900,d.tm_mon+1,d.tm_mday);
+ // A signed UTC offset avoids incorrect assumptions about DST.
+ char tz[12]={};strftime(tz,sizeof(tz),"%z",&d);
+ return String("Current local date: ")+date+" ("+weekdays[d.tm_wday]+
+  "), UTC offset "+tz+
+  ". Interpret today/yesterday/tomorrow relative to this local date. "
+  "A plan from a past day is historical, not automatically completed. "
+  "Preserve its original date, and never invent whether it happened.";
+}
 inline String localHHMM(){
  if(!valid())return "";
  time_t now=time(nullptr);tm local={};localtime_r(&now,&local);
