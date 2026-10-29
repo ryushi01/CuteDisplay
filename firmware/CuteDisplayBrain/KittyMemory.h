@@ -377,6 +377,12 @@ inline String preferenceKey(const String &kind,const String &value){
 inline bool isEpisodic(const String &key){
  return key.startsWith("note_")||key.startsWith("event_");
 }
+inline bool temporaryFact(const String &key){return key.startsWith("note_")||key.startsWith("event_")||key=="context_upcoming_plan";}
+inline uint32_t expiryForFact(const String &key){
+ time_t now=time(nullptr);
+ if(now<1700000000 || !temporaryFact(key))return 0;
+ return (uint32_t)now + 48UL*3600UL; // conservative provisional horizon
+}
 inline bool meaningfulPreferenceSubject(String subject);
 inline void mergeFact(const String &key,const String &value){
  if(!facts || !cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
@@ -394,6 +400,7 @@ inline void mergeFact(const String &key,const String &value){
    if(entry==String(facts[i].value)){xSemaphoreGive(cacheMutex);return;}
    entry.toCharArray(facts[i].value,sizeof(facts[i].value));
    if(factUpdated)factUpdated[i]=(uint32_t)time(nullptr);
+   if(factExpires)factExpires[i]=expiryForFact(key);
    factRevision++;
    xSemaphoreGive(cacheMutex);return;
   }
@@ -407,6 +414,7 @@ inline void mergeFact(const String &key,const String &value){
   finalKey.toCharArray(facts[factCount].key,sizeof(facts[factCount].key));
   stored.toCharArray(facts[factCount].value,sizeof(facts[factCount].value));
   if(factUpdated)factUpdated[factCount]=(uint32_t)time(nullptr);
+  if(factExpires)factExpires[factCount]=expiryForFact(key);
   factCount++;factRevision++;
  }else{
   // Fixed memory budget: rotate episodic notes first, preserving identity
