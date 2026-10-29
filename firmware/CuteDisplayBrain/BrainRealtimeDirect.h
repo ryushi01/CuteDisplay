@@ -404,6 +404,10 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   if(cJSON_IsString(id) && cJSON_IsString(transcript) &&
      transcript->valuestring && transcript->valuestring[0]){
    queueCaption("YOU: ",transcript->valuestring);
+   // Realtime voice often responds without delegated BrainAI chat;
+   // archive the transcript independently of whether delegation occurs.
+   // The answer may arrive later, but user facts must not be dropped.
+   KittyMemory::queue(String(transcript->valuestring),String("[voice transcript]"));
    String item(id->valuestring);
    if(remoteResponse || BrainRealtimeAudio::hasSpeakerAudio() ||
       !delegatedCallId.isEmpty() || !animationResponseId.isEmpty()){
