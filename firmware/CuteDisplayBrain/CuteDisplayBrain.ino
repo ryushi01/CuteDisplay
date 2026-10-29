@@ -743,7 +743,7 @@ static void consoleCommand(String cmd){
  if(cmd=="help"){
   Serial.println("[S3] call status / call diagnose / call start / call stop / call mood 0..15");
   Serial.println("[S3] c5 ota status (automatic OTA when a newer embedded C5 image is available)");
-  Serial.println("[S3] audio beep / audio diagnose / audio test / memory status");
+  Serial.println("[S3] audio beep / audio diagnose / audio test / memory status / memory format CONFIRM");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
   return;
  }
@@ -760,6 +760,13 @@ static void consoleCommand(String cmd){
  if(cmd=="audio test"){
   if(BrainC5OTA::updating())Serial.println("[AUDIO] Wait until C5 OTA completes");
   else BrainAudioTest::start();
+  return;
+ }
+ if(cmd=="memory format CONFIRM"){
+  bool accepted=KittyMemory::requestFormat();
+  Serial.println(accepted?
+    "[MEMORY] Format requested. This erases the complete SD card. Watch C5 status.":
+    "[MEMORY] Format refused: only allowed after SD mount failure.");
   return;
  }
  if(cmd=="memory status"){
@@ -1185,6 +1192,14 @@ void loop(){
   }
  }
  BrainAI::tick(Serial1,faceOnline && !BrainC5OTA::updating() && !activeSeq);
+ // SD status updates are tiny and do not block audio or SD I/O.
+ static uint8_t lastCardState=255;
+ uint8_t cardState=KittyMemory::status();
+ if(cardState!=lastCardState && faceOnline && !BrainC5OTA::updating()){
+  CuteLink::send(Serial1,++brainActivitySeq,"SD_STATE",String((int)cardState));
+  lastCardState=cardState;
+ }
+
  BrainRealtimeDirect::tick(BrainVoiceSTT::running || BrainTTS::running ||
                            BrainAudioTest::running || BrainC5OTA::updating());
  // Face Control is a lightweight S3->C5 UART side channel; the 24kHz I2S
