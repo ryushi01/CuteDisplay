@@ -1,4 +1,11 @@
-# CuteDisplay realtime voice barge-in (2026-10-29)
+# CuteDisplay realtime voice barge-in and noise suppression (2026-10-29)
+
+## Follow-up: call error on speech
+- One likely cause was a race between `response.done` and `response.cancel`: the server now checks its tracked unfinished response IDs before forwarding cancel.
+- S3 capture now uses adaptive background-noise floor gating, a DC filter, and stricter speaker-reference checks before triggering interruption (10 consecutive 20 ms frames, approximately 200 ms).
+- These DSP changes are **noise suppression and echo-aware detection**, **not** full acoustic echo cancellation (AEC). A true AEC requires a synchronized far-end reference with delay adaptation; do not claim it is installed.
+- If `CALL_ERROR` continues, collect the precise `[CALL]` serial reason and a sanitized backend traceback; this race is suspected, not proven from logs.
+
 
 This is a **direct feature implementation**, not an optional test mode. The existing hardware-validated baseline is preserved on `stable/2026-10-29-realtime-voice-hardware-validated` (commit `78d4abd9`).
 
