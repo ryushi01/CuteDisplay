@@ -801,6 +801,17 @@ inline void task(void*){
   Serial.printf("[MEMORY] SD mounted: total=%llu MB free~=%llu MB\n",
     (unsigned long long)(SD_MMC.totalBytes()/1048576ULL),
     (unsigned long long)((SD_MMC.totalBytes()-SD_MMC.usedBytes())/1048576ULL));
+  // Restore only the newest concise summary; the full history stays on SD.
+  File summaryFile=SD_MMC.open("/kitty/summaries.tsv",FILE_READ);
+  if(summaryFile){
+   if(summaryFile.size()>1024){summaryFile.seek(summaryFile.size()-1024);summaryFile.readStringUntil('\\n');}
+   while(summaryFile.available()){
+    String line=summaryFile.readStringUntil('\\n');
+    int tab=line.indexOf('\\t');
+    if(tab>=0 && tab+1<(int)line.length())latestSummary=sanitize(line.substring(tab+1),220);
+   }
+   summaryFile.close();
+  }
   // Restore only the most recent bounded cache; full archive stays on SD.
   File f=SD_MMC.open("/kitty/conversations.tsv",FILE_READ);
   if(f){
@@ -817,7 +828,20 @@ inline void task(void*){
  }
  Entry e={};
  SearchRequest query={};
+ String summaryBatch;
+ uint8_t summaryTurnCount=0;
  while(true){
+  // Apply completed summaries entirely on the SD task, never the network callback.
+  SummaryResult summary={};
+  if(mounted && summaryResults && xQueueReceive(summaryResults,&summary,0)==pdTRUE){
+   String item=sanitize(String(summary.text),220);
+   File f=SD_MMC.open("/kitty/summaries.tsv",FILE_APPEND);
+   if(f){f.printf("%lu\\t%s\\n",(unsigned long)time(nullptr),item.c_str());f.close();
+    if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
+     latestSummary=item;xSemaphoreGive(cacheMutex);
+    }
+   }
+  }
   // S3's network task proposes changes only; the SD worker owns persistence.
   ConsolidatedFact aiFact={};
   if(mounted && consolidatedFacts && xQueueReceive(consolidatedFacts,&aiFact,0)==pdTRUE){
@@ -899,6 +923,19 @@ inline void task(void*){
   bool ok=f.printf("%lu\t%s\t%s\n",(unsigned long)ts,e.question,e.answer)>0;
   f.close();
   if(ok){saved++;appendIndex(e,offset,ts);
+   // Batch user statements for an idle-only model summary. No model call or SD
+   // summary write occurs on the websocket or I2S execution path.
+   String snippet=sanitize(String(e.question),115);
+   if(summaryBatch.length()+snippet.length()+2>740){summaryBatch="";summaryTurnCount=0;}
+   if(!summaryBatch.isEmpty())summaryBatch+='\\n';
+   summaryBatch+=snippet;
+   if(++summaryTurnCount>=6){
+    if(summaryCandidates){
+     SummaryCandidate batch={};summaryBatch.toCharArray(batch.turns,sizeof(batch.turns));
+     (void)xQueueSend(summaryCandidates,&batch,0);
+    }
+    summaryBatch="";summaryTurnCount=0;
+   }
    if(consolidationCandidates && strlen(e.question)>=12){
     ConsolidationCandidate c={};strlcpy(c.utterance,e.question,sizeof(c.utterance));
     // Drop oldest if overloaded: never block speech or the SD archive.
@@ -944,6 +981,8 @@ inline void init(){
  if(!writes)writes=xQueueCreate(10,sizeof(Entry));
  if(!consolidationCandidates)consolidationCandidates=xQueueCreate(8,sizeof(ConsolidationCandidate));
  if(!consolidatedFacts)consolidatedFacts=xQueueCreate(8,sizeof(ConsolidatedFact));
+ if(!summaryCandidates)summaryCandidates=xQueueCreate(2,sizeof(SummaryCandidate));
+ if(!summaryResults)summaryResults=xQueueCreate(2,sizeof(SummaryResult));
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
  if(writes && !worker)
   xTaskCreatePinnedToCore(task,"kitty_sd",6144,nullptr,1,&worker,0);
