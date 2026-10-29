@@ -491,10 +491,10 @@ bool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false,voi
 // Long hold retains legacy manual PTT only when Call Mode is off.
 bool callModeActive=false;
 // Transient full-screen call artwork state; normal user settings are untouched.
-static uint8_t callFaceMood=1; // neutral 0, happy 1, sad 2, angry 3 ...
+static uint8_t callFaceMood=0; // neutral 0, happy 1, sad 2, angry 3 ...
 static uint8_t callLipLevel=0; // S3 speaker PCM intensity 0..9
 static uint32_t callFaceMoodSince=0,callLipAt=0;
-static constexpr uint32_t CALL_MOOD_HOLD_MS=10000UL;
+// Realtime expressions are held for the response, never timed out mid-speech.
 unsigned long voiceButtonChangedAt=0,voiceButtonHeldAt=0;
 bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
@@ -2840,7 +2840,7 @@ static void serviceBrain() {
    continue;
   }
   if(f.type=="HELLO"){
-   callModeActive=false;callFaceMood=1;callLipLevel=0;
+   callModeActive=false;callFaceMood=0;callLipLevel=0;
    // Remote reboot: require a NEW successful round trip.
    lastProbeAck=0;
    resetCmdParts();
@@ -2883,7 +2883,7 @@ static void serviceBrain() {
    bool wasActive=callModeActive;
    if(next.startsWith("CALL_"))callModeActive=next!="CALL_OFF" && next!="CALL_ERROR";
    else if(next.isEmpty())callModeActive=false;
-   if(!callModeActive){callFaceMood=1;callLipLevel=0;}
+   if(!callModeActive){callFaceMood=0;callLipLevel=0;}
    if(next!=kittyActivity || wasActive!=callModeActive){
     kittyActivity=next;if(lcdReady)redrawCurrent();
    }
@@ -2958,7 +2958,7 @@ static void serviceBrain() {
  }
  uint32_t now=millis();
  if(s3Online&&(uint32_t)(now-lastS3)>BRAIN_LOST_MS){
-  callModeActive=false;callFaceMood=1;callLipLevel=0;
+  callModeActive=false;callFaceMood=0;callLipLevel=0;
   s3Online=false;
   lastProbeAck=0;
   pendingProbeSeq=0;
@@ -3129,7 +3129,7 @@ void loop(){
      toS3("CALL_TOGGLE");
      // Optimistic local state for the very next press, corrected by S3 ACTIVITY.
      callModeActive=!callModeActive;
-     callFaceMood=1;callFaceMoodSince=now;callLipLevel=0;
+     callFaceMood=0;callFaceMoodSince=now;callLipLevel=0;
      if(lcdReady)redrawCurrent();
     }
    }
@@ -3170,9 +3170,8 @@ void loop(){
  if(callModeActive){
   // Return to a gentle default if no more AI gestures arrive. Silence and
   // link drops cannot leave an open speaking mouth stuck on the face.
-  if(callFaceMood!=1 && (uint32_t)(now-callFaceMoodSince)>=CALL_MOOD_HOLD_MS){
-   callFaceMood=1;if(lcdReady)redrawCurrent();
-  }
+  // S3 sends CALL_MOOD=0 after the response and speaker drain. Never expire
+  // a speaking expression based only on elapsed wall-clock time.
   if(callLipLevel && (uint32_t)(now-callLipAt)>500UL){
    callLipLevel=0;if(lcdReady)redrawCurrent();
   }
