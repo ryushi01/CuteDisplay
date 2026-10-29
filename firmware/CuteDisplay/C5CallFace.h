@@ -201,23 +201,20 @@ static void drawFullScreenKittyFace(){
  oval(x+8,160,8,8,CF_INK);oval(x+width-8,160,8,8,CF_INK);
  rect(x+8,152,width-16,17,CF_INK);
  textAt(label,x+12,155,1,CF_WHITE);
- // Floating two-line conversation text on the bright face background.
- // Reuse the speech-bubble UTF-8 renderer, but avoid a black panel.
- // As new text arrives, its tail moves upwards through the two-line window.
- if(!callCaption.isEmpty()){
-  const int maxChars=88;
-  String shown=callCaption;
-  if(shown.length()>maxChars){
-   int begin=shown.length()-maxChars;
-   while(begin<shown.length() && ((uint8_t)shown[begin]&0xC0)==0x80)begin++;
-   shown=shown.substring(begin);
-  }
-  const int split=shown.length()>44?shown.length()-44:0;
-  if(split>0){
-   int cut=split;
+ // Two lines of chronological conversation at the top. New lines arrive
+ // at the lower row and push the older line upward (speech-bubble style).
+ // Black text directly on the bright face, without any caption panel.
+ auto showLine=[&](const String &source,int y){
+  if(source.isEmpty())return;
+  String shown=source;
+  // Clip from the UTF-8 leading edge to keep the newest part of a line.
+  if(shown.length()>49){
+   int cut=shown.length()-49;
    while(cut<shown.length() && ((uint8_t)shown[cut]&0xC0)==0x80)cut++;
-   richText(shown.substring(0,cut),8,5,1,1,CF_INK,312);
-   richText(shown.substring(cut),8,16,1,1,CF_INK,312);
-  }else richText(shown,8,5,1,1,CF_INK,312);
- }
+   shown=shown.substring(cut);
+  }
+  richText(shown,6,y,1,1,CF_INK,316);
+ };
+ showLine(callCaptionPrevious,3);
+ showLine(callCaption,16);
 }
