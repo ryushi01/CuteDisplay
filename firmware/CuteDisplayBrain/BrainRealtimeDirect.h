@@ -355,6 +355,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   if(!profile.isEmpty()){if(!facts.isEmpty())facts+='\n';facts+=profile;}
   String summary=KittyMemory::latestSummaryContext(170);
   if(!summary.isEmpty()){if(!facts.isEmpty())facts+='\n';facts+="recent_summary: "+summary;}
+  facts=KittyMemory::clipUTF8(facts,810);
   if(!facts.isEmpty())cJSON_AddStringToObject(auth,"kitty_sd_memory",facts.c_str());
   char* json=cJSON_PrintUnformatted(auth);
   cJSON_Delete(auth);
