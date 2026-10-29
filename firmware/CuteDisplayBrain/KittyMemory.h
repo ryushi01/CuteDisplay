@@ -165,8 +165,39 @@ inline bool extractFact(String utterance,String &key,String &value){
  utterance.trim();if(utterance.length()<5)return false;
  String lower=utterance;lower.toLowerCase();
  int pos=-1,skip=0;
- for(const char* marker:{"my name is ","call me ","i am called ","je m’appelle ","je m'appelle ","私の名前は","名前は"}){
+ for(const char* marker:{"my name is ","my name's ","i am called ","i'm called ","you can call me ","please call me ","call me ","i go by ","everyone calls me ","people call me ","je m’appelle ","je m'appelle ","私の名前は","名前は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
+ }
+ // Plain English "I'm Shana"/"I am Shana" is an introduction only when
+ // the remaining words form a short name, not a sentence about an activity.
+ if(pos<0 && lower.indexOf('?')<0 && lower.indexOf("？")<0){
+  for(const char* marker:{"i'm ","i’m ","i am "}){
+   if(!lower.startsWith(marker))continue;
+   String candidate=utterance.substring(strlen(marker));candidate.trim();
+   for(const char* tail:{".","!","。","です"})if(candidate.endsWith(tail))
+    candidate.remove(candidate.length()-strlen(tail));
+   candidate.trim();
+   String c=candidate;c.toLowerCase();
+   bool sentence=false;
+   for(const char* word:{"busy","working","going","feeling","happy","sad",
+     "tired","hungry","at ","in ","on ","from ","with ","not ","very ",
+     "a ","an ","the ","here","there","doing","looking","trying",
+     "planning","thinking","sorry","ready","fine","good","sick"}){
+    if(c==word || c.startsWith(word)){sentence=true;break;}
+   }
+   int spaces=0;bool letters=true;
+   for(size_t i=0;i<candidate.length();i++){
+    char ch=candidate[i];
+    if(ch==' ')spaces++;
+    else if(!((ch>='A' && ch<='Z')||(ch>='a' && ch<='z')||ch=='-'||ch=='\'')){
+     letters=false;break;
+    }
+   }
+   if(!sentence && letters && spaces<=2 && candidate.length()>=2 && candidate.length()<=40){
+    key="name";value=candidate;pos=-2;
+   }
+   break;
+  }
  }
  // Self-introduction without the literal word 'name'.
  if(pos<0){
@@ -288,11 +319,12 @@ inline bool extractFact(String utterance,String &key,String &value){
  }
  value.trim();
  if(key=="name"){
-  // Trim spoken Japanese identity endings and French self-introduction.
+  // Trim multilingual self-introduction endings.
   for(const char* suffix:{"と申します","といいます","と言います","です","だよ","だ","って呼んで","と呼んで"}){
    if(value.endsWith(suffix)){value.remove(value.length()-strlen(suffix));break;}
   }
   if(value.startsWith("シャナ") || value.startsWith("しゃな"))value="Shana";
+  for(const char* suffix:{" please"," okay"," ok"})if(value.endsWith(suffix))value.remove(value.length()-strlen(suffix));
   value.trim();
  }
  // Do not chop off a UTF-8 scalar or store a sprawling paragraph.
