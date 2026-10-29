@@ -67,3 +67,11 @@
 - The indexed conversation archive remains on the S3 microSD. A fixed 24-entry in-RAM fact/note cache feeds an at-most-700-byte summary for realtime calls; only a bounded excerpt is sent over the WebSocket, so model prompt size does not grow with historical archive size.
 - The separate historical search remains capped at 40 ms and three selected archive matches with an at-most-850-byte context budget.
 - This heuristic capture is **not** equivalent to true semantic extraction or consolidation. It can save incomplete, redundant or irrelevant notes and does not yet guarantee robust correction/merging across arbitrary topics. Please test before trusting it as a complete memory system.
+
+## Memory consolidation v2
+- Durable name, home, and work slots update on explicit correction.
+- English 'my SUBJECT is VALUE' uses a normalized subject-specific slot; a later value replaces the previous one.
+- Multiple preference subjects coexist. Exact normalized 'like / dislike' corrections supersede the earlier preference for that subject.
+- Identical recent notes are deduplicated in the 24-slot RAM cache, and brief episodic notes rotate; original conversation history remains on SD.
+- Each new note is at most 112 UTF-8 bytes, realtime fact summary at most 700 bytes; relevant historical search remains capped at 40 ms. Stable facts have priority over newest notes.
+- LIMITATION: rule-based matching is not true semantic similarity. Paraphrases, implicit corrections, and references to the same subject under different names may not consolidate. No persistent server storage is introduced.
