@@ -165,8 +165,14 @@ inline bool extractFact(String utterance,String &key,String &value){
  utterance.trim();if(utterance.length()<5)return false;
  String lower=utterance;lower.toLowerCase();
  int pos=-1,skip=0;
- for(const char* marker:{"my name is ","call me ","i am called ","je m’appelle ","je m'appelle ","私の名前は","名前は","私は","僕は"}){
+ for(const char* marker:{"my name is ","call me ","i am called ","je m’appelle ","je m'appelle ","私の名前は","名前は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
+ }
+ // Self-introduction without the literal word 'name'.
+ if(pos<0){
+  for(const char* marker:{"私はシャナ","僕はシャナ","わたしはシャナ","私はしゃな","僕はしゃな"}){
+   if(lower.startsWith(marker)){key="name";value="Shana";pos=-2;break;}
+  }
  }
  if(pos<0)for(const char* marker:{"i live in ","i moved to ","i now live in ","j'habite à ","j'habite a ","住んでいるのは"}){
   pos=lower.indexOf(marker);if(pos>=0){key="home";skip=strlen(marker);break;}
