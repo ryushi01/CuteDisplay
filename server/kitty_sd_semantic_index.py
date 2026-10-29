@@ -1,68 +1,156 @@
 #!/usr/bin/env python3
-"""Optional multilingual semantic search over SD-exported Kitty memory.
+"""CPU-only semantic index for a read-only export of Kitty's microSD.
 
-Runs on Ubuntu/Mac, not ESP32 audio tasks. Data is sourced from a read-only
-copy of Kitty's SD TSV files; the microSD remains canonical. No automatic
-migration, deletion, upload, or network model calls are performed.
+The S3 microSD remains authoritative. This SQLite database is a disposable
+derived cache, never a second writable memory authority. No remote downloads
+except the embedding model's initial local cache download.
 """
-import argparse, json, math, os, pathlib, sqlite3
-from datetime import datetime
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import threading
+
+DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+_MODEL_CACHE = {}
+_MODEL_LOCK = threading.RLock()
+
+def get_model(name=DEFAULT_MODEL):
+    # Warm one CPU model for HTTP requests rather than loading per search.
+    with _MODEL_LOCK:
+        if name not in _MODEL_CACHE:
+            from sentence_transformers import SentenceTransformer
+            _MODEL_CACHE[name] = SentenceTransformer(name, device="cpu")
+        return _MODEL_CACHE[name]
 
 def load_rows(sd):
-    sd=pathlib.Path(sd)
-    for filename in ("facts.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv"):
-        path=sd/"kitty"/filename
-        if not path.is_file():continue
-        with path.open(encoding="utf-8",errors="replace") as f:
-            for i,line in enumerate(f):
-                parts=line.rstrip("\n").split("\t")
-                if filename=="facts.tsv" and len(parts)>=2:
-                    key,text=parts[0],parts[1]
-                elif filename=="dated_plans.tsv" and len(parts)>=3:
-                    key,text=parts[1],parts[2]
-                elif filename=="summaries.tsv" and len(parts)>=2:
-                    key,text="summary:"+parts[0],parts[1]
-                elif filename=="conversations.tsv" and len(parts)>=3:
-                    key,text="conversation:"+parts[0],parts[1]+" "+parts[2]
-                else:continue
-                if key and text:
-                    yield f"{filename}:{i}:{key}",f"{key}: {text}"
+    root = Path(sd) / "kitty"
+    for filename in ("facts.tsv", "dated_plans.tsv", "summaries.tsv", "conversations.tsv"):
+        path = root / filename
+        if not path.is_file():
+            continue
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for i, line in enumerate(handle):
+                parts = line.rstrip("\r\n").split("\t")
+                if filename == "facts.tsv" and len(parts) >= 2:
+                    key, value = parts[0], parts[1]
+                elif filename == "dated_plans.tsv" and len(parts) >= 3:
+                    key, value = parts[1], parts[2]
+                elif filename == "summaries.tsv" and len(parts) >= 2:
+                    key, value = "summary:" + parts[0], parts[1]
+                elif filename == "conversations.tsv" and len(parts) >= 3:
+                    key, value = "conversation:" + parts[0], parts[1] + " " + parts[2]
+                else:
+                    continue
+                if key and value:
+                    yield f"{filename}:{i}:{key}", f"{key}: {value}"
 
-def build(sd,out,model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"):
-    from sentence_transformers import SentenceTransformer
-    model=SentenceTransformer(model_name,device="cpu")
-    rows=list(load_rows(sd))
-    db=sqlite3.connect(out)
-    db.execute("CREATE TABLE IF NOT EXISTS vectors (id TEXT PRIMARY KEY,text TEXT NOT NULL,embedding TEXT NOT NULL)")
-    db.execute("DELETE FROM vectors")
-    for start in range(0,len(rows),64):
-        chunk=rows[start:start+64]
-        embeds=model.encode([x[1] for x in chunk],normalize_embeddings=True,batch_size=16)
-        db.executemany("INSERT INTO vectors VALUES (?,?,?)",[
-            (item[0],item[1],json.dumps(vec.tolist(),separators=(",",":"))) for item,vec in zip(chunk,embeds)])
-    db.commit();db.close()
-    return len(rows)
+def _connect(path):
+    db = sqlite3.connect(str(path), timeout=10)
+    db.execute("PRAGMA busy_timeout=10000")
+    db.execute("""CREATE TABLE IF NOT EXISTS semantic_v6 (
+      id TEXT PRIMARY KEY, text TEXT NOT NULL, digest TEXT NOT NULL,
+      vector BLOB NOT NULL, model TEXT NOT NULL, generation INTEGER NOT NULL
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS semantic_v6_generation ON semantic_v6(generation)")
+    return db
 
-def search(db_path,query,k=5,model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"):
-    from sentence_transformers import SentenceTransformer
+def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
+    """Incrementally refresh derived index. Writes commit only after each batch.
+
+    On interruption, next build repairs any partial generation; searches can
+    continue to use the last complete generation.
+    """
     import numpy as np
-    model=SentenceTransformer(model_name,device="cpu")
-    query_vec=model.encode([query],normalize_embeddings=True)[0]
-    db=sqlite3.connect(db_path)
-    scores=[]
-    for id,text,raw in db.execute("SELECT id,text,embedding FROM vectors"):
-        vec=np.array(json.loads(raw),dtype="float32")
-        score=float(np.dot(query_vec,vec))
-        scores.append((score,id,text))
-    db.close()
-    return [{"score":round(score,4),"id":id,"text":text} for score,id,text in sorted(scores,reverse=True)[:max(1,min(k,10))]]
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    model = get_model(model_name)
+    with _connect(out) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS semantic_meta (key TEXT PRIMARY KEY, value TEXT)")
+        active_row = db.execute("SELECT value FROM semantic_meta WHERE key='active'").fetchone()
+        active = int(active_row[0]) if active_row else 0
+        next_gen = active + 1
+        # Interrupted build rows are discarded, not offered to live searches.
+        db.execute("DELETE FROM semantic_v6 WHERE generation NOT IN (?,?)", (active, next_gen))
+        db.execute("DELETE FROM semantic_v6 WHERE generation=?", (next_gen,))
+        db.commit()
+        current = {row[0]: row[1:] for row in db.execute(
+            "SELECT id,digest,vector,model FROM semantic_v6 WHERE generation=?", (active,))}
+        count, reused, changed = 0, 0, 0
+        batch = []
+        def flush():
+            nonlocal changed
+            if not batch:
+                return
+            texts = [x[2] for x in batch]
+            with _MODEL_LOCK:
+                vectors = model.encode(texts, normalize_embeddings=True, batch_size=16)
+            db.executemany("INSERT OR REPLACE INTO semantic_v6 VALUES (?,?,?,?,?,?)",
+                [(id, text, digest, np.asarray(vec, dtype="<f4").tobytes(), model_name, next_gen)
+                 for (id, digest, text), vec in zip(batch, vectors)])
+            changed += len(batch)
+            batch.clear()
+            db.commit()
+        for id, value in load_rows(sd):
+            count += 1
+            digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+            old = current.get(id)
+            if old and old[0] == digest and old[2] == model_name:
+                db.execute("INSERT OR REPLACE INTO semantic_v6 VALUES (?,?,?,?,?,?)",
+                           (id, value, digest, old[1], model_name, next_gen))
+                reused += 1
+            else:
+                batch.append((id, digest, value))
+                if len(batch) >= batch_size:
+                    flush()
+        flush()
+        db.execute("INSERT OR REPLACE INTO semantic_meta VALUES ('active', ?)", (str(next_gen),))
+        db.commit()
+        db.execute("DELETE FROM semantic_v6 WHERE generation!=?", (next_gen,))
+        db.commit()
+    return {"indexed":count, "embedded":changed, "reused":reused, "model":model_name}
+
+def search(db_path, query, k=5, model_name=DEFAULT_MODEL):
+    """Return bounded semantic results. Never modify source memories."""
+    import numpy as np
+    if not query or not query.strip() or len(query)>1000:
+        return []
+    if not os.path.isfile(db_path):
+        raise FileNotFoundError(db_path)
+    model = get_model(model_name)
+    with _MODEL_LOCK:
+        q = np.asarray(model.encode([query], normalize_embeddings=True)[0], dtype=np.float32)
+    results = []
+    with _connect(db_path) as db:
+        active_row = db.execute("SELECT value FROM semantic_meta WHERE key='active'").fetchone() if _has_meta(db) else None
+        if not active_row:
+            return []
+        for id, text, raw, model_used in db.execute(
+            "SELECT id,text,vector,model FROM semantic_v6 WHERE generation=?", (int(active_row[0]),)):
+            if model_used != model_name:
+                continue
+            vec = np.frombuffer(raw, dtype="<f4")
+            if vec.shape != q.shape:
+                continue
+            results.append((float(np.dot(q, vec)), id, text))
+    results.sort(reverse=True)
+    return [{"score": round(score,4), "id":id, "text":text}
+            for score,id,text in results[:max(1,min(int(k),10))]]
+
+def _has_meta(db):
+    return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='semantic_meta'").fetchone() is not None
 
 def main():
-    ap=argparse.ArgumentParser()
-    sub=ap.add_subparsers(dest="command",required=True)
-    a=sub.add_parser("build");a.add_argument("--sd-copy",required=True);a.add_argument("--db",required=True)
-    b=sub.add_parser("search");b.add_argument("--db",required=True);b.add_argument("--query",required=True);b.add_argument("--limit",type=int,default=5)
-    x=ap.parse_args()
-    if x.command=="build":print(json.dumps({"indexed":build(x.sd_copy,x.db)}))
-    else:print(json.dumps({"results":search(x.db,x.query,x.limit)},ensure_ascii=False))
-if __name__=="__main__":main()
+    p=argparse.ArgumentParser()
+    sub=p.add_subparsers(dest="command",required=True)
+    a=sub.add_parser("build"); a.add_argument("--sd-copy",required=True); a.add_argument("--db",required=True)
+    b=sub.add_parser("search"); b.add_argument("--db",required=True); b.add_argument("--query",required=True)
+    b.add_argument("--limit",type=int,default=5)
+    args=p.parse_args()
+    if args.command=="build":
+        print(json.dumps(build(args.sd_copy,args.db)))
+    else:
+        print(json.dumps({"results":search(args.db,args.query,args.limit)},ensure_ascii=False))
+if __name__=="__main__":
+    main()
