@@ -111,7 +111,7 @@ inline String recall(const String &question){
 }
 
 struct Fact { char key[32]; char value[192]; };
-static constexpr size_t MAX_FACTS=256;
+static constexpr size_t MAX_FACTS=512; // PSRAM bounded cache; full history remains SD-backed
 static Fact *facts=nullptr; // PSRAM catalog; SD remains durable
 // Future lifecycle metadata will be stored alongside the catalog.
 static uint32_t *factUpdated=nullptr;
@@ -865,6 +865,25 @@ inline void searchOnSD(const SearchRequest &q){
    }
   }
  }
+ // Scan older index rows directly from SD if they exceed the PSRAM
+ // window. This is background-only and yields frequently to audio.
+ File older=SD_MMC.open("/kitty/memory.idx",FILE_READ);
+ if(older && older.size()>INDEX_MAX*sizeof(IndexRow)){
+  const size_t oldRows=(older.size()/sizeof(IndexRow))-INDEX_MAX;
+  for(size_t i=0;i<oldRows;i++){
+   IndexRow row={};
+   if(older.read((uint8_t*)&row,sizeof(row))!=sizeof(row))break;
+   if((i&255)==0)vTaskDelay(1);
+   int score=__builtin_popcount(row.terms&bits);
+   if(topics && (row.topics&topics))score+=12;
+   if(!topics || !(row.topics&topics) || score<12)continue;
+   for(int k=0;k<3;k++)if(score>best[k].score){
+    for(int j=2;j>k;j--)best[j]=best[j-1];
+    best[k]={score,row.offset};break;
+   }
+  }
+ }
+ if(older)older.close();
  String result;
  // SD-backed date lookup: recent dated-plan history remains retrievable
  // even after a plan rotates out of the fixed PSRAM fact cache.
@@ -873,9 +892,7 @@ inline void searchOnSD(const SearchRequest &q){
   bool exactDate=anchorDatedPlan(query,dateKey,dateValue);
   File plans=SD_MMC.open("/kitty/dated_plans.tsv",FILE_READ);
   if(plans){
-   // Bound SD work. This scans the recent tail, not the complete lifetime archive.
-   size_t size=plans.size();
-   if(size>16384){plans.seek(size-16384);plans.readStringUntil('\n');}
+   // The SD task scans complete historical plans; no RAM-sized history cap.
    String latest[3];
    while(plans.available()){
     String line=plans.readStringUntil('\n');
