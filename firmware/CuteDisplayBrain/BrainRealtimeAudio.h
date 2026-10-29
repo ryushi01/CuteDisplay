@@ -182,8 +182,11 @@ static void audioTask(void *){
   i2s_chan_config_t channel=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
   // 8 x 480 stereo 32-bit frames would reserve ~30KB internal DMA per
   // direction (60KB duplex). After TLS that frequently exhausts DRAM.
-  // 8 x 120 is ~7.5KB/direction and still gives 40ms DMA slack.
-  channel.dma_desc_num=8;
+  // Use smaller DMA-capable internal allocations per direction. The audio
+  // task transfers 10ms frames and handles speaker bursts in the PSRAM ring.
+  // Four 120-frame descriptors give 20ms DMA slack per direction; this keeps
+  // the same frame size while halving persistent DMA descriptor demand.
+  channel.dma_desc_num=4;
   channel.dma_frame_num=120;
   esp_err_t rc=i2s_new_channel(&channel,&tx,&rx);
   if(rc!=ESP_OK){reportError("CHANNEL_ALLOC",rc);break;}
