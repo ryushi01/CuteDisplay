@@ -60,3 +60,10 @@
 - Long-term event extraction captures simple explicit future plans, dates, purchases, projects, past events and requests to remember (not restricted to food). For example, "the day after tomorrow I will eat Belgian moules" remains an episodic note rather than attempting to classify the dish into a food preference.
 - Most important: event extraction is currently pattern based. This does not equal full open-ended, reasoning-driven memory; ambiguous paraphrases may still be missed.
 - Structured facts are persisted in full in /kitty/facts.tsv. AI receives only a bounded contextual slice.
+
+## Bounded, cross-topic memory capture
+- Explicit "remember this" commands and personal declarative statements may become short stored notes regardless of food, travel, work or other categories. The rule is intentionally conservative about routine questions and greetings.
+- Single note text is truncated safely to at most 112 UTF-8 bytes; long prose is not added to the realtime model context.
+- The indexed conversation archive remains on the S3 microSD. A fixed 24-entry in-RAM fact/note cache feeds an at-most-700-byte summary for realtime calls; only a bounded excerpt is sent over the WebSocket, so model prompt size does not grow with historical archive size.
+- The separate historical search remains capped at 40 ms and three selected archive matches with an at-most-850-byte context budget.
+- This heuristic capture is **not** equivalent to true semantic extraction or consolidation. It can save incomplete, redundant or irrelevant notes and does not yet guarantee robust correction/merging across arbitrary topics. Please test before trusting it as a complete memory system.
