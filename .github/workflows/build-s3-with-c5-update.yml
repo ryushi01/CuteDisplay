@@ -3,7 +3,7 @@ name: Build combined S3 + C5 firmware
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/s3-ai-streaming, feature/wav-only-baseline-candidate, feature/c5-unicode-font-coverage, feature/c5-color-emoji-v16, feature/uart-ota-fast-v17, feature/c5-uniform-chat-font-v18, feature/c5-v19-selective-font-fix, feature/c5-v20-latin-glyph-priority, feature/c5-v21-latin-composed-accents, feature/realtime-call-c5v21, feature/realtime-kitty-fullscreen-expressions, feature/idle-ai-memory-consolidation, feature/semantic-sd-facts, feature/dual-core-scheduling, feature/memory-v2-lifecycle, feature/kitty-temporal-awareness, feature/kitty-sd-brain-v3, feature/kitty-sd-brain-v4-persona]
+    branches: [main, feature/s3-ai-streaming, feature/wav-only-baseline-candidate, feature/c5-unicode-font-coverage, feature/c5-color-emoji-v16, feature/uart-ota-fast-v17, feature/c5-uniform-chat-font-v18, feature/c5-v19-selective-font-fix, feature/c5-v20-latin-glyph-priority, feature/c5-v21-latin-composed-accents, feature/realtime-call-c5v21, feature/realtime-kitty-fullscreen-expressions, feature/idle-ai-memory-consolidation, feature/semantic-sd-facts, feature/dual-core-scheduling, feature/memory-v2-lifecycle, feature/kitty-temporal-awareness, feature/kitty-sd-brain-v3, feature/kitty-sd-brain-v4-persona, feature/kitty-memory-v5-fullstack]
     paths:
       - ".github/workflows/build-s3-with-c5-update.yml"
       - "tools/build_s3_with_c5_update.sh"
@@ -32,6 +32,12 @@ jobs:
 
       - name: Verify opt-in Kitty live memory refresh gateway patch
         run: python3 server/test_patch_openwebui_memory_refresh.py
+
+      - name: Compile optional server memory tools and run storage regression tests
+        run: |
+          python3 -m py_compile server/kitty_memory_service.py server/kitty_calendar.py server/kitty_sd_semantic_index.py server/patch_openwebui_memory_refresh.py
+          python3 -m unittest server.test_kitty_memory_service
+          python3 server/test_patch_openwebui_memory_refresh.py
 
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
