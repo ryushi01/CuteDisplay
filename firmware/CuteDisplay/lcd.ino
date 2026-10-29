@@ -2116,6 +2116,7 @@ void drawMessage() {
  if(!beginDrawing())return;
  if(callModeActive && !C5UARTOTA::active()){
   drawFullScreenKittyFace();
+  drawBatteryOverlay(); // Right-button status remains available in Call Mode.
   drawBrainLinkOverlay();
   drawSDCardNotice();
   finishDrawing();
