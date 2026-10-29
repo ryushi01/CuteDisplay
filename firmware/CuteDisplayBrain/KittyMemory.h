@@ -602,9 +602,17 @@ inline void task(void*){
   ConsolidatedFact aiFact={};
   if(mounted && consolidatedFacts && xQueueReceive(consolidatedFacts,&aiFact,0)==pdTRUE){
    String kind(aiFact.key),subject(aiFact.value);
-   if((kind=="likes"||kind=="dislikes") && meaningfulPreferenceSubject(subject)){
+   bool preference=(kind=="likes"||kind=="dislikes") && meaningfulPreferenceSubject(subject);
+   int colon=subject.indexOf(':');
+   String topic=colon>0?subject.substring(0,colon):String("");
+   String detail=colon>0?subject.substring(colon+1):String("");
+   bool situation=kind=="situation" && (topic=="work_availability" ||
+     topic=="upcoming_plan" || topic=="hobby") && detail.length()>=5 &&
+     detail.length()<=90 && detail.indexOf('?')<0;
+   if(preference || situation){
     uint32_t before=factRevision;
-    mergeFact(kind,subject);
+    if(preference)mergeFact(kind,subject);
+    else mergeFact("context_"+topic,detail);
     if(factRevision!=before){
      if(persistFacts())memorizedNoticeSeq++;
      Serial.printf("[MEMORY AI] consolidated %s\n",kind.c_str());
