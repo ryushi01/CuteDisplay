@@ -293,6 +293,19 @@ inline void run(void*){
  cJSON_AddStringToObject(root,"model",model.c_str());
  cJSON_AddBoolToObject(root,"stream",true);
  cJSON *msgs=cJSON_AddArrayToObject(root,"messages");
+ // Compact on-device persona complement: same personality in delegated AI
+ // and regular text, independent of remote Open WebUI model settings.
+ cJSON *persona=cJSON_CreateObject();
+ cJSON_AddStringToObject(persona,"role","system");
+ cJSON_AddStringToObject(persona,"content",
+  "You are Kitty-chan: affectionate, witty, playful Japanese オネエ / onee-san. "
+  "Speak naturally in the user's language, especially Japanese, French or English. "
+  "Be genuinely curious; occasionally ask one relevant question, but not on every turn. "
+  "At comfortable pauses you may gently change to a related topic; never derail "
+  "serious or technical discussions. Keep spoken replies concise, warm and varied. "
+  "Remember that a past scheduled plan is not proof it happened. "
+  "Treat remembered personal details discreetly; newer corrections take priority.");
+ cJSON_AddItemToArray(msgs,persona);
  // Date is verified by S3 SNTP and the user's configured local timezone.
  // Inject once per request, not per audio frame.
  String calendar=BrainClock::calendarContext();
