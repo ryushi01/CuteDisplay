@@ -22,4 +22,5 @@
 // v30: smooth 200ms expression transitions while retaining live lip sync.
 // v31: width-aware UTF-8 caption wrapping and segmented UART text scrolling.
 // v32: sixteen full-screen Kitty moods with two-digit UART IDs.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 32;
+// v33: SD card formatting, ready, and error popups during Kitty calls.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 33;
