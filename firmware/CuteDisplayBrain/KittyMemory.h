@@ -866,6 +866,34 @@ inline void searchOnSD(const SearchRequest &q){
   }
  }
  String result;
+ // SD-backed date lookup: recent dated-plan history remains retrievable
+ // even after a plan rotates out of the fixed PSRAM fact cache.
+ if(topics&(1UL<<9)){
+  String dateKey="context_upcoming_plan",dateValue=query;
+  bool exactDate=anchorDatedPlan(query,dateKey,dateValue);
+  File plans=SD_MMC.open("/kitty/dated_plans.tsv",FILE_READ);
+  if(plans){
+   // Bound SD work. This scans the recent tail, not the complete lifetime archive.
+   size_t size=plans.size();
+   if(size>16384){plans.seek(size-16384);plans.readStringUntil('\n');}
+   String latest[3];
+   while(plans.available()){
+    String line=plans.readStringUntil('\n');
+    int first=line.indexOf('\t'),second=line.indexOf('\t',first+1);
+    if(first<0||second<0)continue;
+    String id=line.substring(first+1,second);
+    if(!id.startsWith("dated_plan_"))continue;
+    if(exactDate && !id.startsWith(dateKey.substring(0,22)))continue;
+    latest[0]=latest[1];latest[1]=latest[2];latest[2]=line.substring(second+1);
+    if((plans.position()&2047)==0)vTaskDelay(1);
+   }
+   plans.close();
+   for(int i=0;i<3;i++)if(!latest[i].isEmpty()){
+    String piece=latest[i]+"\n";
+    if(result.length()+piece.length()<=550)result+=piece;
+   }
+  }
+ }
  File archive=SD_MMC.open("/kitty/conversations.tsv",FILE_READ);
  if(archive){
   for(int i=0;i<3;i++){
