@@ -29,15 +29,36 @@ static bool remoteResponse=false, streamedSpeech=false;
 static bool bargeCancelling=false;
 static String deferredVoiceItem;
 static String captionPending;
+static size_t captionOffset=0;
 static bool captionReady=false;
-inline bool takeCaption(String &out){if(!captionReady)return false;out=captionPending;captionReady=false;return true;}
+// Chunk long UTF-8 captions into the existing 80-byte UART channel.
+// '0' begins a new caption; '1' appends its continuation on the C5.
+inline bool takeCaption(String &out){
+ if(!captionReady)return false;
+ const size_t remaining=captionPending.length()-captionOffset;
+ size_t count=min((size_t)76,remaining);
+ if(count<remaining){
+  while(count>0 && ((uint8_t)captionPending[captionOffset+count]&0xC0)==0x80)count--;
+ }
+ if(count==0){captionReady=false;return false;}
+ out=(captionOffset==0?"0":"1");
+ out+=captionPending.substring(captionOffset,captionOffset+count);
+ captionOffset+=count;
+ if(captionOffset>=captionPending.length()){
+  captionReady=false;captionPending="";captionOffset=0;
+ }
+ return true;
+}
 inline void queueCaption(const char *speaker,const char *words){
  if(!words || !*words)return;
  String c=String(speaker)+String(words);
- // UART side-channel has an 80-byte payload limit. UTF-8 tail clipping
- // avoids splitting Japanese multibyte characters at the packet boundary.
- if(c.length()>78){int end=78;while(end>2 && ((uint8_t)c[end]&0xC0)==0x80)end--;c=c.substring(0,end);}
- captionPending=c;captionReady=true;
+ // Bound UI-only storage, never split a UTF-8 code point.
+ if(c.length()>768){
+  int begin=c.length()-768;
+  while(begin<c.length() && ((uint8_t)c[begin]&0xC0)==0x80)begin++;
+  c=c.substring(begin);
+ }
+ captionPending=c;captionOffset=0;captionReady=true;
 }
 static bool playbackSpeechDetected=false;
 static String delegatedCallId, animationResponseId;
