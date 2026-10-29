@@ -775,7 +775,7 @@ static void consoleCommand(String cmd){
   bool accepted=KittyMemory::requestFormat();
   Serial.println(accepted?
     "[MEMORY] Format requested. This erases the complete SD card. Watch C5 status.":
-    "[MEMORY] Format refused: only allowed after SD mount failure.");
+    "[MEMORY] Format refused: SD initialization or another format is in progress.");
   return;
  }
  if(cmd=="memory probe"){
