@@ -99,6 +99,12 @@ inline bool extractFact(String utterance,String &key,String &value){
  for(const char* marker:{"my name is ","call me ","i am called ","私の名前は","名前は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
  }
+ if(pos<0)for(const char* marker:{"i live in ","i moved to ","i now live in ","j'habite à ","j'habite a ","住んでいるのは"}){
+  pos=lower.indexOf(marker);if(pos>=0){key="home";skip=strlen(marker);break;}
+ }
+ if(pos<0)for(const char* marker:{"i work at ","i now work at ","i work for ","je travaille chez ","勤務先は"}){
+  pos=lower.indexOf(marker);if(pos>=0){key="work";skip=strlen(marker);break;}
+ }
  if(pos<0)for(const char* marker:{"i no longer like ","i don't like ","i do not like ","i dislike ","i hate ","je n'aime pas ","もう好きじゃない"}){
   pos=lower.indexOf(marker);if(pos>=0){key="dislikes";skip=strlen(marker);break;}
  }
@@ -172,7 +178,6 @@ inline void mergeFact(const String &key,const String &value){
  for(int i=0;i<factCount;i++){
   if(finalKey==facts[i].key){
    // Keep multiple likes; a correction to the same subject supersedes it.
-   String existing(facts[i].value);
    if(key=="dislikes"||key=="likes"){
     String entry=key+":"+value;
     entry.toCharArray(facts[i].value,sizeof(facts[i].value));
@@ -194,7 +199,9 @@ inline void mergeFact(const String &key,const String &value){
   // and known preferences until new information needs the slots.
   int victim=-1;
   for(int i=0;i<factCount;i++)if(isEpisodic(String(facts[i].key))){victim=i;break;}
-  if(victim<0 && finalKey!="name")victim=0;
+  if(victim<0 && finalKey!="name" && finalKey!="home" && finalKey!="work"){
+   for(int i=0;i<factCount;i++)if(String(facts[i].key).startsWith("pref_")){victim=i;break;}
+  }
   if(victim>=0){
    for(int i=victim;i<factCount-1;i++)facts[i]=facts[i+1];
    finalKey.toCharArray(facts[factCount-1].key,sizeof(facts[0].key));
