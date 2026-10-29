@@ -29,6 +29,18 @@ static bool remoteResponse=false, streamedSpeech=false;
 static bool bargeCancelling=false;
 static String deferredVoiceItem;
 static String captionPending;
+static String liveKittyCaption;
+static uint32_t captionLastSent=0;
+inline void appendLiveKitty(const String &delta){
+ if(delta.isEmpty())return;
+ if(liveKittyCaption.length()+delta.length()>760){
+  int cut=(int)(liveKittyCaption.length()+delta.length()-760);
+  while(cut<(int)liveKittyCaption.length() &&
+    ((uint8_t)liveKittyCaption[cut]&0xC0)==0x80)cut++;
+  liveKittyCaption.remove(0,cut);
+ }
+ liveKittyCaption+=delta;
+}
 static size_t captionOffset=0;
 static bool captionReady=false;
 // Chunk long UTF-8 captions into the existing 80-byte UART channel.
@@ -338,6 +350,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   lastPing=millis();
  }else if(strcmp(type,"response.created")==0){
   remoteResponse=true;streamedSpeech=false;expressionIdleSince=0;
+  liveKittyCaption="";captionLastSent=0;
   playbackSpeechDetected=false;
   bargeCancelling=false;BrainRealtimeAudio::resetBarge();
   BrainRealtimeAudio::setRemoteReply(true);
@@ -452,17 +465,25 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    }
   }
  }else if(strcmp(type,"response.output_audio_transcript.delta")==0 ||
-          strcmp(type,"response.output_audio_transcript.done")==0){
-  // Optional provider-generated spoken transcript: use only local hints,
-  // never upload text to an additional service. Full motion still works when
-  // the upstream provider supplies audio but no transcript events.
-  cJSON *speech=cJSON_GetObjectItem(json,"delta");
-  if(!cJSON_IsString(speech))speech=cJSON_GetObjectItem(json,"transcript");
+          strcmp(type,"response.output_audio_transcript.done")==0 ||
+          strcmp(type,"response.text.delta")==0 ||
+          strcmp(type,"response.text.done")==0){
+  const bool done=strstr(type,".done")!=nullptr;
+  cJSON *speech=cJSON_GetObjectItem(json,done?"transcript":"delta");
+  if(!cJSON_IsString(speech))speech=cJSON_GetObjectItem(json,done?"text":"transcript");
   if(cJSON_IsString(speech) && speech->valuestring){
    String excerpt(speech->valuestring);
-   if(excerpt.length()>400)excerpt=excerpt.substring(0,400);
-   if(strcmp(type,"response.output_audio_transcript.done")==0)
-    queueCaption("KITTY: ",excerpt.c_str());
+   if(done){
+    // Final transcript is a full snapshot, not a delta.
+    if(excerpt.length())liveKittyCaption=excerpt;
+    queueCaption("KITTY: ",liveKittyCaption.c_str());
+   }else{
+    appendLiveKitty(excerpt);
+    if((uint32_t)(millis()-captionLastSent)>100UL){
+     queueCaption("KITTY: ",liveKittyCaption.c_str());
+     captionLastSent=millis();
+    }
+   }
    int mood=emotionForText(excerpt);
    if(mood>=0)chooseMood(mood,false);
   }
@@ -620,6 +641,17 @@ inline void tick(bool audioBusy){
   }
  }
  if(ready){
+  // Chat model deltas are produced on a separate task. Copy via FreeRTOS
+  // queue; emit the first phrase early, then cap screen updates to ~8Hz.
+  String piece;
+  for(int i=0;i<5 && BrainAI::takeCallStream(piece);i++)
+   appendLiveKitty(piece);
+  if(!liveKittyCaption.isEmpty() &&
+     (uint32_t)(millis()-captionLastSent)>=125UL &&
+     (!delegatedCallId.isEmpty())){
+   queueCaption("KITTY: ",liveKittyCaption.c_str());
+   captionLastSent=millis();
+  }
   if(BrainRealtimeAudio::failed()){
    Serial.printf("[CALL] I2S driver fault: %s\n",BrainRealtimeAudio::issue());
    fail("I2S_RUNTIME");return;
