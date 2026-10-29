@@ -21,4 +21,5 @@
 // v29: two-line chronological captions with newest text on lower row.
 // v30: smooth 200ms expression transitions while retaining live lip sync.
 // v31: width-aware UTF-8 caption wrapping and segmented UART text scrolling.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 31;
+// v32: sixteen full-screen Kitty moods with two-digit UART IDs.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 32;
