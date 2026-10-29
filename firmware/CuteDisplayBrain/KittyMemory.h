@@ -1203,24 +1203,15 @@ inline void init(){
  if(!summaryResults)summaryResults=xQueueCreate(2,sizeof(SummaryResult));
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
  if(writes && !worker){
-  // SD fact parsing, indexed search, metadata snapshot and nested String
-  // operations need more than the original 6 KiB worker stack. Allocate the
-  // stack in PSRAM so realtime I2S keeps its scarce internal DMA-capable heap.
-  constexpr uint32_t kWorkerStack=12288;
-  StackType_t *stack=(StackType_t*)heap_caps_malloc(kWorkerStack,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  StaticTask_t *tcb=(StaticTask_t*)heap_caps_calloc(1,sizeof(StaticTask_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
-  if(stack && tcb){
-   worker=xTaskCreateStaticPinnedToCore(task,"kitty_sd",kWorkerStack,
-     nullptr,1,stack,tcb,0);
-  }
-  if(!worker){
-   if(stack)heap_caps_free(stack);
-   if(tcb)heap_caps_free(tcb);
-   // Prefer disabling SD writes over starting an undersized worker
-   // that might corrupt the realtime audio task's stack.
-   Serial.println("[MEMORY] SD worker unavailable: unable to reserve safe stack");
+  // Memory parsing and SD index scanning exceed the old 6144-byte stack
+  // budget in some realtime sessions. Keep the FreeRTOS task stack in
+  // internal RAM: external PSRAM stacks require special IDF configuration.
+  BaseType_t created=xTaskCreatePinnedToCore(task,"kitty_sd",9216,nullptr,1,&worker,0);
+  if(created!=pdPASS || !worker){
+   worker=nullptr;
+   Serial.println("[MEMORY] SD worker unavailable: safe stack allocation failed");
   }else{
-   Serial.printf("[MEMORY] SD worker stack=%u bytes (PSRAM)\\n",(unsigned)kWorkerStack);
+   Serial.println("[MEMORY] SD worker stack=9216 bytes");
   }
  }
 }
