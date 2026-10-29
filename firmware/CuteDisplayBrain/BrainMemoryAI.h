@@ -63,8 +63,8 @@ inline void tick(bool busy){
     "Summarize these user statements into ONE compact, factual memory of at most 180 characters. "
     "Preserve explicitly mentioned project decisions, changes, and future plans. "
     "Never invent details, never infer identities, and avoid speculative facts. "
-    "Respond with JSON only: {\\\"summary\\\":\\\"...\\\"}. "
-    "If nothing meaningful was discussed, return {\\\"summary\\\":\\\"\\\"}." :
+    "Respond with JSON only: {\"summary\":\"...\"}. "
+    "If nothing meaningful was discussed, return {\"summary\":\"\"}." :
     "Extract ONLY explicitly stated personal facts from the user utterance in English, French, or Japanese. "
     "Return compact JSON only: {\"facts\":[{\"kind\":\"likes\",\"subject\":\"chocolate\"}]}. "
     "Allowed kind: likes, dislikes, situation. For situation use subject as " 
