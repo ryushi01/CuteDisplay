@@ -217,7 +217,7 @@ inline bool extractFact(String utterance,String &key,String &value){
  }
  // Consolidate declarative attributes under a stable subject (not all
  // user statements are food, plans or preferences).
- if(pos<0){
+ if(pos==-1){
   int subjectStart=lower.indexOf("my ");
   int predicate=subjectStart>=0?lower.indexOf(" is ",subjectStart+3):-1;
   if(subjectStart>=0 && predicate>subjectStart+3 && predicate-subjectStart<=42){
