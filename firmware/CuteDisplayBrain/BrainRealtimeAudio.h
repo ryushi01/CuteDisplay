@@ -87,11 +87,15 @@ static float aecReference[AEC_REF_SIZE]={};
 static uint32_t aecWrite=0;
 static float aecEchoPower=0;
 static volatile uint32_t aecResidualLevel=0;
+static volatile uint32_t outputPeak=0,limitedSamples=0;
+static float limiterGain=1.0f;
+static uint32_t audioDiagAt=0;
 inline uint32_t residualLevel(){return aecResidualLevel;}
 inline void resetAEC(){
  memset(aecWeights,0,sizeof(aecWeights));
  memset(aecReference,0,sizeof(aecReference));
  aecWrite=0;aecEchoPower=0;aecResidualLevel=0;
+ limiterGain=1.0f;outputPeak=0;limitedSamples=0;audioDiagAt=millis();
 }
 static volatile uint32_t droppedMic=0;
 // PCM energy for the C5 full-screen Kitty mouth, no microphone inference.
@@ -242,8 +246,17 @@ static void audioTask(void *){
     int32_t raw=work->capture[i*2]>>16;
     dcEstimate+=(raw-dcEstimate)/512;
     raw-=dcEstimate;
-    int32_t played=hasAudio?(int32_t)work->speaker.pcm[i]*speakerVolume/100:0;
+    // Soft attack/release limiter applied to the speaker output only.
+    // No gain reduction based on microphone speech or barge-in.
+    const float incoming=hasAudio?fabsf((float)work->speaker.pcm[i]*speakerVolume/100.0f):0.0f;
+    const float desired=incoming>11000.0f?11000.0f/incoming:1.0f;
+    const float rate=desired<limiterGain?0.065f:0.0009f;
+    limiterGain+=(desired-limiterGain)*rate;
+    if(desired<0.999f)limitedSamples++;
+    int32_t played=hasAudio?(int32_t)((float)work->speaker.pcm[i]*
+       speakerVolume*limiterGain/100.0f):0;
     played=constrain(played,-12500,12500);
+    if((uint32_t)abs(played)>outputPeak)outputPeak=(uint32_t)abs(played);
     work->output[i*2]=(int32_t)((int64_t)played*65536LL);
     work->output[i*2+1]=work->output[i*2];
     // Use previous output frames; current outgoing frame has not yet reached DAC.
@@ -301,6 +314,14 @@ static void audioTask(void *){
     (void)xQueueReceive(micQueue,&work->discard,0);
     (void)xQueueSend(micQueue,&work->mic,0);
     droppedMic++;
+   }
+   if((uint32_t)(millis()-audioDiagAt)>10000UL){
+    audioDiagAt=millis();
+    Serial.printf("[CALL AUDIO DIAG] output_peak=%lu limited=%lu mic=%lu buffer_ms=%lu dropped_ms=%lu mic_drops=%lu\\n",
+      (unsigned long)outputPeak,(unsigned long)limitedSamples,
+      (unsigned long)aecResidualLevel,(unsigned long)bufferedMs(),
+      (unsigned long)droppedSpeakerMs(),(unsigned long)droppedMic);
+    outputPeak=0;limitedSamples=0;
    }
    size_t written=0;
    esp_err_t writeError=i2s_channel_write(tx,work->output,sizeof(work->output),&written,160);
