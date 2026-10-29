@@ -58,18 +58,21 @@ async def _cutedisplay_verified_realtime_user(ws: WebSocket, token: str, redis=N
 # already have the original secure API-key patch deployed, so both base states
 # are supported. We never replace, loosen or bypass existing authorization.
 EXPRESSION_MARKER = "# CuteDisplay realtime facial expressions (opt-in v1)"
-EXPRESSION_MOODS = ("neutral", "happy", "sad", "angry", "hungry", "sleepy", "excited", "shy")
+EXPRESSION_MOODS = ("neutral", "happy", "sad", "angry", "hungry", "sleepy", "excited", "shy", "surprised", "confused", "laughing", "worried", "playful", "love", "bored", "proud")
 EXPRESSION_TOOL = """
-KITTY_EXPRESSIONS = ("neutral", "happy", "sad", "angry", "hungry", "sleepy", "excited", "shy")
+KITTY_EXPRESSIONS = ("neutral", "happy", "sad", "angry", "hungry", "sleepy", "excited", "shy", "surprised", "confused", "laughing", "worried", "playful", "love", "bored", "proud")
 KITTY_EXPRESSION_TOOL = {
     'type': 'function',
     'name': 'set_expression',
     'description': (
         'Change your Kitty companion face to match the emotional tone of your '
-        'speech. Use happy, sad, angry, excited, sleepy, shy, hungry or neutral '
-        'when genuinely appropriate. Do not narrate the expression command; '
-        'continue the spoken conversation normally. Prefer at most one change '
-        'per spoken answer, only when the emotional tone changes.'
+        'speech. Select from neutral, happy, sad, angry, hungry, sleepy, '
+        'excited, shy, surprised, confused, laughing, worried, playful, '
+        'love, bored, and proud. React naturally to jokes, surprises, '
+        'affection, uncertainty, teasing and the tone of your own words. '
+        'Change expression when the emotional beat changes, possibly more '
+        'than once within a long response, but do not spam tool calls. '
+        'Never narrate an expression command; continue normal speech.'
     ),
     'parameters': {
         'type': 'object',
@@ -81,9 +84,17 @@ KITTY_EXPRESSION_TOOL = {
     },
 }
 KITTY_EXPRESSION_INSTRUCTIONS = (
-    "\\nYou have a small animated Kitty companion face. When your emotion changes, "
-    "call set_expression with one supported emotion before speaking. "
-    "Use it sparingly, never verbalize the control, and continue the response."
+    "\\nYou are Kitty-chan, a lively playful animated companion with expressive eyes. "
+    "React promptly to the user's feelings and the changing emotional tone. "
+    "Use set_expression with one of: neutral, happy, sad, angry, hungry, sleepy, "
+    "excited, shy, surprised, confused, laughing, worried, playful, love, bored, proud. "
+    "Choose surprised for unexpected news, confused for uncertainty, laughing for jokes, "
+    "worried for concern, playful for teasing, love for affection, bored for boredom, "
+    "proud for success. Match the scene without making assumptions about the user. "
+    "Set the expression early, before the relevant speech when possible; for a long "
+    "response, change it again if the emotional tone actually changes. "
+    "Do not announce the expression or interrupt the content of your answer. "
+    "Speak naturally in the user's language and retain your existing personality."
 )
 """ + EXPRESSION_MARKER + "\\n"
 
