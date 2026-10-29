@@ -36,6 +36,25 @@ inline bool configure(const String &cmd){
  Serial.printf("[S3 TIME] Zone selection=%u (POSIX TZ rule), clock remains UTC internally\n",(unsigned)zone);
  return true;
 }
+// Date context is recomputed from the configured local timezone for each
+// request, not cached at boot. This survives midnight without a reboot.
+inline uint32_t localDayKey(){
+ if(!valid())return 0;
+ time_t now=time(nullptr);struct tm t={};localtime_r(&now,&t);
+ return (uint32_t)((t.tm_year+1900)*10000+(t.tm_mon+1)*100+t.tm_mday);
+}
+inline String calendarContext(){
+ if(!valid())return "";
+ time_t now=time(nullptr);struct tm t={};localtime_r(&now,&t);
+ const char *days[]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
+ char date[40]={};snprintf(date,sizeof(date),"%04d-%02d-%02d %02d:%02d",
+   t.tm_year+1900,t.tm_mon+1,t.tm_mday,t.tm_hour,t.tm_min);
+ String out="Device local date/time: ";out+=date;out+=" (";
+ out+=days[t.tm_wday];out+="). Timezone: ";out+=TZ_RULES[zone];
+ out+=". Today means this local calendar day; yesterday is the previous calendar day.";
+ out+=" A past plan is historical, not automatically completed; never claim it occurred without confirmation.";
+ return out;
+}
 inline String localHHMM(){
  if(!valid())return "";
  time_t now=time(nullptr);tm local={};localtime_r(&now,&local);
