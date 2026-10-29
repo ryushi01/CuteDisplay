@@ -64,8 +64,11 @@ static volatile bool running=false, ready=false, stopping=false, fault=false;
 static volatile bool remoteReply=false, playing=false;
 static volatile bool bargeRequested=false,bargeActive=false;
 static uint8_t bargeFrames=0;
+static int32_t noiseFloor=200;
+static int32_t dcEstimate=0;
+static volatile uint32_t bargeCooldownUntil=0;
 inline bool takeBargeRequest(){if(!bargeRequested)return false;bargeRequested=false;return true;}
-inline void resetBarge(){bargeRequested=false;bargeActive=false;bargeFrames=0;}
+inline void resetBarge(){bargeRequested=false;bargeActive=false;bargeFrames=0;bargeCooldownUntil=millis()+600;}
 static volatile uint32_t lastPlaybackMs=0;
 static uint16_t micGain=100;
 static uint8_t speakerVolume=35;
@@ -205,8 +208,9 @@ static void audioTask(void *){
     outputLipLevel=(uint8_t)min((uint32_t)9,(avg+360)/1250);
    }else outputLipLevel=0;
    if(hasAudio)lastPlaybackMs=millis();
-   // Listen through the speaker, but demand sustained near-end energy
-   // stronger than the playback reference to reduce acoustic false triggers.
+   // Low-cost realtime noise/echo suppression. A speaker reference and
+   // adaptive background estimate keep steady noise and playback leakage
+   // out of the microphone without buffering/delaying outgoing PCM.
    uint64_t micEnergy=0,speakerEnergy=0;
    for(size_t i=0;i<SAMPLES;i+=4){
     int32_t m=work->capture[i*2]>>16;
@@ -216,11 +220,19 @@ static void audioTask(void *){
    }
    uint32_t micLevel=(uint32_t)(micEnergy/(SAMPLES/4));
    uint32_t spkLevel=(uint32_t)(speakerEnergy/(SAMPLES/4));
-   if((remoteReply || hasAudio) && !bargeActive){
-    if(micLevel>1800 && micLevel>spkLevel*3/2+600){
-     if(bargeFrames<10)bargeFrames++;
+   if(!hasAudio && !remoteReply && !bargeActive){
+    // Track slow ambient changes, but avoid adapting to sudden speech.
+    if(micLevel<(uint32_t)(noiseFloor*3+300))
+     noiseFloor=(noiseFloor*31+(int32_t)micLevel)/32;
+   }
+   uint32_t threshold=max((uint32_t)1800,(uint32_t)(noiseFloor*5+900));
+   // Avoid accidental triggers at the start of TTS or from loudspeaker echo.
+   if((remoteReply || hasAudio) && !bargeActive &&
+      (int32_t)(millis()-bargeCooldownUntil)>=0){
+    if(micLevel>threshold && micLevel>spkLevel*2+1000){
+     if(bargeFrames<16)bargeFrames++;
     }else bargeFrames=0;
-    if(bargeFrames>=8){bargeActive=true;bargeRequested=true;}
+    if(bargeFrames>=10){bargeActive=true;bargeRequested=true;}
    }
    bool mute=!bargeActive && (remoteReply || hasAudio ||
      (uint32_t)(millis()-lastPlaybackMs)<TAIL_MUTE_MS);
@@ -229,6 +241,12 @@ static void audioTask(void *){
     if(!mute){
      // INMP441 L/R wired to GND => left slot; 24-bit left-aligned input.
      int32_t raw=work->capture[i*2]>>16;
+     // Adaptive DC/high-pass and soft ambient-noise suppression.
+     dcEstimate+=(raw-dcEstimate)/512;
+     raw-=dcEstimate;
+     int32_t floorGate=max((int32_t)150,noiseFloor*2);
+     if(raw>-floorGate && raw<floorGate)raw=0;
+     else raw+=raw>0?-floorGate:floorGate;
      value=(raw*(int32_t)micGain)/100;
      if(value>32767)value=32767;
      if(value< -32768)value=-32768;
