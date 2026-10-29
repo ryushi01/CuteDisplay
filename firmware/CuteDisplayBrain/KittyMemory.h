@@ -331,6 +331,22 @@ inline bool extractFact(String utterance,String &key,String &value){
    {"context_work_availability","休みが取れない"},
    {"context_upcoming_plan","tonight i"},
    {"context_upcoming_plan","tomorrow i"},
+   {"context_upcoming_plan","i will "},
+   {"context_upcoming_plan","i have a meeting"},
+   {"context_upcoming_plan","next monday"},
+   {"context_upcoming_plan","next tuesday"},
+   {"context_upcoming_plan","next wednesday"},
+   {"context_upcoming_plan","next thursday"},
+   {"context_upcoming_plan","next friday"},
+   {"context_upcoming_plan","next saturday"},
+   {"context_upcoming_plan","next sunday"},
+   {"context_upcoming_plan","après-demain"},
+   {"context_upcoming_plan","lundi prochain"},
+   {"context_upcoming_plan","mardi prochain"},
+   {"context_upcoming_plan","vendredi prochain"},
+   {"context_upcoming_plan","明後日"},
+   {"context_upcoming_plan","来週の"},
+   {"context_upcoming_plan","行く予定"},
    {"context_upcoming_plan","i plan to"},
    {"context_upcoming_plan","i'm going to"},
    {"context_upcoming_plan","ce soir je"},
@@ -1110,7 +1126,14 @@ inline void task(void*){
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
     // Resolve today/tomorrow once, on the SD worker, before saving.
-    (void)anchorDatedPlan(String(e.question),key,value);
+    bool dated=anchorDatedPlan(String(e.question),key,value);
+    // Append-only plan history is never rotated out by the 256-fact cache.
+    // Persist even if the current RAM catalog is full.
+    if(dated){
+     File history=SD_MMC.open("/kitty/dated_plans.tsv",FILE_APPEND);
+     if(history){history.printf("%lu\t%s\t%s\n",
+       (unsigned long)ts,key.c_str(),sanitize(value,180).c_str());history.close();}
+    }
     mergeFact(key,value);
    }
    if(gymCancellation(String(e.question)))removeSupersededGymPlan();
