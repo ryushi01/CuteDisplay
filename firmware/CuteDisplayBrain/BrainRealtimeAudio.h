@@ -62,6 +62,10 @@ inline void reportError(const char *stage,esp_err_t err=ESP_OK){
 }
 static volatile bool running=false, ready=false, stopping=false, fault=false;
 static volatile bool remoteReply=false, playing=false;
+static volatile bool bargeRequested=false,bargeActive=false;
+static uint8_t bargeFrames=0;
+inline bool takeBargeRequest(){if(!bargeRequested)return false;bargeRequested=false;return true;}
+inline void resetBarge(){bargeRequested=false;bargeActive=false;bargeFrames=0;}
 static volatile uint32_t lastPlaybackMs=0;
 static uint16_t micGain=100;
 static uint8_t speakerVolume=35;
@@ -201,9 +205,25 @@ static void audioTask(void *){
     outputLipLevel=(uint8_t)min((uint32_t)9,(avg+360)/1250);
    }else outputLipLevel=0;
    if(hasAudio)lastPlaybackMs=millis();
-   // Wait until provider has stopped responding AND acoustic tail is gone.
-   bool mute=remoteReply || hasAudio ||
-     (uint32_t)(millis()-lastPlaybackMs)<TAIL_MUTE_MS;
+   // Listen through the speaker, but demand sustained near-end energy
+   // stronger than the playback reference to reduce acoustic false triggers.
+   uint64_t micEnergy=0,speakerEnergy=0;
+   for(size_t i=0;i<SAMPLES;i+=4){
+    int32_t m=work->capture[i*2]>>16;
+    int32_t p=work->speaker.pcm[i];
+    micEnergy+=(uint32_t)(m<0?-m:m);
+    speakerEnergy+=(uint32_t)(p<0?-p:p);
+   }
+   uint32_t micLevel=(uint32_t)(micEnergy/(SAMPLES/4));
+   uint32_t spkLevel=(uint32_t)(speakerEnergy/(SAMPLES/4));
+   if((remoteReply || hasAudio) && !bargeActive){
+    if(micLevel>1800 && micLevel>spkLevel*3/2+600){
+     if(bargeFrames<10)bargeFrames++;
+    }else bargeFrames=0;
+    if(bargeFrames>=8){bargeActive=true;bargeRequested=true;}
+   }
+   bool mute=!bargeActive && (remoteReply || hasAudio ||
+     (uint32_t)(millis()-lastPlaybackMs)<TAIL_MUTE_MS);
    for(size_t i=0;i<SAMPLES;i++){
     int32_t value=0;
     if(!mute){
