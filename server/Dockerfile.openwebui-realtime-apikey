@@ -16,4 +16,9 @@ RUN python /tmp/cutedisplay-barge-in-patch.py --source-root /app --check && \
     python /tmp/cutedisplay-barge-in-patch.py --source-root /app --apply && \
     python -m py_compile /app/backend/open_webui/routers/audio/realtime.py && \
     rm /tmp/cutedisplay-barge-in-patch.py
+COPY server/patch_openwebui_conversation_v2.py /tmp/cutedisplay-conversation-v2.py
+RUN python /tmp/cutedisplay-conversation-v2.py --source-root /app --check && \
+    python /tmp/cutedisplay-conversation-v2.py --source-root /app --apply && \
+    python -m py_compile /app/backend/open_webui/routers/audio/realtime.py && \
+    rm /tmp/cutedisplay-conversation-v2.py
 USER ${ORIGINAL_USER}
