@@ -142,6 +142,7 @@ inline bool persistFacts(){
  }
  return true;
 }
+inline void mergeFact(const String &key,const String &value);
 inline void restoreFactSnapshots(){
  const char* candidates[]={"/kitty/facts.tsv","/kitty/facts.bak"};
  for(const char *path:candidates){
