@@ -235,6 +235,12 @@ static void audioTask(void *){
    uint32_t outputLevel=min((uint32_t)12500,
      (uint32_t)((uint64_t)spkLevel*speakerVolume/100));
    overlapMicLevel=micLevel;overlapSpkLevel=outputLevel;
+   // When an overlapping voice is detected, gently duck playback so the
+   // user's next words reach VAD/STT clearly without terminating this reply.
+   if(bargeActive && micLevel<max((uint32_t)500,(uint32_t)noiseFloor*3+300)){
+    if(bargeFrames>0)bargeFrames--;
+    if(bargeFrames==0)bargeActive=false;
+   }
    uint32_t threshold=max((uint32_t)650,(uint32_t)(noiseFloor*3+350));
    // Avoid accidental triggers at the start of TTS or from loudspeaker echo.
    if((remoteReply || hasAudio) && !bargeActive &&
@@ -265,7 +271,7 @@ static void audioTask(void *){
      if(value< -32768)value=-32768;
     }
     work->mic.pcm[i]=(int16_t)value;
-    int32_t out=hasAudio?(int32_t)work->speaker.pcm[i]*speakerVolume/100:0;
+    int32_t out=hasAudio?(int32_t)work->speaker.pcm[i]*speakerVolume*(bargeActive?22:100)/10000:0;
     // Bound first hardware tests to ~38% full scale even at volume=100.
     if(out>12500)out=12500;
     if(out< -12500)out=-12500;
