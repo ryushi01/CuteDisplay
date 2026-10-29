@@ -302,21 +302,36 @@ inline void run(void*){
   cJSON_AddStringToObject(a,"content",history[i].assistant.c_str());
   cJSON_AddItemToArray(msgs,a);
  }
- // Search the entire SD index asynchronously; wait at most 40ms.
- // A slow or busy card never blocks the model beyond this fixed deadline.
+ // Keep identity facts first, and cap archive contributions before appending.
+ // Only the low-priority AI task performs this bounded retrieval.
  uint32_t searchId=KittyMemory::requestSearch(prompt);
- String remembered=KittyMemory::factSummary()+KittyMemory::recall(prompt);
- if(searchId){
+ String remembered=KittyMemory::factSummary(360);
+ String related=KittyMemory::semanticFactRecall(prompt,240);
+ if(!related.isEmpty()){
+  if(!remembered.isEmpty())remembered+='\n';
+  remembered+=related;
+ }
+ String recent=KittyMemory::recall(prompt);
+ if(!recent.isEmpty()){
+  if(!remembered.isEmpty())remembered+='\n';
+  remembered+=KittyMemory::clipUTF8(recent,200);
+ }
+ if(searchId && remembered.length()<760){
   uint32_t began=millis();
-  while((uint32_t)(millis()-began)<40UL){
+  while((uint32_t)(millis()-began)<25UL){
    String old=KittyMemory::takeSearch(searchId);
    if(!old.isEmpty()){
-    remembered=old;break;
+    if(!remembered.isEmpty())remembered+='\n';
+    remembered+=KittyMemory::clipUTF8(old,760-remembered.length());
+    break;
    }
    vTaskDelay(pdMS_TO_TICKS(5));
   }
  }
- remembered=KittyMemory::clipUTF8(remembered,850);
+ remembered=KittyMemory::clipUTF8(remembered,760);
+ if(delegated)Serial.printf("[AI MEMORY] facts=%u bytes=%u search=%lu internal=%lu\n",
+   (unsigned)KittyMemory::factCount,(unsigned)remembered.length(),(unsigned long)searchId,
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
  if(!remembered.isEmpty()){
   cJSON *memory=cJSON_CreateObject();
   cJSON_AddStringToObject(memory,"role","system");
@@ -328,9 +343,25 @@ inline void run(void*){
  cJSON_AddStringToObject(m,"role","user");
  cJSON_AddStringToObject(m,"content",prompt.c_str());
  cJSON_AddItemToArray(msgs,m);
- char *json=cJSON_PrintUnformatted(root);
+ // Serialize directly into PSRAM: cJSON_PrintUnformatted otherwise places the
+ // entire HTTP request in heap memory needed by Wi-Fi/TLS and realtime audio.
+ // Preallocated printing avoids the intermediate full-size heap copy.
+ char *json=nullptr;
+ size_t jsonCapacity=4096;
+ while(root && jsonCapacity<=131072){
+  char *candidate=(char*)heap_caps_malloc(jsonCapacity,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!candidate)break;
+  if(cJSON_PrintPreallocated(root,candidate,(int)jsonCapacity,0)){
+   json=candidate;break;
+  }
+  heap_caps_free(candidate);
+  jsonCapacity*=2;
+ }
  cJSON_Delete(root);
  if(json){
+  Serial.printf("[AI MEMORY] JSON in PSRAM capacity=%u bytes=%u internal=%lu\\n",
+   (unsigned)jsonCapacity,(unsigned)strlen(json),
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
   esp_http_client_config_t cfg={};
   cfg.url=address.c_str();
   cfg.crt_bundle_attach=esp_crt_bundle_attach;
@@ -386,8 +417,8 @@ inline void run(void*){
    if(rc!=ESP_OK || code!=200 || !doneSeen)failed=true;
    if(http)esp_http_client_cleanup(http);
   }else failed=true;
-  free(json);
- }else failed=true;
+  heap_caps_free(json);
+ }else {Serial.println("[AI MEMORY] PSRAM JSON allocation/serialization failed");failed=true;}
  if(cancelRequested){
   failed=true;
   staged="";

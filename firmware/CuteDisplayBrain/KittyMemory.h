@@ -5,19 +5,37 @@
 #include <Arduino.h>
 #include <FS.h>
 #include <SD_MMC.h>
+#include <ff.h>
 #include <time.h>
 
 namespace KittyMemory {
 static constexpr size_t SLOT_BYTES=768;
 struct Entry { char question[256]; char answer[512]; };
 static QueueHandle_t writes=nullptr;
+// Bounded RAM handoff to the optional idle-only AI consolidator.
+// Never waits on inference, and never touches SD in a network task.
+struct ConsolidationCandidate { char utterance[256]; };
+static QueueHandle_t consolidationCandidates=nullptr;
+struct ConsolidatedFact { char key[32]; char value[128]; };
+static QueueHandle_t consolidatedFacts=nullptr;
+inline bool takeConsolidationCandidate(String &value){
+ ConsolidationCandidate item={};
+ if(!consolidationCandidates || xQueueReceive(consolidationCandidates,&item,0)!=pdTRUE)return false;
+ value=String(item.utterance);return !value.isEmpty();
+}
+inline bool proposeConsolidatedFact(const String &key,const String &value){
+ if(!consolidatedFacts || key.isEmpty() || value.isEmpty() || key.length()>31 || value.length()>112)return false;
+ ConsolidatedFact item={};key.toCharArray(item.key,sizeof(item.key));value.toCharArray(item.value,sizeof(item.value));
+ return xQueueSend(consolidatedFacts,&item,0)==pdTRUE;
+}
+
 static TaskHandle_t worker=nullptr;
 static volatile bool mounted=false;
 static volatile uint8_t cardState=0; // 0=starting,1=ready,2=needs format/check,3=formatting,4=error
 static volatile bool formatRequested=false;
 inline uint8_t status(){return cardState;}
 inline bool requestFormat(){
- if(cardState!=2 || formatRequested)return false;
+ if(cardState==0 || cardState==3 || formatRequested)return false;
  formatRequested=true;return true;
 }
 static volatile uint32_t saved=0, failed=0;
@@ -70,8 +88,8 @@ inline String recall(const String &question){
 }
 
 struct Fact { char key[32]; char value[192]; };
-static Fact facts[24]={};
-static constexpr uint8_t MAX_FACTS=24;
+static constexpr size_t MAX_FACTS=256;
+static Fact *facts=nullptr; // PSRAM catalog; SD remains durable
 static volatile uint32_t sdTotalKB=0, sdUsedKB=0;
 inline uint32_t capacityKB(){return sdTotalKB;}
 inline uint32_t usedKB(){return sdUsedKB;}
@@ -80,21 +98,23 @@ inline void updateStorage(){
  uint64_t total=SD_MMC.totalBytes(),used=SD_MMC.usedBytes();
  sdTotalKB=(uint32_t)(total/1024ULL);sdUsedKB=(uint32_t)(used/1024ULL);
 }
-static uint8_t factCount=0;
+static size_t factCount=0;
 static volatile uint32_t factRevision=0, memorizedNoticeSeq=0;
 inline String factSummary(size_t maxLen=700){
  String out;
- if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
- // Prioritize stable facts and newest entries without increasing context size.
- // Keep stable identity and preferences ahead of the newest episodic notes.
- // Fixed byte budget is unchanged as the archive grows.
- for(int pass=0;pass<2;pass++){
+ if(!facts || !cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
+ // Keep realtime memory bounded and multilingual-topic context visible,
+ // even when many older preference slots are occupied.
+ for(int pass=0;pass<3;pass++){
   int count=(int)factCount;
   for(int n=0;n<count;n++){
-   int i=pass==0?n:(count-1-n);
+   int i=pass==2?(count-1-n):n;
    String k(facts[i].key);
-   bool episodic=k.startsWith("note_")||k.startsWith("event_");
-   if((pass==0 && episodic)||(pass==1 && !episodic))continue;
+   bool episodic=k.startsWith("note_") || k.startsWith("event_");
+   bool important=k=="name" || k=="home" || k=="work" || k.startsWith("context_");
+   if((pass==0 && !important) ||
+      (pass==1 && (important || episodic)) ||
+      (pass==2 && !episodic))continue;
    String record=k+"\t"+facts[i].value+"\n";
    if(out.length()+record.length()>maxLen)continue;
    out+=record;
@@ -102,12 +122,97 @@ inline String factSummary(size_t maxLen=700){
  }
  xSemaphoreGive(cacheMutex);return out;
 }
+// Recoverable SD fact snapshots: never truncate the only good copy.
+inline bool persistFacts(){
+ if(!facts || factCount==0)return false;
+ const char *tmp="/kitty/facts.next",*main="/kitty/facts.tsv",*backup="/kitty/facts.bak";
+ SD_MMC.remove(tmp);
+ File f=SD_MMC.open(tmp,FILE_WRITE);
+ if(!f)return false;
+ // Copy one small fact at a time rather than assembling a 50KB+ String.
+ // Never hold the cache mutex while writing to the SD card.
+ bool ok=true;
+ for(size_t i=0;i<factCount;i++){
+  Fact item={};
+  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(50))!=pdTRUE){ok=false;break;}
+  item=facts[i];
+  xSemaphoreGive(cacheMutex);
+  if(f.printf("%s\t%s\n",item.key,item.value)<=0){ok=false;break;}
+  if((i&31)==0)vTaskDelay(1);
+ }
+ f.flush();f.close();
+ if(!ok){SD_MMC.remove(tmp);return false;}
+ if(SD_MMC.exists(main)){
+  SD_MMC.remove(backup);
+  if(!SD_MMC.rename(main,backup)){SD_MMC.remove(tmp);return false;}
+ }
+ if(!SD_MMC.rename(tmp,main)){
+  if(SD_MMC.exists(backup))SD_MMC.rename(backup,main);
+  return false;
+ }
+ return true;
+}
+inline void mergeFact(const String &key,const String &value);
+inline void restoreFactSnapshots(){
+ const char* candidates[]={"/kitty/facts.tsv","/kitty/facts.bak"};
+ for(const char *path:candidates){
+  File f=SD_MMC.open(path,FILE_READ);if(!f)continue;
+  size_t before=factCount;
+  while(f.available()){
+   String line=f.readStringUntil('\n');int tab=line.indexOf('\t');
+   if(tab>0 && tab<32 && line.length()<240)
+    mergeFact(line.substring(0,tab),line.substring(tab+1));
+  }
+  f.close();
+  if(factCount>before){
+   if(String(path)!="/kitty/facts.tsv")Serial.println("[MEMORY] recovered facts from backup");
+   break;
+  }
+ }
+}
 inline bool extractFact(String utterance,String &key,String &value){
  utterance.trim();if(utterance.length()<5)return false;
  String lower=utterance;lower.toLowerCase();
  int pos=-1,skip=0;
- for(const char* marker:{"my name is ","call me ","i am called ","私の名前は","名前は"}){
+ for(const char* marker:{"my name is ","my name's ","my name’s ","i am called ","i'm called ","i’m called ","you can call me ","please call me ","call me ","i go by ","everyone calls me ","people call me ","je m’appelle ","je m'appelle ","mon prénom est ","mon prenom est ","je suis appelé ","je suis appelée ","私の名前は","名前は","私の名前は、","僕の名前は","わたしの名前は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
+ }
+ // Plain English "I'm Shana"/"I am Shana" is an introduction only when
+ // the remaining words form a short name, not a sentence about an activity.
+ if(pos<0 && lower.indexOf('?')<0 && lower.indexOf("？")<0){
+  for(const char* marker:{"i'm ","i’m ","i am "}){
+   if(!lower.startsWith(marker))continue;
+   String candidate=utterance.substring(strlen(marker));candidate.trim();
+   for(const char* tail:{".","!","。","です"})if(candidate.endsWith(tail))
+    candidate.remove(candidate.length()-strlen(tail));
+   candidate.trim();
+   String c=candidate;c.toLowerCase();
+   bool sentence=false;
+   for(const char* word:{"busy","working","going","feeling","happy","sad",
+     "tired","hungry","at ","in ","on ","from ","with ","not ","very ",
+     "a ","an ","the ","here","there","doing","looking","trying",
+     "planning","thinking","sorry","ready","fine","good","sick"}){
+    if(c==word || c.startsWith(word)){sentence=true;break;}
+   }
+   int spaces=0;bool letters=true;
+   for(size_t i=0;i<candidate.length();i++){
+    char ch=candidate[i];
+    if(ch==' ')spaces++;
+    else if(!((ch>='A' && ch<='Z')||(ch>='a' && ch<='z')||ch=='-'||ch=='\'')){
+     letters=false;break;
+    }
+   }
+   if(!sentence && letters && spaces<=2 && candidate.length()>=2 && candidate.length()<=40){
+    key="name";value=candidate;pos=-2;
+   }
+   break;
+  }
+ }
+ // Self-introduction without the literal word 'name'.
+ if(pos<0){
+  for(const char* marker:{"私はシャナ","僕はシャナ","わたしはシャナ","私はしゃな","僕はしゃな"}){
+   if(lower.startsWith(marker)){key="name";value="Shana";pos=-2;break;}
+  }
  }
  if(pos<0)for(const char* marker:{"i live in ","i moved to ","i now live in ","j'habite à ","j'habite a ","住んでいるのは"}){
   pos=lower.indexOf(marker);if(pos>=0){key="home";skip=strlen(marker);break;}
@@ -115,9 +220,50 @@ inline bool extractFact(String utterance,String &key,String &value){
  if(pos<0)for(const char* marker:{"i work at ","i now work at ","i work for ","je travaille chez ","勤務先は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="work";skip=strlen(marker);break;}
  }
+ // Fast multilingual context classification, without extra model inference.
+ // Preserve negation and time qualifiers in the value; same topic replaces
+ // older temporary statements rather than manufacturing permanent traits.
+ if(pos<0 && lower.indexOf('?')<0 && lower.indexOf("？")<0){
+  struct Rule { const char* key; const char* trigger; };
+  static const Rule rules[]={
+   {"context_work_availability","busy with work"},
+   {"context_work_availability","too busy to take"},
+   {"context_work_availability","cannot take holidays"},
+   {"context_work_availability","can't take holidays"},
+   {"context_work_availability","je suis occupé"},
+   {"context_work_availability","je suis occupée"},
+   {"context_work_availability","trop de travail"},
+   {"context_work_availability","pas prendre de vacances"},
+   {"context_work_availability","仕事が忙しい"},
+   {"context_work_availability","休暇を取れない"},
+   {"context_work_availability","休みが取れない"},
+   {"context_upcoming_plan","tonight i"},
+   {"context_upcoming_plan","tomorrow i"},
+   {"context_upcoming_plan","i plan to"},
+   {"context_upcoming_plan","i'm going to"},
+   {"context_upcoming_plan","ce soir je"},
+   {"context_upcoming_plan","demain je"},
+   {"context_upcoming_plan","je vais "},
+   {"context_upcoming_plan","今夜は"},
+   {"context_upcoming_plan","明日は"},
+   {"context_upcoming_plan","予定がある"},
+   {"context_upcoming_plan","する予定"},
+   {"context_hobby","my hobby is"},
+   {"context_hobby","my hobbies are"},
+   {"context_hobby","mon passe-temps"},
+   {"context_hobby","mes loisirs"},
+   {"context_hobby","私の趣味は"},
+   {"context_hobby","趣味は"}
+  };
+  for(const auto &rule:rules){
+   if(lower.indexOf(rule.trigger)>=0){
+    key=rule.key;value=utterance;pos=-2;break;
+   }
+  }
+ }
  // Consolidate declarative attributes under a stable subject (not all
  // user statements are food, plans or preferences).
- if(pos<0){
+ if(pos==-1){
   int subjectStart=lower.indexOf("my ");
   int predicate=subjectStart>=0?lower.indexOf(" is ",subjectStart+3):-1;
   if(subjectStart>=0 && predicate>subjectStart+3 && predicate-subjectStart<=42){
@@ -133,14 +279,19 @@ inline bool extractFact(String utterance,String &key,String &value){
    }
   }
  }
- if(pos==-1)for(const char* marker:{"i no longer like ","i don't like ","i do not like ","i dislike ","i hate ","je n'aime pas ","もう好きじゃない"}){
+ if(pos==-1)for(const char* marker:{"i no longer like ","i don't like ","i do not like ","i dislike ","i hate ","je n'aime pas ","je déteste ","je deteste ","もう好きじゃない"}){
   pos=lower.indexOf(marker);if(pos>=0){key="dislikes";skip=strlen(marker);break;}
  }
- if(pos==-1)for(const char* marker:{"i like ","i love ","my favorite food is ","好きな食べ物は","好きなのは"}){
+ if(pos==-1)for(const char* marker:{"i like ","i love ","j'aime ","j’adore ","j'adore ","my favorite food is ","好きな食べ物は","好きなのは"}){
   pos=lower.indexOf(marker);if(pos>=0){key="likes";skip=strlen(marker);break;}
  }
  if(pos==-1 && lower.indexOf("が好き")>0){
   key="likes";value=utterance.substring(0,lower.indexOf("が好き"));
+  // Japanese topic and subject markers are not part of the liked object.
+  for(const char* prefix:{"私は","僕は","俺は","わたしは","私が","僕が","俺が","わたしが"}){
+   if(value.startsWith(prefix)){value.remove(0,strlen(prefix));break;}
+  }
+  value.trim();
  }else if(pos>=0){
   value=utterance.substring(pos+skip);
  }else if(pos==-1){
@@ -176,6 +327,17 @@ inline bool extractFact(String utterance,String &key,String &value){
   int k=value.indexOf(ending);if(k>=0)value=value.substring(0,k);
  }
  value.trim();
+ if(key=="name"){
+  // Trim multilingual self-introduction endings.
+  for(const char* suffix:{"と申します","といいます","と言います","です","だよ","だ","って呼んで","と呼んで","と呼んでください"}){
+   if(value.endsWith(suffix)){value.remove(value.length()-strlen(suffix));break;}
+  }
+  if(value.startsWith("シャナ") || value.startsWith("しゃな"))value="Shana";
+  if(value.startsWith("、") || value.startsWith(" "))value.remove(0,value.startsWith("、")?strlen("、"):1);
+  for(const char* suffix:{"よろしくお願いします","よろしくね"})if(value.endsWith(suffix))value.remove(value.length()-strlen(suffix));
+  for(const char* suffix:{" please"," okay"," ok"})if(value.endsWith(suffix))value.remove(value.length()-strlen(suffix));
+  value.trim();
+ }
  // Do not chop off a UTF-8 scalar or store a sprawling paragraph.
  if(value.length()>112)value=clipUTF8(value,112);
  return value.length()>=2;
@@ -198,7 +360,7 @@ inline bool isEpisodic(const String &key){
 }
 inline bool meaningfulPreferenceSubject(String subject);
 inline void mergeFact(const String &key,const String &value){
- if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
+ if(!facts || !cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
  // Consolidate exact duplicates and corrections: dislikes replace likes
  // for the same subject, while different preferences coexist.
  String normalized=normalizeSubject(value);
@@ -208,10 +370,10 @@ inline void mergeFact(const String &key,const String &value){
  for(int i=0;i<factCount;i++){
   if(finalKey==facts[i].key){
    // Keep multiple likes; a correction to the same subject supersedes it.
-   if(key=="dislikes"||key=="likes"){
-    String entry=key+":"+value;
-    entry.toCharArray(facts[i].value,sizeof(facts[i].value));
-   }else value.toCharArray(facts[i].value,sizeof(facts[i].value));
+   String entry=(key=="dislikes"||key=="likes")?key+":"+value:value;
+   // Repeating an unchanged fact is not a new memory event.
+   if(entry==String(facts[i].value)){xSemaphoreGive(cacheMutex);return;}
+   entry.toCharArray(facts[i].value,sizeof(facts[i].value));
    factRevision++;
    xSemaphoreGive(cacheMutex);return;
   }
@@ -340,7 +502,8 @@ inline bool queue(const String &question,const String &answer){
  sanitize(question,sizeof(e.question)-1).toCharArray(e.question,sizeof(e.question));
  sanitize(answer,sizeof(e.answer)-1).toCharArray(e.answer,sizeof(e.answer));
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
- String key,value;if(extractFact(question,key,value) && key!="event" && key!="note" && key!="likes" && key!="dislikes")mergeFact(key,value);
+ // Facts are merged exclusively in the SD worker, so revision detection
+ // and snapshot persistence cannot miss an early RAM-only mutation.
  // The active recall cache updates immediately; SD persistence is deferred.
  addCache(question,answer);
  return true;
@@ -401,6 +564,42 @@ inline uint32_t termBits(String s){
  }
  return bits;
 }
+// Language-independent topic aliases: retrieve related history without an
+// extra model request or SD I/O on the audio path. This is lexical semantic
+// expansion (not embedding/vector search).
+inline uint32_t semanticTopics(String q){
+ q.toLowerCase();
+ uint32_t topics=topicsFor(q);
+ const char *food[]={"like","enjoy","favorite","favourite","prefer","aime","adore","préfère","préf","好き","好物","好み","何が好き","食べ物",nullptr};
+ for(int i=0;food[i];i++)if(q.indexOf(food[i])>=0){topics|=1UL<<1;break;}
+ const char *work[]={"career","profession","employer","occupation","métier","emploi","職業","働","勤務",nullptr};
+ for(int i=0;work[i];i++)if(q.indexOf(work[i])>=0){topics|=1UL<<3;break;}
+ const char *identity[]={"who am i","who i am","my identity","comment je m'appelle","quel est mon nom","私の名前","名前を",nullptr};
+ for(int i=0;identity[i];i++)if(q.indexOf(identity[i])>=0){topics|=1UL<<12;break;}
+ return topics;
+}
+inline String semanticFactRecall(const String &query,size_t limit=280){
+ String result;
+ if(!facts || !cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(2))!=pdTRUE)return result;
+ uint32_t topics=semanticTopics(query);
+ String lower=query;lower.toLowerCase();
+ bool preferences=(topics&(1UL<<1)) || lower.indexOf("prefer")>=0 || lower.indexOf("好き")>=0;
+ // Iterate recent facts first, prioritizing identity and matching preferences.
+ for(int i=(int)factCount-1;i>=0;i--){
+  String key(facts[i].key),value(facts[i].value);
+  bool selected=(preferences && key.startsWith("pref_")) ||
+   ((topics&(1UL<<12)) && key=="name") ||
+   ((topics&(1UL<<3)) && (key=="work" || key=="context_work_availability")) ||
+   ((topics&(1UL<<9)) && key=="context_upcoming_plan") ||
+   ((topics&(1UL<<11)) && key=="home");
+  if(!selected)continue;
+  String line=key+"\\t"+value+"\\n";
+  if(result.length()+line.length()>limit)continue;
+  result+=line;
+ }
+ xSemaphoreGive(cacheMutex);
+ return result;
+}
 inline void readIndex(){
  if(!mounted)return;
  File f=SD_MMC.open("/kitty/memory.idx",FILE_READ);
@@ -431,11 +630,14 @@ inline void appendIndex(const Entry &entry,uint32_t offset,uint32_t timestamp){
 }
 inline void searchOnSD(const SearchRequest &q){
  String query(q.query);
- const uint32_t topics=topicsFor(query),bits=termBits(query);
+ const uint32_t topics=semanticTopics(query),bits=termBits(query);
  struct Rank { int score; uint32_t offset; };
  Rank best[3]={{0,0},{0,0},{0,0}};
  if(indexRows){
   for(int i=(int)indexCount-1;i>=0;i--){
+   // Yield in fixed slices, even when candidates fail the topic filter.
+   // Keeps large 150k-row scans cooperative with the Core 0 I2S task.
+   if((i&255)==0)vTaskDelay(1);
    IndexRow row=indexRows[i];
    int score=__builtin_popcount(row.terms&bits);
    if(topics && (row.topics&topics))score+=12;
@@ -444,7 +646,6 @@ inline void searchOnSD(const SearchRequest &q){
     for(int j=2;j>k;j--)best[j]=best[j-1];
     best[k]={score,row.offset};break;
    }
-   if((i&1023)==0)vTaskDelay(1); // yield to realtime I2S
   }
  }
  String result;
@@ -467,7 +668,7 @@ inline void searchOnSD(const SearchRequest &q){
  }
 }
 inline uint32_t requestSearch(const String &query){
- if(!mounted || !searches || !indexRows || !indexCount || !topicsFor(query))return 0;
+ if(!mounted || !searches || !indexRows || !indexCount || !semanticTopics(query))return 0;
  SearchRequest q={};
  sanitize(query,sizeof(q.query)-1).toCharArray(q.query,sizeof(q.query));
  q.serial=++nextSerial;
@@ -482,6 +683,8 @@ inline String takeSearch(uint32_t serial){
 }
 
 inline void task(void*){
+ if(!facts)facts=(Fact*)heap_caps_calloc(MAX_FACTS,sizeof(Fact),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!facts)Serial.println("[MEMORY] ERROR: PSRAM fact catalog unavailable");
  SD_MMC.setPins(39,38,40);
  mounted=SD_MMC.begin("/sdcard",true,false,20000,5);
  cardState=mounted?1:2;
@@ -491,11 +694,9 @@ inline void task(void*){
  }else{
   SD_MMC.mkdir("/kitty");
   updateStorage();
-  File factFile=SD_MMC.open("/kitty/facts.tsv",FILE_READ);
-  if(factFile){while(factFile.available()){String line=factFile.readStringUntil('\n');int t=line.indexOf('\t');if(t>0)mergeFact(line.substring(0,t),line.substring(t+1));}factFile.close();}
+  if(facts)restoreFactSnapshots();
   if(pruneInvalidPreferences()){
-   File clean=SD_MMC.open("/kitty/facts.tsv","w");
-   if(clean){clean.print(factSummary(6000));clean.close();}
+   persistFacts();
    Serial.println("[MEMORY] pruned ambiguous preferences");
   }
   indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -545,23 +746,75 @@ inline void task(void*){
  Entry e={};
  SearchRequest query={};
  while(true){
+  // S3's network task proposes changes only; the SD worker owns persistence.
+  ConsolidatedFact aiFact={};
+  if(mounted && consolidatedFacts && xQueueReceive(consolidatedFacts,&aiFact,0)==pdTRUE){
+   String kind(aiFact.key),subject(aiFact.value);
+   bool preference=(kind=="likes"||kind=="dislikes") && meaningfulPreferenceSubject(subject);
+   int colon=subject.indexOf(':');
+   String topic=colon>0?subject.substring(0,colon):String("");
+   String detail=colon>0?subject.substring(colon+1):String("");
+   bool situation=kind=="situation" && (topic=="work_availability" ||
+     topic=="upcoming_plan" || topic=="hobby") && detail.length()>=5 &&
+     detail.length()<=90 && detail.indexOf('?')<0;
+   if(preference || situation){
+    uint32_t before=factRevision;
+    if(preference)mergeFact(kind,subject);
+    else mergeFact("context_"+topic,detail);
+    if(factRevision!=before){
+     if(persistFacts())memorizedNoticeSeq++;
+     Serial.printf("[MEMORY AI] consolidated %s\n",kind.c_str());
+    }
+   }
+  }
   static uint32_t lastStorageAt=0;
   if(mounted && (uint32_t)(millis()-lastStorageAt)>30000UL){updateStorage();lastStorageAt=millis();}
-  if(formatRequested && cardState==2){
+  if(formatRequested){
    formatRequested=false;
-   cardState=3;
-   Serial.println("[MEMORY] FORMATTING: requested explicitly; all card data will be erased");
-   SD_MMC.end();
-   mounted=SD_MMC.begin("/sdcard",true,true,20000,5);
-   if(mounted && SD_MMC.cardType()!=CARD_NONE){
-    cardState=1;SD_MMC.mkdir("/kitty");updateStorage();
-    if(!indexRows)indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    indexCount=0;readIndex();
-    Serial.println("[MEMORY] FORMAT COMPLETE: SD ready");
+   const bool wasMounted=mounted;
+   cardState=3;mounted=false; // suspend enqueue and memory I/O during format
+   Serial.println("[MEMORY] FORMATTING: permanently erasing all SD content");
+   if(writes)xQueueReset(writes);
+   if(searches)xQueueReset(searches);
+   if(consolidationCandidates)xQueueReset(consolidationCandidates);
+   if(consolidatedFacts)xQueueReset(consolidatedFacts);
+   bool ok=false;
+   if(wasMounted){
+    // Unlike begin(format_if_mount_failed=true), f_mkfs reformats even a
+    // previously healthy FAT volume. The SD worker is the only FS owner.
+    BYTE* work=(BYTE*)heap_caps_malloc(4096,MALLOC_CAP_8BIT);
+    if(work){
+     MKFS_PARM opt={};opt.fmt=FM_FAT|FM_FAT32;opt.n_fat=1;
+     FRESULT result=f_mkfs("0:",&opt,work,4096);
+     free(work);
+     Serial.printf("[MEMORY] FAT format result=%d\\n",(int)result);
+     ok=(result==FR_OK);
+    }
+    SD_MMC.end();
+    if(ok)ok=SD_MMC.begin("/sdcard",true,false,20000,5);
    }else{
-    mounted=false;cardState=4;
-    Serial.println("[MEMORY] FORMAT FAILED: check card and connections");
+    // Mount failed: allow the Arduino SD driver to initialize and
+    // format an unmountable FAT volume.
+    SD_MMC.end();
+    ok=SD_MMC.begin("/sdcard",true,true,20000,5);
    }
+   mounted=ok && SD_MMC.cardType()!=CARD_NONE;
+   if(mounted){
+    SD_MMC.mkdir("/kitty");
+    if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(500))==pdTRUE){
+     if(facts)memset(facts,0,MAX_FACTS*sizeof(Fact));factCount=0;factRevision++;
+     for(auto &v:recent)v="";
+     recentCount=0;recentNext=0;
+     xSemaphoreGive(cacheMutex);
+    }
+    indexCount=0;finishedSerial=0;nextSerial=0;searchReply="";
+    saved=0;failed=0;updateStorage();cardState=1;
+    Serial.println("[MEMORY] FORMAT COMPLETE: card mounted, memory cache cleared");
+   }else{
+    cardState=4;
+    Serial.println("[MEMORY] FORMAT FAILED: check SD card and wiring");
+   }
+   continue;
   }
   if(searches && xQueueReceive(searches,&query,0)==pdTRUE && mounted)searchOnSD(query);
   if(xQueueReceive(writes,&e,pdMS_TO_TICKS(15))!=pdTRUE)continue;
@@ -574,18 +827,24 @@ inline void task(void*){
   bool ok=f.printf("%lu\t%s\t%s\n",(unsigned long)ts,e.question,e.answer)>0;
   f.close();
   if(ok){saved++;appendIndex(e,offset,ts);
+   if(consolidationCandidates && strlen(e.question)>=12){
+    ConsolidationCandidate c={};strlcpy(c.utterance,e.question,sizeof(c.utterance));
+    // Drop oldest if overloaded: never block speech or the SD archive.
+    if(xQueueSend(consolidationCandidates,&c,0)!=pdTRUE){
+     ConsolidationCandidate old={};xQueueReceive(consolidationCandidates,&old,0);
+     xQueueSend(consolidationCandidates,&c,0);
+    }
+   }
    uint32_t revisionBefore=factRevision;
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
-    if(key!="likes" && key!="dislikes")mergeFact(key,value);
+    // Persist parsed facts on the SD worker, never on the audio callback.
+    mergeFact(key,value);
    }
    if(gymCancellation(String(e.question)))removeSupersededGymPlan();
    consolidatePreferences(String(e.question));
    {
-    File ff=SD_MMC.open("/kitty/facts.tsv","w");
-    if(ff){size_t written=ff.print(factSummary(6000));ff.close();
-     if(written && factRevision!=revisionBefore)memorizedNoticeSeq++;
-    }
+    if(factRevision!=revisionBefore && persistFacts())memorizedNoticeSeq++;
     Serial.printf("[MEMORY] saved fact key=%s total=%u\n",key.c_str(),(unsigned)factCount);
    }
   }else failed++;
@@ -598,6 +857,8 @@ inline void task(void*){
 inline void init(){
  if(!cacheMutex)cacheMutex=xSemaphoreCreateMutex();
  if(!writes)writes=xQueueCreate(10,sizeof(Entry));
+ if(!consolidationCandidates)consolidationCandidates=xQueueCreate(8,sizeof(ConsolidationCandidate));
+ if(!consolidatedFacts)consolidatedFacts=xQueueCreate(8,sizeof(ConsolidatedFact));
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
  if(writes && !worker)
   xTaskCreatePinnedToCore(task,"kitty_sd",6144,nullptr,1,&worker,0);

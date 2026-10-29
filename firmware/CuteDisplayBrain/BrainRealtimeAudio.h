@@ -317,10 +317,13 @@ static void audioTask(void *){
    }
    if((uint32_t)(millis()-audioDiagAt)>10000UL){
     audioDiagAt=millis();
-    Serial.printf("[CALL AUDIO DIAG] output_peak=%lu limited=%lu mic=%lu buffer_ms=%lu dropped_ms=%lu mic_drops=%lu\\n",
+    Serial.printf("[CALL AUDIO DIAG] output_peak=%lu limited=%lu mic=%lu buffer_ms=%lu dropped_ms=%lu mic_drops=%lu stack_free=%lu internal_free=%lu largest_internal=%lu\\n",
       (unsigned long)outputPeak,(unsigned long)limitedSamples,
       (unsigned long)aecResidualLevel,(unsigned long)bufferedMs(),
-      (unsigned long)droppedSpeakerMs(),(unsigned long)droppedMic);
+      (unsigned long)droppedSpeakerMs(),(unsigned long)droppedMic,
+      (unsigned long)uxTaskGetStackHighWaterMark(nullptr),
+      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
     outputPeak=0;limitedSamples=0;
    }
    size_t written=0;

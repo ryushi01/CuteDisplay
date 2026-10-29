@@ -353,10 +353,9 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(!n||n>MAX_EVENT_BYTES){fail("OVERSIZED_EVENT");return;}
  // JSON parsing happens only on the Arduino loop (Core 1). Never parse on
  // the 24kHz I2S task, and never log transcription or response audio.
- String text;
- if(!text.reserve(n+1)){fail("JSON_ALLOC");return;}
- for(size_t i=0;i<n;i++)text+=(char)payload[i];
- cJSON* json=cJSON_Parse(text.c_str());
+ // Parse the bounded WebSocket payload directly. Avoid duplicating up to
+ // tens of KB of base64 TTS JSON in internal heap on every audio frame.
+ cJSON* json=cJSON_ParseWithLength((const char*)payload,n);
  if(!json){fail("JSON_PARSE");return;}
  cJSON *typ=cJSON_GetObjectItem(json,"type");
  const char *type=cJSON_IsString(typ)?typ->valuestring:"";
