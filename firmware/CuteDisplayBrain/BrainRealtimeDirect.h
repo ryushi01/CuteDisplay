@@ -563,7 +563,10 @@ inline void tick(bool audioBusy){
     // Listening continues while Kitty finishes her sentence.
     // Do not cancel provider or drain the speaker ring.
     playbackSpeechDetected=true;
-    Serial.println("[CALL] OVERLAP_VOICE: microphone open during speech");
+    Serial.printf("[CALL] OVERLAP_VOICE: mic=%lu speaker_output=%lu detections=%lu\\n",
+      (unsigned long)BrainRealtimeAudio::nearMicLevel(),
+      (unsigned long)BrainRealtimeAudio::playbackReferenceLevel(),
+      (unsigned long)BrainRealtimeAudio::overlapCount());
    }
    // 20ms mono little-endian PCM16, encoded as a native Open WebUI event.
    // Never send more than 2 frames per tick (40ms maximum).
