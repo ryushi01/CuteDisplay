@@ -29,6 +29,7 @@ static bool remoteResponse=false, streamedSpeech=false;
 static bool bargeCancelling=false;
 static String deferredVoiceItem;
 static String captionPending;
+static String captionDeferred;
 static String liveKittyCaption;
 static uint32_t captionLastSent=0;
 inline void appendLiveKitty(const String &delta){
@@ -58,6 +59,11 @@ inline bool takeCaption(String &out){
  captionOffset+=count;
  if(captionOffset>=captionPending.length()){
   captionReady=false;captionPending="";captionOffset=0;
+  if(!captionDeferred.isEmpty()){
+   captionPending=captionDeferred;
+   captionDeferred="";
+   captionReady=true;
+  }
  }
  return true;
 }
@@ -70,6 +76,7 @@ inline void queueCaption(const char *speaker,const char *words){
   while(begin<c.length() && ((uint8_t)c[begin]&0xC0)==0x80)begin++;
   c=c.substring(begin);
  }
+ if(captionReady){captionDeferred=c;return;}
  captionPending=c;captionOffset=0;captionReady=true;
 }
 static bool playbackSpeechDetected=false;
