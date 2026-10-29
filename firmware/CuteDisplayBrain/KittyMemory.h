@@ -239,10 +239,32 @@ inline void mergeFact(const String &key,const String &value){
 }
 
 
+inline bool gymCancellation(const String &utterance){
+ String s=utterance;s.toLowerCase();
+ return s.indexOf("gym")>=0 && (s.indexOf("cancel")>=0 ||
+    s.indexOf("not going")>=0 || s.indexOf("won't go")>=0);
+}
+inline void removeSupersededGymPlan(){
+ if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
+ for(int i=0;i<factCount;){
+  String k(facts[i].key),v(facts[i].value);v.toLowerCase();
+  if(isEpisodic(k) && v.indexOf("gym")>=0 &&
+    v.indexOf("tomorrow")>=0 && v.indexOf("cancel")<0 &&
+    v.indexOf("not going")<0 && v.indexOf("won't go")<0){
+   for(int j=i;j<factCount-1;j++)facts[j]=facts[j+1];
+   factCount--;
+  }else i++;
+ }
+ xSemaphoreGive(cacheMutex);
+}
 inline void consolidatePreferences(const String &utterance){
  // Break short compound English statements into independent preference facts.
  // Generic subjects: food, games, people, music, hobbies, technology, etc.
  String lowered=utterance;lowered.toLowerCase();
+ // An interrogative is not a new personal preference.
+ if(lowered.indexOf('?')>=0 || lowered.indexOf("？")>=0 ||
+    lowered.indexOf("what ")>=0 || lowered.indexOf("which ")>=0 ||
+    lowered.indexOf("do i ")>=0 || lowered.indexOf("can you ")>=0)return;
  const char *markers[]={"i no longer like ","i don't like ","i do not like ",
    "i dislike ","i hate ","i like ","i love ","but hate ","but dislike ",
    "but i hate ","but i dislike ","but i like ","but i love "};
@@ -266,6 +288,9 @@ inline void consolidatePreferences(const String &utterance){
     for(const char *tail:{".","!","。"," but"," though"}){
      if(subject.endsWith(tail))subject.remove(subject.length()-strlen(tail));
     }
+    subject.trim();
+    if(subject.startsWith("and "))subject.remove(0,4);
+    if(subject.startsWith("especially "))subject.remove(0,11);
     subject.trim();
     if(subject.length()>1 && subject.length()<=72 &&
        subject.indexOf('?')<0 && subject.indexOf("？")<0)
@@ -518,6 +543,7 @@ inline void task(void*){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
     if(key!="likes" && key!="dislikes")mergeFact(key,value);
    }
+   if(gymCancellation(String(e.question)))removeSupersededGymPlan();
    consolidatePreferences(String(e.question));
    {
     File ff=SD_MMC.open("/kitty/facts.tsv","w");
