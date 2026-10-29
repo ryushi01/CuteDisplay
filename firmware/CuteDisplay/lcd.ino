@@ -3168,11 +3168,7 @@ void loop(){
   if(!batteryOverlayUntil)redrawCurrent();
  }
  if(callModeActive){
-  // Return to a gentle default if no more AI gestures arrive. Silence and
-  // link drops cannot leave an open speaking mouth stuck on the face.
-  if(callFaceMood!=1 && (uint32_t)(now-callFaceMoodSince)>=CALL_MOOD_HOLD_MS){
-   callFaceMood=1;if(lcdReady)redrawCurrent();
-  }
+  // Hold selected emotion for the whole spoken reply; S3 resets on playback drain.
   if(callLipLevel && (uint32_t)(now-callLipAt)>500UL){
    callLipLevel=0;if(lcdReady)redrawCurrent();
   }
