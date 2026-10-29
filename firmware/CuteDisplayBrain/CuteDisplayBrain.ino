@@ -811,7 +811,7 @@ static void consoleCommand(String cmd){
     (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
   // Task measurements are high-water stack headroom in bytes, not CPU load.
   // Never walk the whole RTOS task list from the realtime WebSocket loop.
-  Serial.printf("[SYS TASKS] audio_core=0 audio_priority=3 audio_stack_free=%lu sd_core=0 sd_priority=1 sd_stack_free=%lu ai_core=0 ai_priority=1 ai_stack_free=%lu\\n",
+  Serial.printf("[SYS TASKS] audio_core=0 audio_priority=3 audio_stack_free=%lu sd_core=0 sd_priority=1 sd_stack_free=%lu ai_core=0 ai_priority=1 ai_stack_free=%lu\n",
     (unsigned long)(BrainRealtimeAudio::owner?uxTaskGetStackHighWaterMark(BrainRealtimeAudio::owner):0),
     (unsigned long)(KittyMemory::worker?uxTaskGetStackHighWaterMark(KittyMemory::worker):0),
     (unsigned long)(BrainAI::worker?uxTaskGetStackHighWaterMark(BrainAI::worker):0));
