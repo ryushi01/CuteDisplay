@@ -238,7 +238,7 @@ inline void task(void*){
  SearchRequest query={};
  while(true){
   if(searches && xQueueReceive(searches,&query,0)==pdTRUE && mounted)searchOnSD(query);
-  if(xQueueReceive(writes,&e,pdMS_TO_TICKS(1000))!=pdTRUE)continue;
+  if(xQueueReceive(writes,&e,pdMS_TO_TICKS(15))!=pdTRUE)continue;
   if(!mounted)continue;
   File f=SD_MMC.open("/kitty/conversations.tsv",FILE_APPEND);
   if(!f){failed++;continue;}
