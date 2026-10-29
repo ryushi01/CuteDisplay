@@ -200,6 +200,11 @@ inline bool extractFact(String utterance,String &key,String &value){
  }
  if(pos==-1 && lower.indexOf("が好き")>0){
   key="likes";value=utterance.substring(0,lower.indexOf("が好き"));
+  // Japanese topic and subject markers are not part of the liked object.
+  for(const char* prefix:{"私は","僕は","俺は","わたしは","私が","僕が","俺が","わたしが"}){
+   if(value.startsWith(prefix)){value.remove(0,strlen(prefix));break;}
+  }
+  value.trim();
  }else if(pos>=0){
   value=utterance.substring(pos+skip);
  }else if(pos==-1){
@@ -694,7 +699,7 @@ inline void task(void*){
    uint32_t revisionBefore=factRevision;
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
-    if(key!="likes" && key!="dislikes")mergeFact(key,value);
+    // Save short, explicit multilingual preferences immediately on the SD worker.\n   // No network or model inference is required while Call Mode is active.\n   mergeFact(key,value);
    }
    if(gymCancellation(String(e.question)))removeSupersededGymPlan();
    consolidatePreferences(String(e.question));
