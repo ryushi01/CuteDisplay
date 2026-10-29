@@ -554,6 +554,8 @@ inline void tick(bool audioBusy){
     Serial.println("[CALL] BARGE_IN: local speech detected, stopping Kitty");
     BrainRealtimeAudio::clearSpeaker();
     BrainAI::cancelCallDelegation();
+    delegatedCallId="";failedCallId="";failedCallAnswer="";
+    animationResponseId="";toolResponseFinished=false;
     // The backend should forward this standard Realtime command upstream.
     // If the provider already finished, leave the open session intact.
     bargeCancelling=remoteResponse;
