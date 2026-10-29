@@ -117,7 +117,7 @@ def patch_expressions(source):
         if begin < 0 or end < 0:
             raise ValueError("Previous expression block not found")
         end += len(EXPRESSION_MARKER)
-        fresh = EXPRESSION_TOOL.rstrip("\\n")
+        fresh = EXPRESSION_TOOL.rstrip()
         return source[:begin] + fresh + source[end:]
     for name, anchor in EXPRESSION_ANCHORS.items():
         if source.count(anchor) != 1:
