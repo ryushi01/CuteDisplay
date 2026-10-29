@@ -357,6 +357,8 @@ const unsigned long BATTERY_CARD_MS = 6000UL;
 const unsigned long CHARGE_NOTICE_MS = 3000UL;
 const unsigned long BATTERY_SAMPLE_MS = 2000UL;
 unsigned long batteryOverlayUntil = 0;
+static uint8_t sdCardNoticeState=0;
+static uint32_t sdCardNoticeUntil=0;
 unsigned long chargeNoticeUntil = 0;
 unsigned long fullNoticeUntil = 0;
 unsigned long lowNoticeUntil = 0;
@@ -2081,11 +2083,28 @@ void drawSpeechBubble() {
   rect(min(x,innerRight-3),y,2,max(7*a,16*j),BLACK);
 }
 #include "C5CallFace.h"
+static void drawSDCardNotice(){
+ if(!sdCardNoticeState || (int32_t)(sdCardNoticeUntil-millis())<=0)return;
+ rect(24,55,272,67,0xFFFF);
+ rect(27,58,266,61,0x2104);
+ if(sdCardNoticeState==3){
+  textAt("SD CARD FORMATTING",51,70,2,0xFFE0);
+  textAt("DO NOT REMOVE CARD",93,101,1,0xFFFF);
+ }else if(sdCardNoticeState==1){
+  textAt("SD CARD READY",73,72,2,0x07E0);
+ }else if(sdCardNoticeState==2){
+  textAt("SD CARD NOT READY",53,72,2,0xFFE0);
+  textAt("CHECK / FORMAT ON S3",85,101,1,0xFFFF);
+ }else{
+  textAt("SD CARD ERROR",74,74,2,0xF800);
+ }
+}
 void drawMessage() {
  if(!beginDrawing())return;
  if(callModeActive && !C5UARTOTA::active()){
   drawFullScreenKittyFace();
   drawBrainLinkOverlay();
+  drawSDCardNotice();
   finishDrawing();
   return;
  }
@@ -2133,6 +2152,7 @@ void drawMessage() {
    textAt(C5UARTOTA::error(),74,94,1,0xFFFF);
   }
  }
+ drawSDCardNotice();
  finishDrawing();
 }
 void showMessage(String s) {
@@ -2907,6 +2927,14 @@ static void serviceBrain() {
     }
    }
   }
+  else if(f.type=="SD_STATE"){
+   int code=f.payload.toInt();
+   if(code>=1 && code<=4){
+    sdCardNoticeState=(uint8_t)code;
+    sdCardNoticeUntil=millis()+(code==3?90000UL:6000UL);
+    if(lcdReady)redrawCurrent();
+   }
+  }
   else if(f.type=="CALL_TEXT"){
    if(callModeActive && f.payload.length()>=2 && f.payload.length()<=80){
     const char mode=f.payload[0];
@@ -3177,6 +3205,9 @@ void loop(){
  }
  if(batteryOverlayUntil && (int32_t)(now-batteryOverlayUntil)>=0){
   batteryOverlayUntil=0;redrawCurrent();
+ }
+ if(sdCardNoticeState && (int32_t)(now-sdCardNoticeUntil)>=0){
+  sdCardNoticeState=0;if(lcdReady)redrawCurrent();
  }
  if(fullNoticeUntil && (int32_t)(now-fullNoticeUntil)>=0){fullNoticeUntil=0;redrawCurrent();}
  if(lowNoticeUntil && (int32_t)(now-lowNoticeUntil)>=0){lowNoticeUntil=0;redrawCurrent();}
