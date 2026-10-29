@@ -1196,10 +1196,24 @@ inline void task(void*){
 }
 inline void init(){
  if(!cacheMutex)cacheMutex=xSemaphoreCreateMutex();
- if(!writes)writes=xQueueCreate(10,sizeof(Entry));
- if(!consolidationCandidates)consolidationCandidates=xQueueCreate(8,sizeof(ConsolidationCandidate));
+ // Keep queue payloads in PSRAM: these long-lived allocations were
+ // reserving ~11 KiB of scarce internal 8-bit RAM, even when idle.
+ // Queue metadata remains internal; payloads are 8-bit-accessible PSRAM.
+ static StaticQueue_t writeQueueCtrl,consolidationQueueCtrl,summaryQueueCtrl;
+ static uint8_t *writeStorage=nullptr,*consolidationStorage=nullptr,*summaryStorage=nullptr;
+ if(!writes){
+  writeStorage=(uint8_t*)heap_caps_malloc(10*sizeof(Entry),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(writeStorage)writes=xQueueCreateStatic(10,sizeof(Entry),writeStorage,&writeQueueCtrl);
+ }
+ if(!consolidationCandidates){
+  consolidationStorage=(uint8_t*)heap_caps_malloc(8*sizeof(ConsolidationCandidate),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(consolidationStorage)consolidationCandidates=xQueueCreateStatic(8,sizeof(ConsolidationCandidate),consolidationStorage,&consolidationQueueCtrl);
+ }
  if(!consolidatedFacts)consolidatedFacts=xQueueCreate(8,sizeof(ConsolidatedFact));
- if(!summaryCandidates)summaryCandidates=xQueueCreate(2,sizeof(SummaryCandidate));
+ if(!summaryCandidates){
+  summaryStorage=(uint8_t*)heap_caps_malloc(2*sizeof(SummaryCandidate),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(summaryStorage)summaryCandidates=xQueueCreateStatic(2,sizeof(SummaryCandidate),summaryStorage,&summaryQueueCtrl);
+ }
  if(!summaryResults)summaryResults=xQueueCreate(2,sizeof(SummaryResult));
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
  if(writes && !worker){
