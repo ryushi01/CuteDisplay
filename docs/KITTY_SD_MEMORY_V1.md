@@ -52,3 +52,11 @@
 - On connection, the S3 includes a bounded memory profile in authenticated realtime session context. The matching custom Open WebUI realtime patch must be redeployed for this to influence direct realtime speech.
 - The profile is only transmitted as temporary model context. No long-term memory is stored in Open WebUI or on the Mac.
 - If `memory probe` increases saved/indexed but speaking does not, inspect the transcription event path, not the SD filesystem.
+
+## SD information card and episodic memories (C5 v34)
+- C5 right-button short press retains the existing battery, Wi-Fi, Bluetooth and IP readout and adds SD usage: approximate fill percent, used MB/KB and card capacity MB/KB.
+- The Brain samples SD_MMC size and used bytes on the low-priority SD worker every ~30 seconds or following writes; sends cached KB via SD_USAGE UART roughly every 15 seconds. C5 does **not** read the card directly.
+- The information card is also available during fullscreen realtime calls.
+- Long-term event extraction captures simple explicit future plans, dates, purchases, projects, past events and requests to remember (not restricted to food). For example, "the day after tomorrow I will eat Belgian moules" remains an episodic note rather than attempting to classify the dish into a food preference.
+- Most important: event extraction is currently pattern based. This does not equal full open-ended, reasoning-driven memory; ambiguous paraphrases may still be missed.
+- Structured facts are persisted in full in /kitty/facts.tsv. AI receives only a bounded contextual slice.
