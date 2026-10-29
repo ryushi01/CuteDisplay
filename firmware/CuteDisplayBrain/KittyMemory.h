@@ -102,16 +102,18 @@ static volatile uint32_t factRevision=0, memorizedNoticeSeq=0;
 inline String factSummary(size_t maxLen=700){
  String out;
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
- // Prioritize stable facts and newest entries without increasing context size.
- // Keep stable identity and preferences ahead of the newest episodic notes.
- // Fixed byte budget is unchanged as the archive grows.
- for(int pass=0;pass<2;pass++){
+ // Keep realtime memory bounded and multilingual-topic context visible,
+ // even when many older preference slots are occupied.
+ for(int pass=0;pass<3;pass++){
   int count=(int)factCount;
   for(int n=0;n<count;n++){
-   int i=pass==0?n:(count-1-n);
+   int i=pass==2?(count-1-n):n;
    String k(facts[i].key);
-   bool episodic=k.startsWith("note_")||k.startsWith("event_");
-   if((pass==0 && episodic)||(pass==1 && !episodic))continue;
+   bool episodic=k.startsWith("note_") || k.startsWith("event_");
+   bool important=k=="name" || k=="home" || k=="work" || k.startsWith("context_");
+   if((pass==0 && !important) ||
+      (pass==1 && (important || episodic)) ||
+      (pass==2 && !episodic))continue;
    String record=k+"\t"+facts[i].value+"\n";
    if(out.length()+record.length()>maxLen)continue;
    out+=record;
