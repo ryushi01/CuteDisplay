@@ -12,6 +12,7 @@
 #include <freertos/queue.h>
 #include "CuteLink.h"
 #include "BrainTTS.h"
+#include "KittyMemory.h"
 
 namespace BrainAI {
 struct Packet { char kind[12]; char text[81]; };
@@ -301,6 +302,14 @@ inline void run(void*){
   cJSON_AddStringToObject(a,"content",history[i].assistant.c_str());
   cJSON_AddItemToArray(msgs,a);
  }
+ String remembered=KittyMemory::recall(prompt);
+ if(!remembered.isEmpty()){
+  cJSON *memory=cJSON_CreateObject();
+  cJSON_AddStringToObject(memory,"role","system");
+  String note="Relevant local SD memory excerpts (may be outdated; prefer the user's newest corrections):\n"+remembered;
+  cJSON_AddStringToObject(memory,"content",note.c_str());
+  cJSON_AddItemToArray(msgs,memory);
+ }
  cJSON *m=cJSON_CreateObject();
  cJSON_AddStringToObject(m,"role","user");
  cJSON_AddStringToObject(m,"content",prompt.c_str());
@@ -374,6 +383,7 @@ inline void run(void*){
  }else releaseText(true);
  if(!failed && doneSeen && !cancelRequested){
   rememberTurn(prompt,currentAnswer);
+  KittyMemory::queue(prompt,currentAnswer);
   if(!delegated && !BrainTTS::enqueue(currentAnswer))
    Serial.println("[TTS] Queue unavailable; text delivered");
  }
