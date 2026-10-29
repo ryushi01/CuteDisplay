@@ -744,7 +744,7 @@ static void consoleCommand(String cmd){
  if(cmd=="help"){
   Serial.println("[S3] call status / call diagnose / call start / call stop / call mood 0..15");
   Serial.println("[S3] c5 ota status (automatic OTA when a newer embedded C5 image is available)");
-  Serial.println("[S3] audio beep / audio diagnose / audio test / memory status / memory probe / memory format CONFIRM");
+  Serial.println("[S3] audio beep / audio diagnose / audio test / memory status / system status / memory probe / memory format CONFIRM");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
   return;
  }
@@ -791,6 +791,47 @@ static void consoleCommand(String cmd){
     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   Serial.printf("[MEMORY] profile_facts=%u\n",(unsigned)KittyMemory::factCount);
   Serial.print(KittyMemory::factSummary());
+  return;
+ }
+ if(cmd=="system status" || cmd=="diagnostics"){
+  // Read-only snapshot; does not stop I2S, read the SD filesystem or
+  // allocate large buffers. CPU percentage is deliberately NOT guessed.
+  Serial.printf("[SYS] uptime_ms=%lu reset_reason=%d cpu_mhz=%lu cores=%d loop_core=%d\n",
+    (unsigned long)millis(),(int)esp_reset_reason(),
+    (unsigned long)ESP.getCpuFreqMHz(),(int)ESP.getChipCores(),(int)xPortGetCoreID());
+  Serial.printf("[SYS HEAP] internal_free=%lu internal_min=%lu internal_largest=%lu psram_free=%lu psram_min=%lu psram_largest=%lu\n",
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  Serial.printf("[SYS CPU] frequency_mhz=%lu free_rtos_tasks=%lu loop_stack_highwater_bytes=%lu (instant CPU load unavailable)\n",
+    (unsigned long)ESP.getCpuFreqMHz(),(unsigned long)uxTaskGetNumberOfTasks(),
+    (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
+  Serial.printf("[SYS MEMORY] mounted=%d state=%u facts=%u indexed=%lu/%lu saved=%lu failed=%lu queue=%u ai_queue=%u\n",
+    KittyMemory::ready()?1:0,(unsigned)KittyMemory::status(),
+    (unsigned)KittyMemory::factCount,(unsigned long)KittyMemory::indexCount,
+    (unsigned long)KittyMemory::INDEX_MAX,(unsigned long)KittyMemory::saved,
+    (unsigned long)KittyMemory::failed,
+    (unsigned)(KittyMemory::writes?uxQueueMessagesWaiting(KittyMemory::writes):0),
+    (unsigned)(KittyMemory::consolidationCandidates?uxQueueMessagesWaiting(KittyMemory::consolidationCandidates):0));
+  Serial.printf("[SYS SD] used_kb=%lu total_kb=%lu available_kb=%lu\n",
+    (unsigned long)KittyMemory::usedKB(),(unsigned long)KittyMemory::capacityKB(),
+    (unsigned long)(KittyMemory::capacityKB()>KittyMemory::usedKB()?
+       KittyMemory::capacityKB()-KittyMemory::usedKB():0));
+  Serial.printf("[SYS CALL] state=%s connected=%d audio_active=%d speaker_buffer_ms=%lu speaker_peak_ms=%lu speaker_dropped_ms=%lu underruns=%lu mic_dropped=%lu stage=%s\n",
+    BrainRealtimeDirect::activity().c_str(),BrainRealtimeDirect::active()?1:0,
+    BrainRealtimeAudio::active()?1:0,(unsigned long)BrainRealtimeAudio::bufferedMs(),
+    (unsigned long)BrainRealtimeAudio::peakSpeakerMs(),
+    (unsigned long)BrainRealtimeAudio::droppedSpeakerMs(),
+    (unsigned long)BrainRealtimeAudio::speakerUnderruns,
+    (unsigned long)BrainRealtimeAudio::droppedMic,BrainRealtimeAudio::issue());
+  Serial.printf("[SYS WORK] memory_ai_running=%d memory_ai_aborting=%d legacy_ai=%d stt=%d tts=%d ota=%d wifi=%d\n",
+    BrainMemoryAI::running?1:0,BrainMemoryAI::abortRequested?1:0,
+    BrainAI::busy?1:0,BrainVoiceSTT::running?1:0,
+    BrainTTS::running?1:0,BrainC5OTA::updating()?1:0,
+    WiFi.status()==WL_CONNECTED?1:0);
   return;
  }
  if(cmd=="c5 ota status"){
