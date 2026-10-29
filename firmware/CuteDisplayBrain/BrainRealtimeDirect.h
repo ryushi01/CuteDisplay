@@ -28,6 +28,17 @@ static bool requested=false, started=false, connected=false, ready=false;
 static bool remoteResponse=false, streamedSpeech=false;
 static bool bargeCancelling=false;
 static String deferredVoiceItem;
+static String captionPending;
+static bool captionReady=false;
+inline bool takeCaption(String &out){if(!captionReady)return false;out=captionPending;captionReady=false;return true;}
+inline void queueCaption(const char *speaker,const char *words){
+ if(!words || !*words)return;
+ String c=String(speaker)+String(words);
+ // UART side-channel has an 80-byte payload limit. UTF-8 tail clipping
+ // avoids splitting Japanese multibyte characters at the packet boundary.
+ if(c.length()>78){int end=78;while(end>2 && ((uint8_t)c[end]&0xC0)==0x80)end--;c=c.substring(0,end);}
+ captionPending=c;captionReady=true;
+}
 static bool playbackSpeechDetected=false;
 static String delegatedCallId, animationResponseId;
 // The provider must finish the initial tool-call response before bridge.respond.
@@ -305,6 +316,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   cJSON *transcript=cJSON_GetObjectItem(json,"transcript");
   if(cJSON_IsString(id) && cJSON_IsString(transcript) &&
      transcript->valuestring && transcript->valuestring[0]){
+   queueCaption("YOU: ",transcript->valuestring);
    String item(id->valuestring);
    if(remoteResponse || BrainRealtimeAudio::hasSpeakerAudio() ||
       !delegatedCallId.isEmpty() || !animationResponseId.isEmpty()){
@@ -398,6 +410,8 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   if(cJSON_IsString(speech) && speech->valuestring){
    String excerpt(speech->valuestring);
    if(excerpt.length()>400)excerpt=excerpt.substring(0,400);
+   if(strcmp(type,"response.output_audio_transcript.done")==0)
+    queueCaption("KITTY: ",excerpt.c_str());
    int mood=emotionForText(excerpt);
    if(mood>=0)chooseMood(mood,false);
   }
