@@ -24,4 +24,5 @@
 // v32: sixteen full-screen Kitty moods with two-digit UART IDs.
 // v33: SD card formatting, ready, and error popups during Kitty calls.
 // v34: SD usage percentage, used KB/MB and capacity on right-button info card.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 34;
+// v35: transient FACT MEMORIZED toast next to Call Mode status (3.5s).
+static constexpr uint32_t C5_FIRMWARE_VERSION = 35;
