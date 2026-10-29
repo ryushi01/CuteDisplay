@@ -305,7 +305,7 @@ inline void run(void*){
  // Search the entire SD index asynchronously; wait at most 40ms.
  // A slow or busy card never blocks the model beyond this fixed deadline.
  uint32_t searchId=KittyMemory::requestSearch(prompt);
- String remembered=KittyMemory::recall(prompt);
+ String remembered=KittyMemory::factSummary()+KittyMemory::recall(prompt);
  if(searchId){
   uint32_t began=millis();
   while((uint32_t)(millis()-began)<40UL){
