@@ -30,6 +30,9 @@ jobs:
       - name: Check out CuteDisplay project
         uses: actions/checkout@v4
 
+      - name: Verify opt-in Kitty live memory refresh gateway patch
+        run: python3 server/test_patch_openwebui_memory_refresh.py
+
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
