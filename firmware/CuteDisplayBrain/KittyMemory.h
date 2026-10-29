@@ -225,10 +225,10 @@ inline void mergeFact(const String &key,const String &value){
  for(int i=0;i<factCount;i++){
   if(finalKey==facts[i].key){
    // Keep multiple likes; a correction to the same subject supersedes it.
-   if(key=="dislikes"||key=="likes"){
-    String entry=key+":"+value;
-    entry.toCharArray(facts[i].value,sizeof(facts[i].value));
-   }else value.toCharArray(facts[i].value,sizeof(facts[i].value));
+   String entry=(key=="dislikes"||key=="likes")?key+":"+value:value;
+   // Repeating an unchanged fact is not a new memory event.
+   if(entry==String(facts[i].value)){xSemaphoreGive(cacheMutex);return;}
+   entry.toCharArray(facts[i].value,sizeof(facts[i].value));
    factRevision++;
    xSemaphoreGive(cacheMutex);return;
   }
