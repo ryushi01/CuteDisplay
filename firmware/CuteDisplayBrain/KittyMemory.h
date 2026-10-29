@@ -161,7 +161,7 @@ inline bool persistFactMetadata(){
   if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(50))!=pdTRUE){ok=false;break;}
   item=facts[i];changed=factUpdated[i];expiry=factExpires[i];confidence=factConfidence[i];
   xSemaphoreGive(cacheMutex);
-  if(f.printf("%s\\t%lu\\t%lu\\t%u\\n",item.key,
+  if(f.printf("%s\t%lu\t%lu\t%u\n",item.key,
     (unsigned long)changed,(unsigned long)expiry,confidence)<=0){ok=false;break;}
   if((i&31)==0)vTaskDelay(1);
  }
@@ -238,6 +238,25 @@ inline void restoreFactSnapshots(){
    if(String(path)!="/kitty/facts.tsv")Serial.println("[MEMORY] recovered facts from backup");
    break;
   }
+ }
+ // Load optional sidecar after facts; legacy firmware safely ignores it.
+ for(const char* path: {"/kitty/factsmeta.tsv","/kitty/factsmeta.bak"}){
+  File meta=SD_MMC.open(path,FILE_READ);
+  if(!meta)continue;
+  while(meta.available()){
+   String line=meta.readStringUntil('\n');
+   int a=line.indexOf('\t'),b=a>=0?line.indexOf('\t',a+1):-1;
+   int c=b>=0?line.indexOf('\t',b+1):-1;
+   if(a<=0 || b<=a || c<=b)continue;
+   String key=line.substring(0,a);
+   for(size_t i=0;i<factCount;i++)if(key==facts[i].key){
+    if(factUpdated)factUpdated[i]=(uint32_t)line.substring(a+1,b).toInt();
+    if(factExpires)factExpires[i]=(uint32_t)line.substring(b+1,c).toInt();
+    if(factConfidence)factConfidence[i]=(uint8_t)constrain(line.substring(c+1).toInt(),0L,100L);
+    break;
+   }
+  }
+  meta.close();break;
  }
 }
 inline bool extractFact(String utterance,String &key,String &value){
