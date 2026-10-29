@@ -201,14 +201,23 @@ static void drawFullScreenKittyFace(){
  oval(x+8,160,8,8,CF_INK);oval(x+width-8,160,8,8,CF_INK);
  rect(x+8,152,width-16,17,CF_INK);
  textAt(label,x+12,155,1,CF_WHITE);
- // Persistent compact high-contrast transcript strip below the face.
- // Show the latest confirmed user/Kitty words, including UTF-8 Japanese.
- // Use a thin separator and tiny text, never cover mouth or eyes.
- rect(105,150,215,20,CF_INK);
- line(105,150,319,150,CF_WHITE);
+ // Floating two-line conversation text on the bright face background.
+ // Reuse the speech-bubble UTF-8 renderer, but avoid a black panel.
+ // As new text arrives, its tail moves upwards through the two-line window.
  if(!callCaption.isEmpty()){
-  richText(callCaption,108,153,1,1,CF_WHITE,317);
- }else{
-  textAt("WAITING FOR SPEECH",108,155,1,CF_WHITE);
+  const int maxChars=88;
+  String shown=callCaption;
+  if(shown.length()>maxChars){
+   int begin=shown.length()-maxChars;
+   while(begin<shown.length() && ((uint8_t)shown[begin]&0xC0)==0x80)begin++;
+   shown=shown.substring(begin);
+  }
+  const int split=shown.length()>44?shown.length()-44:0;
+  if(split>0){
+   int cut=split;
+   while(cut<shown.length() && ((uint8_t)shown[cut]&0xC0)==0x80)cut++;
+   richText(shown.substring(0,cut),8,5,1,1,CF_INK,312);
+   richText(shown.substring(cut),8,16,1,1,CF_INK,312);
+  }else richText(shown,8,5,1,1,CF_INK,312);
  }
 }
