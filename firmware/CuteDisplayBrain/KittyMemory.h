@@ -459,7 +459,8 @@ inline bool queue(const String &question,const String &answer){
  sanitize(question,sizeof(e.question)-1).toCharArray(e.question,sizeof(e.question));
  sanitize(answer,sizeof(e.answer)-1).toCharArray(e.answer,sizeof(e.answer));
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
- String key,value;if(extractFact(question,key,value) && key!="event" && key!="note" && key!="likes" && key!="dislikes")mergeFact(key,value);
+ // Facts are merged exclusively in the SD worker, so revision detection
+ // and snapshot persistence cannot miss an early RAM-only mutation.
  // The active recall cache updates immediately; SD persistence is deferred.
  addCache(question,answer);
  return true;
