@@ -124,15 +124,24 @@ inline String factSummary(size_t maxLen=700){
 }
 // Recoverable SD fact snapshots: never truncate the only good copy.
 inline bool persistFacts(){
- String data=factSummary(MAX_FACTS*sizeof(Fact));
- if(data.isEmpty())return false; // never replace a non-empty cache with an empty file
+ if(!facts || factCount==0)return false;
  const char *tmp="/kitty/facts.next",*main="/kitty/facts.tsv",*backup="/kitty/facts.bak";
  SD_MMC.remove(tmp);
  File f=SD_MMC.open(tmp,FILE_WRITE);
  if(!f)return false;
- size_t written=f.print(data);f.flush();f.close();
- if(written!=data.length()){SD_MMC.remove(tmp);return false;}
- // Keep the previous valid snapshot until the new one is committed.
+ // Copy one small fact at a time rather than assembling a 50KB+ String.
+ // Never hold the cache mutex while writing to the SD card.
+ bool ok=true;
+ for(size_t i=0;i<factCount;i++){
+  Fact item={};
+  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(50))!=pdTRUE){ok=false;break;}
+  item=facts[i];
+  xSemaphoreGive(cacheMutex);
+  if(f.printf("%s\\t%s\\n",item.key,item.value)<=0){ok=false;break;}
+  if((i&31)==0)vTaskDelay(1);
+ }
+ f.flush();f.close();
+ if(!ok){SD_MMC.remove(tmp);return false;}
  if(SD_MMC.exists(main)){
   SD_MMC.remove(backup);
   if(!SD_MMC.rename(main,backup)){SD_MMC.remove(tmp);return false;}
