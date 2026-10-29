@@ -76,6 +76,23 @@ inline void resetBarge(){bargeRequested=false;bargeActive=false;bargeFrames=0;ba
 static volatile uint32_t lastPlaybackMs=0;
 static uint16_t micGain=100;
 static uint8_t speakerVolume=35;
+// Small adaptive NLMS acoustic echo canceller. The physical DAC samples are
+// the reference; never lower their volume in response to near-end speech.
+// Reference precedes mic capture by at least one I2S 20 ms DMA transaction.
+// Filtering runs only in the pinned audio task on Core 0.
+static constexpr int AEC_TAPS=192;
+static constexpr int AEC_REF_SIZE=2048;
+static float aecWeights[AEC_TAPS]={};
+static float aecReference[AEC_REF_SIZE]={};
+static uint32_t aecWrite=0;
+static float aecEchoPower=0;
+static volatile uint32_t aecResidualLevel=0;
+inline uint32_t residualLevel(){return aecResidualLevel;}
+inline void resetAEC(){
+ memset(aecWeights,0,sizeof(aecWeights));
+ memset(aecReference,0,sizeof(aecReference));
+ aecWrite=0;aecEchoPower=0;aecResidualLevel=0;
+}
 static volatile uint32_t droppedMic=0;
 // PCM energy for the C5 full-screen Kitty mouth, no microphone inference.
 static volatile uint8_t outputLipLevel=0;
@@ -212,72 +229,73 @@ static void audioTask(void *){
     outputLipLevel=(uint8_t)min((uint32_t)9,(avg+360)/1250);
    }else outputLipLevel=0;
    if(hasAudio)lastPlaybackMs=millis();
-   // Low-cost realtime noise/echo suppression. A speaker reference and
-   // adaptive background estimate keep steady noise and playback leakage
-   // out of the microphone without buffering/delaying outgoing PCM.
-   uint64_t micEnergy=0,speakerEnergy=0;
-   for(size_t i=0;i<SAMPLES;i+=4){
-    int32_t m=work->capture[i*2]>>16;
-    int32_t p=work->speaker.pcm[i];
-    micEnergy+=(uint32_t)(m<0?-m:m);
-    speakerEnergy+=(uint32_t)(p<0?-p:p);
-   }
-   uint32_t micLevel=(uint32_t)(micEnergy/(SAMPLES/4));
-   uint32_t spkLevel=(uint32_t)(speakerEnergy/(SAMPLES/4));
-   if(!hasAudio && !remoteReply && !bargeActive){
-    // Track slow ambient changes, but avoid adapting to sudden speech.
-    if(micLevel<(uint32_t)(noiseFloor*3+300))
-     noiseFloor=(noiseFloor*31+(int32_t)micLevel)/32;
-   }
-   // The DAC level is scaled by speakerVolume (and hard-clipped at 12500).
-   // Comparing raw source PCM against the mic made overlap detection
-   // practically impossible even with a close, clear human voice.
-   uint32_t outputLevel=min((uint32_t)12500,
-     (uint32_t)((uint64_t)spkLevel*speakerVolume/100));
-   overlapMicLevel=micLevel;overlapSpkLevel=outputLevel;
-   // When an overlapping voice is detected, gently duck playback so the
-   // user's next words reach VAD/STT clearly without terminating this reply.
-   if(bargeActive && micLevel<max((uint32_t)500,(uint32_t)noiseFloor*3+300)){
-    if(bargeFrames>0)bargeFrames--;
-    if(bargeFrames==0)bargeActive=false;
-   }
-   uint32_t threshold=max((uint32_t)650,(uint32_t)(noiseFloor*3+350));
-   // Avoid accidental triggers at the start of TTS or from loudspeaker echo.
-   if((remoteReply || hasAudio) && !bargeActive &&
-      (int32_t)(millis()-bargeCooldownUntil)>=0){
-    if(micLevel>threshold && micLevel>outputLevel/2+350){
-     if(bargeFrames<16)bargeFrames++;
-    }else bargeFrames=0;
-    if(bargeFrames>=6){bargeActive=true;bargeRequested=true;overlapTriggers++;}
-   }
-   // Continuous capture while Kitty speaks. The server's VAD may now
-   // transcribe an overlapping turn; preserve its item until output drains.
-   // Physical echo is unavoidable without calibrated AEC; gate residual
-   // energy against the speaker reference rather than blanket muting.
-   bool mute=false;
+   // Calibrated-reference adaptive AEC: consume the microphone sample
+   // while predicting the speaker's acoustic contribution from a delayed
+   // stream of samples ACTUALLY written to the MAX98357A.
+   // Filter adaptation freezes during likely double-talk, protecting speech.
+   uint64_t nearEnergy=0,spkEnergy=0;
+   uint32_t postEnergy=0;
+   const bool outputActive=hasAudio || remoteReply;
+   const float inv32768=1.0f/32768.0f;
+   const uint32_t playbackDelay=480; // previous 20ms I2S write frame
    for(size_t i=0;i<SAMPLES;i++){
-    int32_t value=0;
-    if(!mute){
-     // INMP441 L/R wired to GND => left slot; 24-bit left-aligned input.
-     int32_t raw=work->capture[i*2]>>16;
-     // Adaptive DC/high-pass and soft ambient-noise suppression.
-     dcEstimate+=(raw-dcEstimate)/512;
-     raw-=dcEstimate;
-     int32_t floorGate=max((int32_t)150,noiseFloor*2);
-     if(raw>-floorGate && raw<floorGate)raw=0;
-     else raw+=raw>0?-floorGate:floorGate;
-     value=(raw*(int32_t)micGain)/100;
-     if(value>32767)value=32767;
-     if(value< -32768)value=-32768;
+    int32_t raw=work->capture[i*2]>>16;
+    dcEstimate+=(raw-dcEstimate)/512;
+    raw-=dcEstimate;
+    int32_t played=hasAudio?(int32_t)work->speaker.pcm[i]*speakerVolume/100:0;
+    played=constrain(played,-12500,12500);
+    work->output[i*2]=(int32_t)((int64_t)played*65536LL);
+    work->output[i*2+1]=work->output[i*2];
+    // Use previous output frames; current outgoing frame has not yet reached DAC.
+    uint32_t base=(aecWrite+AEC_REF_SIZE-playbackDelay)%AEC_REF_SIZE;
+    float echo=0,norm=0;
+    for(int k=0;k<AEC_TAPS;k++){
+     const float ref=aecReference[(base+AEC_REF_SIZE-k)%AEC_REF_SIZE];
+     echo+=aecWeights[k]*ref;
+     norm+=ref*ref;
     }
+    const float mic=(float)raw*inv32768;
+    const float clean=mic-echo;
+    // Conservative LMS: keep adapting only when speaker is present and
+    // microphone is broadly dominated by the predicted echo.
+    if(outputActive && norm>0.0003f && fabsf(mic)<fabsf(echo)*2.5f+0.022f){
+     const float step=0.13f*clean/(0.02f+norm);
+     for(int k=0;k<AEC_TAPS;k++)
+      aecWeights[k]+=step*aecReference[(base+AEC_REF_SIZE-k)%AEC_REF_SIZE];
+    }
+    float filtered=outputActive?clean:mic;
+    int32_t value=(int32_t)(filtered*32768.0f);
+    value=(value*(int32_t)micGain)/100;
+    value=constrain(value,-32768,32767);
     work->mic.pcm[i]=(int16_t)value;
-    int32_t out=hasAudio?(int32_t)work->speaker.pcm[i]*speakerVolume*(bargeActive?22:100)/10000:0;
-    // Bound first hardware tests to ~38% full scale even at volume=100.
-    if(out>12500)out=12500;
-    if(out< -12500)out=-12500;
-    work->output[2*i]=(int32_t)((int64_t)out*65536LL);
-    work->output[2*i+1]=(int32_t)((int64_t)out*65536LL);
+    aecReference[aecWrite]=(float)played*inv32768;
+    aecWrite=(aecWrite+1)%AEC_REF_SIZE;
+    if((i&3)==0){
+     int32_t v=value;
+     nearEnergy+=(uint32_t)(v<0?-v:v);
+     spkEnergy+=(uint32_t)(played<0?-played:played);
+    }
    }
+   const uint32_t micLevel=(uint32_t)(nearEnergy/(SAMPLES/4));
+   const uint32_t outputLevel=(uint32_t)(spkEnergy/(SAMPLES/4));
+   overlapMicLevel=micLevel;overlapSpkLevel=outputLevel;
+   aecResidualLevel=micLevel;
+   if(!hasAudio && !remoteReply && !bargeActive &&
+      micLevel<(uint32_t)(noiseFloor*3+300))
+    noiseFloor=(noiseFloor*31+(int32_t)micLevel)/32;
+   // The post-AEC near-end energy, not raw microphone energy, controls
+   // overlap detection. Capture and transmit audio throughout playback.
+   const uint32_t threshold=max((uint32_t)420,(uint32_t)(noiseFloor*3+220));
+   if(outputActive && (int32_t)(millis()-bargeCooldownUntil)>=0){
+    if(micLevel>threshold && micLevel>outputLevel/6+190){
+     if(bargeFrames<20)bargeFrames++;
+    }else if(bargeFrames>0)bargeFrames--;
+    if(bargeFrames>=5 && !bargeActive){
+     bargeActive=true;bargeRequested=true;overlapTriggers++;
+    }
+   }else if(!outputActive)bargeFrames=0;
+   // Never duck, mute, or cancel Kitty just because the user is talking.
+   if(!outputActive && bargeActive)bargeActive=false;
    if(xQueueSend(micQueue,&work->mic,0)!=pdTRUE){
     // Prefer freshest audio instead of accumulating latency on a slow Wi-Fi link.
     (void)xQueueReceive(micQueue,&work->discard,0);
