@@ -70,6 +70,19 @@ static void cfRipple(int x,int y,uint16_t color,int phase){
   line(x-r-3,y,x-r,y+r/3,color);
  }
 }
+static uint16_t cfBlend565(uint16_t from,uint16_t to,uint8_t amount){
+ int r=((from>>11)&31)*(255-amount)+((to>>11)&31)*amount;
+ int g=((from>>5)&63)*(255-amount)+((to>>5)&63)*amount;
+ int b=(from&31)*(255-amount)+(to&31)*amount;
+ return (uint16_t)(((r/255)<<11)|((g/255)<<5)|(b/255));
+}
+static int cfEyeHeight(uint8_t mood){
+ if(mood==5)return 2;
+ if(mood==3)return 6;
+ if(mood==2 || mood==7)return 8;
+ if(mood==6)return 16;
+ return 14;
+}
 static void drawFullScreenKittyFace(){
  const uint32_t t=millis();
  const bool listening=kittyActivity=="CALL_LISTENING"||kittyActivity=="CALL_READY";
@@ -82,13 +95,22 @@ static void drawFullScreenKittyFace(){
  // chosen mood queued, but render it ONLY during CALL_SPEAKING. Thinking
  // always uses the C5-local thoughtful face; listening stays friendly.
  uint8_t emotion=thinking?0:(speaking && callFaceMood<=7?callFaceMood:1);
+ const bool transitioning=speaking && callFacePreviousMood!=emotion &&
+   callFaceTransitionStart &&
+   (uint32_t)(t-callFaceTransitionStart)<CALL_FACE_TRANSITION_MS;
+ const uint8_t mix=transitioning?
+   (uint8_t)(((uint32_t)(t-callFaceTransitionStart)*255UL)/CALL_FACE_TRANSITION_MS):255;
+ const uint8_t prior=callFacePreviousMood<=7?callFacePreviousMood:1;
  const bool blink=(!speaking && (animPhase==8||animPhase==9||animPhase==25));
  const int gaze=thinking?7:listening?-3:0;
  const int bob=speaking?((t/180)%2?1:0):0;
  const uint16_t bg=emotion==3?0xFBEF:emotion==2?0xDF5D:
                    emotion==6?0xF59F:emotion==5?0xDDFB:
                    emotion==7?0xFD9B:0xF73E;
- rect(0,0,LCD_W,LCD_H,bg);
+ const uint16_t oldBg=prior==3?0xFBEF:prior==2?0xDF5D:
+                   prior==6?0xF59F:prior==5?0xDDFB:
+                   prior==7?0xFD9B:0xF73E;
+ rect(0,0,LCD_W,LCD_H,transitioning?cfBlend565(oldBg,bg,mix):bg);
  // Tonal stripes emphasize the panoramic aspect ratio without gradients
  // that would waste all 256 framebuffer palette entries.
  rect(0,0,320,11,emotion==3?0xFBCF:0xEE9C);
@@ -145,6 +167,12 @@ static void drawFullScreenKittyFace(){
   cfEye(lx,ey+2,9,12);cfLid(rx,ey+4,13,false);
   line(lx-12,ey-20,lx+12,ey-24,CF_INK);
   line(rx-12,ey-22,rx+10,ey-19,CF_INK);
+ }else if(transitioning){
+  // Smoothly morph eye opening and position over 200ms, while the mouth
+  // continues using live PCM-based lip-sync independently.
+  int height=(cfEyeHeight(prior)*(255-mix)+cfEyeHeight(emotion)*mix)/255;
+  if(height<=3){cfLid(lx,ey,15,false);cfLid(rx,ey,15,false);}
+  else {cfEye(lx,ey,9,height);cfEye(rx,ey,9,height);}
  }else if(emotion==5 || blink){
   cfLid(lx,ey,15,false);cfLid(rx,ey,15,false);
  }else if(emotion==2){
