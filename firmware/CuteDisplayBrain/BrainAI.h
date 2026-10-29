@@ -316,7 +316,7 @@ inline void run(void*){
    vTaskDelay(pdMS_TO_TICKS(5));
   }
  }
- remembered=KittyMemory::clipUTF8(remembered,850);
+ remembered=KittyMemory::clipUTF8(remembered,850);\n if(delegated)Serial.printf("[AI MEMORY] delegated facts=%u memory_bytes=%u search_id=%lu internal_free=%lu\\n",\n   (unsigned)KittyMemory::factCount,(unsigned)remembered.length(),(unsigned long)searchId,\n   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
  if(!remembered.isEmpty()){
   cJSON *memory=cJSON_CreateObject();
   cJSON_AddStringToObject(memory,"role","system");
