@@ -2895,9 +2895,9 @@ static void serviceBrain() {
   }
   else if(f.type=="CALL_MOOD"){
    // AI expressions never overwrite the user's regular persisted mood.
-   if(callModeActive && f.payload.length()==1 &&
-      f.payload[0]>='0'&&f.payload[0]<='7'){
-    uint8_t next=(uint8_t)(f.payload[0]-'0');
+   if(callModeActive && f.payload.length()>=1 && f.payload.length()<=2 &&
+      f.payload.toInt()>=0 && f.payload.toInt()<=15){
+    uint8_t next=(uint8_t)f.payload.toInt();
     callFaceMoodSince=millis();
     if(callFaceMood!=next){
      callFacePreviousMood=callFaceMood;
