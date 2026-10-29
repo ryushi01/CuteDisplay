@@ -460,6 +460,7 @@ inline bool anchorDatedPlan(const String &source,String &key,String &value){
  String phrase=source;phrase.toLowerCase();
  tm local={};localtime_r(&now,&local);
  bool found=false;
+ bool explicitISO=false;
  int relative=0;
  if(phrase.indexOf("day after tomorrow")>=0||phrase.indexOf("après-demain")>=0||
     phrase.indexOf("明後日")>=0){relative=2;found=true;}
@@ -484,7 +485,7 @@ inline bool anchorDatedPlan(const String &source,String &key,String &value){
    if(year<2020||year>2099)continue;
    local.tm_year=year-1900;
    local.tm_mon=date.substring(5,7).toInt()-1;
-   local.tm_mday=date.substring(8,10).toInt();found=true;break;
+   local.tm_mday=date.substring(8,10).toInt();found=true;explicitISO=true;break;
   }
  }
  if(!found){
@@ -505,10 +506,8 @@ inline bool anchorDatedPlan(const String &source,String &key,String &value){
  const int expectedDay=local.tm_mday;
  local.tm_isdst=-1;
  (void)mktime(&local);
- if(local.tm_year!=expectedYear||local.tm_mon!=expectedMonth){
-  // Weekday/relative arithmetic may intentionally cross months; explicit
-  // invalid ISO inputs are rejected separately below by the year check.
- }
+ if(explicitISO && (local.tm_year!=expectedYear || local.tm_mon!=expectedMonth ||
+    local.tm_mday!=expectedDay))return false;
  char date[16];snprintf(date,sizeof(date),"%04d-%02d-%02d",
     local.tm_year+1900,local.tm_mon+1,local.tm_mday);
  // Unique stable per-plan ID: more than one appointment can share a day.
