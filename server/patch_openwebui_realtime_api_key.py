@@ -206,16 +206,16 @@ def patch_sd_memory_instructions(source):
         raise ValueError("SD memory context patch: incompatible realtime source")
     source = source.replace(
         auth_anchor,
-        auth_anchor + "\\n        " + marker + "\\n        "
-        + "kitty_sd_memory = auth.get('kitty_sd_memory', '')\\n        "
-        + "if not isinstance(kitty_sd_memory, str) or len(kitty_sd_memory.encode('utf-8')) > 850:\\n"
+        auth_anchor + "\n        " + marker + "\n        "
+        + "kitty_sd_memory = auth.get('kitty_sd_memory', '')\n        "
+        + "if not isinstance(kitty_sd_memory, str) or len(kitty_sd_memory.encode('utf-8')) > 850:\n"
         + "            kitty_sd_memory = ''",
         1,
     )
     source = source.replace(
         prompt_anchor,
         prompt_anchor
-        + "\\n                            + ('\\\\nKnown user facts supplied by Kitty device (may be corrected by the user):\\\\n' + kitty_sd_memory if protocol.kitty_expressions and kitty_sd_memory else '')",
+        + "\n                            + ('\\\nKnown user facts supplied by Kitty device (may be corrected by the user):\\\n' + kitty_sd_memory if protocol.kitty_expressions and kitty_sd_memory else '')",
         1,
     )
     compile(source, TARGET, "exec")
