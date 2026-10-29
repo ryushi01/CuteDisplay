@@ -1067,6 +1067,7 @@ void setup(){
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
  BrainAI::init();
+ KittyMemory::init();
  BrainRealtimeDirect::init();
  BrainTTS::init();
  BrainVoiceSTT::init();
