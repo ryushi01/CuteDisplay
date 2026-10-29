@@ -272,7 +272,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   lastPing=millis();
  }else if(strcmp(type,"response.created")==0){
   remoteResponse=true;streamedSpeech=false;expressionIdleSince=0;
-  bargeCancelling=false;
+  bargeCancelling=false;BrainRealtimeAudio::resetBarge();
   BrainRealtimeAudio::setRemoteReply(true);
   status("CALL_THINKING");
  }else if(strcmp(type,"response.done")==0){
