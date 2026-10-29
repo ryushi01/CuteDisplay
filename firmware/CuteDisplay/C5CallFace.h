@@ -201,10 +201,14 @@ static void drawFullScreenKittyFace(){
  oval(x+8,160,8,8,CF_INK);oval(x+width-8,160,8,8,CF_INK);
  rect(x+8,152,width-16,17,CF_INK);
  textAt(label,x+12,155,1,CF_WHITE);
- // Small live caption overlay to inspect recognized conversation on-device.
- // Draw after the face, within the bottom 19px: avoid covering eyes/mouth.
+ // Persistent compact high-contrast transcript strip below the face.
+ // Show the latest confirmed user/Kitty words, including UTF-8 Japanese.
+ // Use a thin separator and tiny text, never cover mouth or eyes.
+ rect(105,150,215,20,CF_INK);
+ line(105,150,319,150,CF_WHITE);
  if(!callCaption.isEmpty()){
-  rect(106,151,214,19,CF_INK);
-  richText(callCaption,110,152,1,1,CF_WHITE,318);
+  richText(callCaption,108,153,1,1,CF_WHITE,317);
+ }else{
+  textAt("WAITING FOR SPEECH",108,155,1,CF_WHITE);
  }
 }
