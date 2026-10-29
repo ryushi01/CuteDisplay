@@ -19,4 +19,5 @@
 // v27: always-visible compact user/Kitty transcript strip in realtime Call Mode.
 // v28: two-line top conversation monitor, black text without a dark panel.
 // v29: two-line chronological captions with newest text on lower row.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 29;
+// v30: smooth 200ms expression transitions while retaining live lip sync.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 30;
