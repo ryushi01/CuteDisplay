@@ -330,15 +330,20 @@ def main():
         else ".py.cutedisplay-pre-expression" if MARKER in original
         else ".py.cutedisplay-original"
     )
-    if backup.exists() and updated != original:
-        parser.error(f"Refusing to overwrite source backup: {backup}")
     if updated == original:
         print("PASS: realtime auth and expression capability already installed")
         return 0
+    if backup.exists():
+        # Already-patched parent images carry an earlier rollback file.
+        # Preserve that file; never overwrite or delete existing backups.
+        # Make a separate pre-update snapshot for this image layer.
+        backup = target.with_suffix(".py.cutedisplay-pre-memory-v5")
+    if backup.exists():
+        parser.error(f"Refusing to overwrite source backup: {backup}")
     shutil.copy2(target, backup)
     target.write_text(updated)
     print("PATCHED Open WebUI source (auth preserved, Kitty expressions opt-in):", target)
-    print("BACKUP of pristine source:", backup)
+    print("BACKUP of previous source:", backup)
     print("No running server was modified. Inspect git diff, rebuild and run permissions/revocation tests.")
     return 0
 
