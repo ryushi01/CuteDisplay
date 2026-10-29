@@ -43,3 +43,12 @@
 - The worker requests FAT formatting using Arduino-ESP32 SD_MMC's explicit format-on-failed-mount option. Success produces **SD CARD READY**; failure produces **SD CARD ERROR**. No live audio tasks wait for SD operations.
 - **Formatting destroys card data.** If there is anything valuable on the card, back it up or repair it on a computer instead.
 - Run `memory status` afterwards to check mount/index/save status.
+
+## Realtime transcript / structured fact repair
+- Realtime voice input is queued from `conversation.item.input_audio_transcription.completed` even if the audio item ID is missing. Serial prints `[MEMORY] Realtime user transcript received` and `[MEMORY] transcript queued=1`.
+- The SD-only `/kitty/facts.tsv` file holds simple updated key/value facts extracted from explicit statements, initially names and likes. This is deterministic extraction, not an unrestricted model memory agent.
+- `memory status` shows `profile_facts` and the current keys, in addition to mount/index counters.
+- `memory probe` queues a harmless diagnostic record, separating SD write faults from voice-transcript delivery faults.
+- On connection, the S3 includes a bounded memory profile in authenticated realtime session context. The matching custom Open WebUI realtime patch must be redeployed for this to influence direct realtime speech.
+- The profile is only transmitted as temporary model context. No long-term memory is stored in Open WebUI or on the Mac.
+- If `memory probe` increases saved/indexed but speaking does not, inspect the transcription event path, not the SD filesystem.
