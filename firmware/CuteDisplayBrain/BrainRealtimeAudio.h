@@ -67,6 +67,10 @@ static uint8_t bargeFrames=0;
 static int32_t noiseFloor=200;
 static int32_t dcEstimate=0;
 static volatile uint32_t bargeCooldownUntil=0;
+static volatile uint32_t overlapMicLevel=0,overlapSpkLevel=0,overlapTriggers=0;
+inline uint32_t nearMicLevel(){return overlapMicLevel;}
+inline uint32_t playbackReferenceLevel(){return overlapSpkLevel;}
+inline uint32_t overlapCount(){return overlapTriggers;}
 inline bool takeBargeRequest(){if(!bargeRequested)return false;bargeRequested=false;return true;}
 inline void resetBarge(){bargeRequested=false;bargeActive=false;bargeFrames=0;bargeCooldownUntil=millis()+600;}
 static volatile uint32_t lastPlaybackMs=0;
@@ -225,14 +229,20 @@ static void audioTask(void *){
     if(micLevel<(uint32_t)(noiseFloor*3+300))
      noiseFloor=(noiseFloor*31+(int32_t)micLevel)/32;
    }
-   uint32_t threshold=max((uint32_t)900,(uint32_t)(noiseFloor*4+500));
+   // The DAC level is scaled by speakerVolume (and hard-clipped at 12500).
+   // Comparing raw source PCM against the mic made overlap detection
+   // practically impossible even with a close, clear human voice.
+   uint32_t outputLevel=min((uint32_t)12500,
+     (uint32_t)((uint64_t)spkLevel*speakerVolume/100));
+   overlapMicLevel=micLevel;overlapSpkLevel=outputLevel;
+   uint32_t threshold=max((uint32_t)650,(uint32_t)(noiseFloor*3+350));
    // Avoid accidental triggers at the start of TTS or from loudspeaker echo.
    if((remoteReply || hasAudio) && !bargeActive &&
       (int32_t)(millis()-bargeCooldownUntil)>=0){
-    if(micLevel>threshold && micLevel>spkLevel*3/2+450){
+    if(micLevel>threshold && micLevel>outputLevel/2+350){
      if(bargeFrames<16)bargeFrames++;
     }else bargeFrames=0;
-    if(bargeFrames>=7){bargeActive=true;bargeRequested=true;}
+    if(bargeFrames>=6){bargeActive=true;bargeRequested=true;overlapTriggers++;}
    }
    bool mute=!bargeActive && (remoteReply || hasAudio ||
      (uint32_t)(millis()-lastPlaybackMs)<TAIL_MUTE_MS);
@@ -315,7 +325,7 @@ inline bool start(uint16_t gain,uint8_t volume){
   (unsigned long)(speakerCapacity*1000ULL/RATE),(unsigned)MIC_FRAMES,
   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
  xQueueReset(micQueue);
- clearSpeaker();
+ clearSpeaker();resetBarge();overlapMicLevel=0;overlapSpkLevel=0;overlapTriggers=0;
  speakerOverrunSamples=0;speakerOverrunEvents=0;speakerPeakSamples=0;speakerUnderruns=0;
  micGain=constrain((int)gain,0,300);
  speakerVolume=constrain((int)volume,0,100);
