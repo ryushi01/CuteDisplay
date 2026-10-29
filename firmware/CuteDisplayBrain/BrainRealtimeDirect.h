@@ -33,7 +33,7 @@ static String failedCallId, failedCallAnswer;
 // Temporary 0..7 Kitty expression selected by realtime avatar gestures or
 // assistant speech. No change to the model, account, or persistent C5 mood.
 static int pendingMood=-1;
-static uint8_t currentMood=1;
+static uint8_t currentMood=0;
 static uint32_t moodUpdatedAt=0;
 static uint32_t lastExplicitMoodAt=0; // AI tool is authoritative over text heuristics
 inline int emotionForText(String phrase){
@@ -183,7 +183,7 @@ inline void diagnose(bool audioBusy){
   key.startsWith("sk-")&&key.length()>20?1:0,audioBusy?1:0);
 }
 inline void stop(){
- pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
+ pendingMood=-1;currentMood=0;lastExplicitMoodAt=0;moodUpdatedAt=0;
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -193,7 +193,7 @@ inline void stop(){
  status("CALL_OFF");
 }
 inline void fail(const char *why){
- pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
+ pendingMood=-1;currentMood=0;lastExplicitMoodAt=0;moodUpdatedAt=0;
  const bool localAudio=(strcmp(why,"I2S_RUNTIME")==0 ||
    strcmp(why,"AUDIO_TASK_ALLOC")==0 ||
    strncmp(why,"NO_PSRAM",8)==0 ||
@@ -214,7 +214,7 @@ inline void fail(const char *why){
 }
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
-  pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
+  pendingMood=-1;currentMood=0;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
   failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
@@ -469,7 +469,7 @@ inline bool connect(){
  return true;
 }
 inline void init(){
- pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
+ pendingMood=-1;currentMood=0;lastExplicitMoodAt=0;moodUpdatedAt=0;
  requested=false;started=false;connected=false;ready=false;
  remoteResponse=false;streamedSpeech=false;delegatedCallId="";animationResponseId="";
  toolResponseFinished=false;failedCallId="";failedCallAnswer="";
@@ -569,6 +569,12 @@ inline void tick(bool audioBusy){
              !failedCallId.isEmpty()){
     status("CALL_THINKING");
    }else{
+    // Provider response ended and queued speaker audio has fully drained.
+    // An AI-chosen expression stays active throughout speech, even if long.
+    if(streamedSpeech){
+     chooseMood(0,true);
+     Serial.println("[CALL FACE] response finished; neutral restored");
+    }
     streamedSpeech=false;
     status("CALL_LISTENING");
    }
