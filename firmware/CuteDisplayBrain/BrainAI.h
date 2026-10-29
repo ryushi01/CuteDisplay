@@ -13,6 +13,7 @@
 #include "CuteLink.h"
 #include "BrainTTS.h"
 #include "KittyMemory.h"
+#include "BrainClock.h"
 
 namespace BrainAI {
 struct Packet { char kind[12]; char text[81]; };
@@ -292,6 +293,15 @@ inline void run(void*){
  cJSON_AddStringToObject(root,"model",model.c_str());
  cJSON_AddBoolToObject(root,"stream",true);
  cJSON *msgs=cJSON_AddArrayToObject(root,"messages");
+ // Date is verified by S3 SNTP and the user's configured local timezone.
+ // Inject once per request, not per audio frame.
+ String calendar=BrainClock::calendarContext();
+ if(!calendar.isEmpty()){
+  cJSON *temporal=cJSON_CreateObject();
+  cJSON_AddStringToObject(temporal,"role","system");
+  cJSON_AddStringToObject(temporal,"content",calendar.c_str());
+  cJSON_AddItemToArray(msgs,temporal);
+ }
  for(size_t i=0;i<historyCount;i++){
   cJSON *u=cJSON_CreateObject();
   cJSON_AddStringToObject(u,"role","user");
