@@ -23,4 +23,5 @@
 // v31: width-aware UTF-8 caption wrapping and segmented UART text scrolling.
 // v32: sixteen full-screen Kitty moods with two-digit UART IDs.
 // v33: SD card formatting, ready, and error popups during Kitty calls.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 33;
+// v34: SD usage percentage, used KB/MB and capacity on right-button info card.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 34;
