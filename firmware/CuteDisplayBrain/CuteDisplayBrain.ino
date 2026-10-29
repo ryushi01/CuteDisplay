@@ -743,7 +743,7 @@ static void consoleCommand(String cmd){
  if(cmd=="help"){
   Serial.println("[S3] call status / call diagnose / call start / call stop / call mood 0..15");
   Serial.println("[S3] c5 ota status (automatic OTA when a newer embedded C5 image is available)");
-  Serial.println("[S3] audio beep / audio diagnose / audio test / memory status / memory format CONFIRM");
+  Serial.println("[S3] audio beep / audio diagnose / audio test / memory status / memory probe / memory format CONFIRM");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
   return;
  }
@@ -775,6 +775,11 @@ static void consoleCommand(String cmd){
   Serial.println(accepted?
     "[MEMORY] Format requested. This erases the complete SD card. Watch C5 status.":
     "[MEMORY] Format refused: only allowed after SD mount failure.");
+  return;
+ }
+ if(cmd=="memory probe"){
+  bool accepted=KittyMemory::queue("memory diagnostic probe","SD write test only");
+  Serial.printf("[MEMORY] probe queued=%d; check 'memory status' after a moment\n",accepted?1:0);
   return;
  }
  if(cmd=="memory status"){
