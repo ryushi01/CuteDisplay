@@ -195,6 +195,33 @@ def patch_expressions(source):
     return result
 
 
+def patch_sd_memory_instructions(source):
+    # In-memory context only: the archive and fact store stay on the S3 SD.
+    marker = "# CuteDisplay SD memory context relay v1"
+    if marker in source:
+        return source
+    auth_anchor = "kitty_expressions = auth.get('kitty_expressions') is True"
+    prompt_anchor = "+ (KITTY_EXPRESSION_INSTRUCTIONS if protocol.kitty_expressions else '')"
+    if source.count(auth_anchor) != 1 or source.count(prompt_anchor) != 1:
+        raise ValueError("SD memory context patch: incompatible realtime source")
+    source = source.replace(
+        auth_anchor,
+        auth_anchor + "\\n        " + marker + "\\n        "
+        + "kitty_sd_memory = auth.get('kitty_sd_memory', '')\\n        "
+        + "if not isinstance(kitty_sd_memory, str) or len(kitty_sd_memory.encode('utf-8')) > 850:\\n"
+        + "            kitty_sd_memory = ''",
+        1,
+    )
+    source = source.replace(
+        prompt_anchor,
+        prompt_anchor
+        + "\\n                            + ('\\\\nKnown user facts supplied by Kitty device (may be corrected by the user):\\\\n' + kitty_sd_memory if protocol.kitty_expressions and kitty_sd_memory else '')",
+        1,
+    )
+    compile(source, TARGET, "exec")
+    return source
+
+
 def patch_authentication(source):
     # Auth security can be unit-tested on its own minimal fixture. The full
     # realtime/gesture integration gets separate upstream protocol tests.
@@ -220,6 +247,7 @@ def patch_authentication(source):
 def patch(source):
     result = patch_authentication(source)
     result = patch_expressions(result)
+    result = patch_sd_memory_instructions(result)
     compile(result, TARGET, "exec")
     return result
 
