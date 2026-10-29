@@ -546,11 +546,9 @@ inline void task(void*){
  }else{
   SD_MMC.mkdir("/kitty");
   updateStorage();
-  File factFile=SD_MMC.open("/kitty/facts.tsv",FILE_READ);
-  if(factFile){while(factFile.available()){String line=factFile.readStringUntil('\n');int t=line.indexOf('\t');if(t>0)mergeFact(line.substring(0,t),line.substring(t+1));}factFile.close();}
+  restoreFactSnapshots();
   if(pruneInvalidPreferences()){
-   File clean=SD_MMC.open("/kitty/facts.tsv","w");
-   if(clean){clean.print(factSummary(6000));clean.close();}
+   persistFacts();
    Serial.println("[MEMORY] pruned ambiguous preferences");
   }
   indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
