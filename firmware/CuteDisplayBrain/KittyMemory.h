@@ -635,6 +635,9 @@ inline void searchOnSD(const SearchRequest &q){
  Rank best[3]={{0,0},{0,0},{0,0}};
  if(indexRows){
   for(int i=(int)indexCount-1;i>=0;i--){
+   // Yield in fixed slices, even when candidates fail the topic filter.
+   // Keeps large 150k-row scans cooperative with the Core 0 I2S task.
+   if((i&255)==0)vTaskDelay(1);
    IndexRow row=indexRows[i];
    int score=__builtin_popcount(row.terms&bits);
    if(topics && (row.topics&topics))score+=12;
@@ -643,7 +646,6 @@ inline void searchOnSD(const SearchRequest &q){
     for(int j=2;j>k;j--)best[j]=best[j-1];
     best[k]={score,row.offset};break;
    }
-   if((i&1023)==0)vTaskDelay(1); // yield to realtime I2S
   }
  }
  String result;
