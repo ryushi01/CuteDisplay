@@ -110,6 +110,8 @@ EXPRESSION_ANCHORS = {
 
 def patch_expressions(source):
     if EXPRESSION_MARKER in source:
+        if '"surprised", "confused", "laughing"' in source:
+            return source
         # Upgrade an already-installed v1 expression tool in place.
         # The original auth/observer plumbing stays untouched.
         begin = source.find("KITTY_EXPRESSIONS = (")
