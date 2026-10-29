@@ -555,6 +555,42 @@ inline uint32_t termBits(String s){
  }
  return bits;
 }
+// Language-independent topic aliases: retrieve related history without an
+// extra model request or SD I/O on the audio path. This is lexical semantic
+// expansion (not embedding/vector search).
+inline uint32_t semanticTopics(String q){
+ q.toLowerCase();
+ uint32_t topics=topicsFor(q);
+ const char *food[]={"like","enjoy","favorite","favourite","prefer","aime","adore","préfère","préf","好き","好物","好み","何が好き","食べ物",nullptr};
+ for(int i=0;food[i];i++)if(q.indexOf(food[i])>=0){topics|=1UL<<1;break;}
+ const char *work[]={"career","profession","employer","occupation","métier","emploi","職業","働","勤務",nullptr};
+ for(int i=0;work[i];i++)if(q.indexOf(work[i])>=0){topics|=1UL<<3;break;}
+ const char *identity[]={"who am i","who i am","my identity","comment je m'appelle","quel est mon nom","私の名前","名前を",nullptr};
+ for(int i=0;identity[i];i++)if(q.indexOf(identity[i])>=0){topics|=1UL<<12;break;}
+ return topics;
+}
+inline String semanticFactRecall(const String &query,size_t limit=280){
+ String result;
+ if(!facts || !cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(2))!=pdTRUE)return result;
+ uint32_t topics=semanticTopics(query);
+ String lower=query;lower.toLowerCase();
+ bool preferences=(topics&(1UL<<1)) || lower.indexOf("prefer")>=0 || lower.indexOf("好き")>=0;
+ // Iterate recent facts first, prioritizing identity and matching preferences.
+ for(int i=(int)factCount-1;i>=0;i--){
+  String key(facts[i].key),value(facts[i].value);
+  bool selected=(preferences && key.startsWith("pref_")) ||
+   ((topics&(1UL<<12)) && key=="name") ||
+   ((topics&(1UL<<3)) && (key=="work" || key=="context_work_availability")) ||
+   ((topics&(1UL<<9)) && key=="context_upcoming_plan") ||
+   ((topics&(1UL<<11)) && key=="home");
+  if(!selected)continue;
+  String line=key+"\\t"+value+"\\n";
+  if(result.length()+line.length()>limit)continue;
+  result+=line;
+ }
+ xSemaphoreGive(cacheMutex);
+ return result;
+}
 inline void readIndex(){
  if(!mounted)return;
  File f=SD_MMC.open("/kitty/memory.idx",FILE_READ);
@@ -585,7 +621,7 @@ inline void appendIndex(const Entry &entry,uint32_t offset,uint32_t timestamp){
 }
 inline void searchOnSD(const SearchRequest &q){
  String query(q.query);
- const uint32_t topics=topicsFor(query),bits=termBits(query);
+ const uint32_t topics=semanticTopics(query),bits=termBits(query);
  struct Rank { int score; uint32_t offset; };
  Rank best[3]={{0,0},{0,0},{0,0}};
  if(indexRows){
@@ -621,7 +657,7 @@ inline void searchOnSD(const SearchRequest &q){
  }
 }
 inline uint32_t requestSearch(const String &query){
- if(!mounted || !searches || !indexRows || !indexCount || !topicsFor(query))return 0;
+ if(!mounted || !searches || !indexRows || !indexCount || !semanticTopics(query))return 0;
  SearchRequest q={};
  sanitize(query,sizeof(q.query)-1).toCharArray(q.query,sizeof(q.query));
  q.serial=++nextSerial;
@@ -647,7 +683,7 @@ inline void task(void*){
  }else{
   SD_MMC.mkdir("/kitty");
   updateStorage();
-  restoreFactSnapshots();
+  if(facts)restoreFactSnapshots();
   if(pruneInvalidPreferences()){
    persistFacts();
    Serial.println("[MEMORY] pruned ambiguous preferences");
