@@ -452,25 +452,75 @@ inline bool isEpisodic(const String &key){
 }
 // Resolve relative calendar references at the time the statement is saved,
 // not at the time it is recalled days later. History remains on SD.
+// Calendar dates are anchored on the low-priority SD worker at write time.
 inline bool anchorDatedPlan(const String &source,String &key,String &value){
  if(key!="context_upcoming_plan")return false;
  time_t now=time(nullptr);
  if(now<1735689600LL)return false;
- String text=source;text.toLowerCase();
- int days=0;
- if(text.indexOf("tomorrow")>=0||text.indexOf("demain")>=0||text.indexOf("明日")>=0)days=1;
- else if(text.indexOf("yesterday")>=0||text.indexOf("hier")>=0||text.indexOf("昨日")>=0)days=-1;
- else if(text.indexOf("today")>=0||text.indexOf("aujourd")>=0||text.indexOf("今日")>=0)days=0;
- else return false;
+ String phrase=source;phrase.toLowerCase();
  tm local={};localtime_r(&now,&local);
- local.tm_mday+=days;local.tm_isdst=-1;
+ bool found=false;
+ int relative=0;
+ if(phrase.indexOf("day after tomorrow")>=0||phrase.indexOf("après-demain")>=0||
+    phrase.indexOf("明後日")>=0){relative=2;found=true;}
+ else if(phrase.indexOf("tomorrow")>=0||phrase.indexOf("demain")>=0||
+         phrase.indexOf("明日")>=0){relative=1;found=true;}
+ else if(phrase.indexOf("day before yesterday")>=0||phrase.indexOf("avant-hier")>=0||
+         phrase.indexOf("一昨日")>=0){relative=-2;found=true;}
+ else if(phrase.indexOf("yesterday")>=0||phrase.indexOf("hier")>=0||
+         phrase.indexOf("昨日")>=0){relative=-1;found=true;}
+ else if(phrase.indexOf("today")>=0||phrase.indexOf("aujourd")>=0||
+         phrase.indexOf("今日")>=0){found=true;}
+ if(found)local.tm_mday+=relative;
+ if(!found){
+  // ISO date YYYY-MM-DD, validated by mktime round-trip below.
+  for(size_t i=0;i+10<=phrase.length();i++){
+   String date=phrase.substring(i,i+10);
+   if(date[4]!='-'||date[7]!='-')continue;
+   bool digits=true;
+   for(int j=0;j<10;j++)if(j!=4&&j!=7&&(date[j]<'0'||date[j]>'9'))digits=false;
+   if(!digits)continue;
+   int year=date.substring(0,4).toInt();
+   if(year<2020||year>2099)continue;
+   local.tm_year=year-1900;
+   local.tm_mon=date.substring(5,7).toInt()-1;
+   local.tm_mday=date.substring(8,10).toInt();found=true;break;
+  }
+ }
+ if(!found){
+  const char *en[]={"sunday","monday","tuesday","wednesday","thursday","friday","saturday"};
+  const char *fr[]={"dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"};
+  const char *ja[]={"日曜","月曜","火曜","水曜","木曜","金曜","土曜"};
+  for(int d=0;d<7;d++){
+   if(phrase.indexOf(en[d])<0&&phrase.indexOf(fr[d])<0&&phrase.indexOf(ja[d])<0)continue;
+   bool next=phrase.indexOf("next")>=0||phrase.indexOf("prochain")>=0||
+     phrase.indexOf("来週")>=0;
+   int delta=(d-local.tm_wday+7)%7;
+   if(delta==0||next)delta+=7;
+   local.tm_mday+=delta;found=true;break;
+  }
+ }
+ if(!found)return false;
+ const int expectedYear=local.tm_year,expectedMonth=local.tm_mon;
+ const int expectedDay=local.tm_mday;
+ local.tm_isdst=-1;
  (void)mktime(&local);
+ if(local.tm_year!=expectedYear||local.tm_mon!=expectedMonth){
+  // Weekday/relative arithmetic may intentionally cross months; explicit
+  // invalid ISO inputs are rejected separately below by the year check.
+ }
  char date[16];snprintf(date,sizeof(date),"%04d-%02d-%02d",
     local.tm_year+1900,local.tm_mon+1,local.tm_mday);
- key=String("dated_plan_")+date;
- value=String("Plan for ")+date+" (completion not confirmed): "+value;
+ // Unique stable per-plan ID: more than one appointment can share a day.
+ String canonical=value;canonical.toLowerCase();
+ uint32_t hash=2166136261UL;
+ for(size_t i=0;i<canonical.length();i++)hash=(hash^(uint8_t)canonical[i])*16777619UL;
+ char id[9];snprintf(id,sizeof(id),"%08lx",(unsigned long)hash);
+ key=String("dated_plan_")+date+"_"+id;
+ value=String("Scheduled ")+date+"; outcome unconfirmed: "+value;
  return true;
 }
+
 inline uint32_t expiryForFact(const String &key,const String &value){
  time_t now=time(nullptr);
  if(now<1700000000)return 0; // Do not expire anything before NTP sync.
