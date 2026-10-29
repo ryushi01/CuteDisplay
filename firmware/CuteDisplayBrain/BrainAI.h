@@ -283,7 +283,8 @@ inline void run(void*){
   cfg.crt_bundle_attach=esp_crt_bundle_attach;
   cfg.event_handler=event;
   cfg.timeout_ms=60000;
-  cfg.buffer_size=4096;
+  cfg.buffer_size=2048;
+  cfg.buffer_size_tx=1024;
   esp_http_client_handle_t http=esp_http_client_init(&cfg);
   if(http){
    String auth="Bearer "+key;
@@ -300,6 +301,27 @@ inline void run(void*){
     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
    esp_err_t rc=esp_http_client_perform(http);
    int code=esp_http_client_get_status_code(http);
+   // If TLS setup exhausted the internal heap before any HTTP response,
+   // retry only once after the first transport has fully cleaned up.
+   // Never retry a response that delivered output: that repeats AI speech.
+   if(rc!=ESP_OK && code==0 && emittedBytes==0 && !cancelRequested){
+    esp_http_client_cleanup(http);
+    http=nullptr;
+    vTaskDelay(pdMS_TO_TICKS(750));
+    Serial.printf("[AI TLS] retry: internal_free=%lu largest_internal=%lu\\n",
+     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+     (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    http=esp_http_client_init(&cfg);
+    if(http){
+     esp_http_client_set_method(http,HTTP_METHOD_POST);
+     esp_http_client_set_header(http,"Authorization",auth.c_str());
+     esp_http_client_set_header(http,"Content-Type","application/json");
+     esp_http_client_set_header(http,"Accept","text/event-stream");
+     esp_http_client_set_post_field(http,json,strlen(json));
+     rc=esp_http_client_perform(http);
+     code=esp_http_client_get_status_code(http);
+    }
+   }
    Serial.printf("[AI] Request finished: HTTP=%d transport=%d\n",code,(int)rc);
    if(cancelRequested){} // Intentional abort; CANCELLED reported during cleanup.
    else if(rc!=ESP_OK)report("NETWORK_ERROR");
@@ -309,7 +331,7 @@ inline void run(void*){
    else if(code!=200)report("SERVER_ERROR");
    else if(!doneSeen)report("STREAM_INCOMPLETE");
    if(rc!=ESP_OK || code!=200 || !doneSeen)failed=true;
-   esp_http_client_cleanup(http);
+   if(http)esp_http_client_cleanup(http);
   }else failed=true;
   free(json);
  }else failed=true;
