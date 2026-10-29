@@ -462,8 +462,9 @@ inline bool anchorDatedPlan(const String &source,String &key,String &value){
  else if(text.indexOf("yesterday")>=0||text.indexOf("hier")>=0||text.indexOf("昨日")>=0)days=-1;
  else if(text.indexOf("today")>=0||text.indexOf("aujourd")>=0||text.indexOf("今日")>=0)days=0;
  else return false;
- time_t target=now+(time_t)days*86400;
- tm local={};localtime_r(&target,&local);
+ tm local={};localtime_r(&now,&local);
+ local.tm_mday+=days;local.tm_isdst=-1;
+ (void)mktime(&local);
  char date[16];snprintf(date,sizeof(date),"%04d-%02d-%02d",
     local.tm_year+1900,local.tm_mon+1,local.tm_mday);
  key=String("dated_plan_")+date;
