@@ -10,7 +10,7 @@ from datetime import datetime
 
 def load_rows(sd):
     sd=pathlib.Path(sd)
-    for filename in ("facts.tsv","dated_plans.tsv","summaries.tsv"):
+    for filename in ("facts.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv"):
         path=sd/"kitty"/filename
         if not path.is_file():continue
         with path.open(encoding="utf-8",errors="replace") as f:
@@ -22,6 +22,8 @@ def load_rows(sd):
                     key,text=parts[1],parts[2]
                 elif filename=="summaries.tsv" and len(parts)>=2:
                     key,text="summary:"+parts[0],parts[1]
+                elif filename=="conversations.tsv" and len(parts)>=3:
+                    key,text="conversation:"+parts[0],parts[1]+" "+parts[2]
                 else:continue
                 if key and text:
                     yield f"{filename}:{i}:{key}",f"{key}: {text}"
