@@ -164,7 +164,7 @@ inline void searchOnSD(const SearchRequest &q){
    IndexRow row=indexRows[i];
    int score=__builtin_popcount(row.terms&bits);
    if(topics && (row.topics&topics))score+=12;
-   if(score<7)continue;
+   // Topic match is mandatory: avoid hallucinated memories from 32-bit\n   // fingerprint collisions on unrelated conversations.\n   if(!topics || !(row.topics&topics) || score<12)continue;
    for(int k=0;k<3;k++)if(score>best[k].score){
     for(int j=2;j>k;j--)best[j]=best[j-1];
     best[k]={score,row.offset};break;
@@ -192,7 +192,7 @@ inline void searchOnSD(const SearchRequest &q){
  }
 }
 inline uint32_t requestSearch(const String &query){
- if(!mounted || !searches || !indexRows || !indexCount)return 0;
+ if(!mounted || !searches || !indexRows || !indexCount || !topicsFor(query))return 0;
  SearchRequest q={};
  sanitize(query,sizeof(q.query)-1).toCharArray(q.query,sizeof(q.query));
  q.serial=++nextSerial;
