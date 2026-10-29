@@ -75,7 +75,7 @@ static uint8_t factCount=0;
 inline String factSummary(){
  String out;
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
- for(int i=0;i<factCount;i++){out+=String(facts[i].key)+" = "+facts[i].value+"\n";if(out.length()>650)break;}
+ for(int i=0;i<factCount;i++){out+=String(facts[i].key)+"\t"+facts[i].value+"\n";if(out.length()>650)break;}
  xSemaphoreGive(cacheMutex);return out;
 }
 inline bool extractFact(String utterance,String &key,String &value){
@@ -343,7 +343,7 @@ inline void task(void*){
   f.close();
   if(ok){saved++;appendIndex(e,offset,ts);
    String key,value;if(extractFact(e.question,key,value)){
-    mergeFact(key,value);File ff=SD_MMC.open("/kitty/facts.tsv",FILE_WRITE);
+    mergeFact(key,value);File ff=SD_MMC.open("/kitty/facts.tsv","w");
     if(ff){ff.print(factSummary());ff.close();}
    }
   }else failed++;
