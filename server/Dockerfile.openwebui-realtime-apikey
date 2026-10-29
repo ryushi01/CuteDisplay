@@ -21,4 +21,11 @@ RUN python /tmp/cutedisplay-conversation-v2.py --source-root /app --check && \
     python /tmp/cutedisplay-conversation-v2.py --source-root /app --apply && \
     python -m py_compile /app/backend/open_webui/routers/audio/realtime.py && \
     rm /tmp/cutedisplay-conversation-v2.py
+# Opt-in live memory refresh. Existing clients are unchanged; build fails closed
+# if the exact reviewed realtime source anchors have changed.
+COPY server/patch_openwebui_memory_refresh.py /tmp/cutedisplay-memory-refresh.py
+RUN python /tmp/cutedisplay-memory-refresh.py --source-root /app --check && \
+    python /tmp/cutedisplay-memory-refresh.py --source-root /app --apply && \
+    python -m py_compile /app/backend/open_webui/routers/audio/realtime.py && \
+    rm /tmp/cutedisplay-memory-refresh.py
 USER ${ORIGINAL_USER}
