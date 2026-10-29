@@ -120,6 +120,16 @@ inline void mergeFact(const String &key,const String &value){
   key.toCharArray(facts[factCount].key,sizeof(facts[factCount].key));
   value.toCharArray(facts[factCount].value,sizeof(facts[factCount].value));
   factCount++;
+ }else{
+  // Rotate oldest episodic memory, never evict stable profile facts.
+  int victim=-1;
+  for(int i=0;i<factCount;i++)
+   if(strncmp(facts[i].key,"event_",6)==0){victim=i;break;}
+  if(victim>=0){
+   for(int i=victim;i<factCount-1;i++)facts[i]=facts[i+1];
+   key.toCharArray(facts[factCount-1].key,sizeof(facts[0].key));
+   value.toCharArray(facts[factCount-1].value,sizeof(facts[0].value));
+  }
  }
  xSemaphoreGive(cacheMutex);
 }
@@ -357,7 +367,7 @@ inline void task(void*){
   f.close();
   if(ok){saved++;appendIndex(e,offset,ts);
    String key,value;if(extractFact(e.question,key,value)){
-    if(key=="event")key="event_"+String(ts%1000000UL);
+    if(key=="event")key="event_"+String(ts%1000000UL)+"_"+String(saved%100UL);
     mergeFact(key,value);File ff=SD_MMC.open("/kitty/facts.tsv","w");
     if(ff){ff.print(factSummary());ff.close();}
    }
