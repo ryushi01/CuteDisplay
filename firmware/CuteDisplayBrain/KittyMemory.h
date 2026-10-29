@@ -105,17 +105,35 @@ inline bool extractFact(String utterance,String &key,String &value){
  if(pos<0)for(const char* marker:{"i work at ","i now work at ","i work for ","je travaille chez ","勤務先は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="work";skip=strlen(marker);break;}
  }
- if(pos<0)for(const char* marker:{"i no longer like ","i don't like ","i do not like ","i dislike ","i hate ","je n'aime pas ","もう好きじゃない"}){
+ // Consolidate declarative attributes under a stable subject (not all
+ // user statements are food, plans or preferences).
+ if(pos<0){
+  int subjectStart=lower.indexOf("my ");
+  int predicate=subjectStart>=0?lower.indexOf(" is ",subjectStart+3):-1;
+  if(subjectStart>=0 && predicate>subjectStart+3 && predicate-subjectStart<=42){
+   String subject=lower.substring(subjectStart+3,predicate);
+   subject.trim();
+   if(subject.length()>1 && subject.indexOf('?')<0){
+    uint32_t h=2166136261UL;
+    for(size_t i=0;i<subject.length();i++)h=(h^(uint8_t)subject[i])*16777619UL;
+    char code[16];snprintf(code,sizeof(code),"%08lx",(unsigned long)h);
+    key=String("attr_")+code;
+    value=subject+": "+utterance.substring(predicate+4);
+    pos=-2; // extracted a subject-value pair, no substring offset needed
+   }
+  }
+ }
+ if(pos==-1)for(const char* marker:{"i no longer like ","i don't like ","i do not like ","i dislike ","i hate ","je n'aime pas ","もう好きじゃない"}){
   pos=lower.indexOf(marker);if(pos>=0){key="dislikes";skip=strlen(marker);break;}
  }
- if(pos<0)for(const char* marker:{"i like ","i love ","my favorite food is ","好きな食べ物は","好きなのは"}){
+ if(pos==-1)for(const char* marker:{"i like ","i love ","my favorite food is ","好きな食べ物は","好きなのは"}){
   pos=lower.indexOf(marker);if(pos>=0){key="likes";skip=strlen(marker);break;}
  }
- if(pos<0 && lower.indexOf("が好き")>0){
+ if(pos==-1 && lower.indexOf("が好き")>0){
   key="likes";value=utterance.substring(0,lower.indexOf("が好き"));
  }else if(pos>=0){
   value=utterance.substring(pos+skip);
- }else{
+ }else if(pos==-1){
   // Broad topic capture: don't restrict memories to hardcoded food/events.
   // Explicit remember requests and personal statements are preserved as
   // concise, dated notes. Avoid archiving routine questions and greetings.
