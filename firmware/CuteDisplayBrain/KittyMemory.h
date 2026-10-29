@@ -83,7 +83,11 @@ static uint8_t factCount=0;
 inline String factSummary(size_t maxLen=700){
  String out;
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
- for(int i=0;i<factCount;i++){\n  String record=String(facts[i].key)+"\\t"+facts[i].value+"\\n";\n  if(out.length()+record.length()>maxLen)break;\n  out+=record;\n }
+ for(int i=0;i<factCount;i++){
+  String record=String(facts[i].key)+"\t"+facts[i].value+"\n";
+  if(out.length()+record.length()>maxLen)break;
+  out+=record;
+ }
  xSemaphoreGive(cacheMutex);return out;
 }
 inline bool extractFact(String utterance,String &key,String &value){
@@ -167,7 +171,7 @@ inline bool queue(const String &question,const String &answer){
  sanitize(question,sizeof(e.question)-1).toCharArray(e.question,sizeof(e.question));
  sanitize(answer,sizeof(e.answer)-1).toCharArray(e.answer,sizeof(e.answer));
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
- String key,value;if(extractFact(question,key,value) && key!="event")mergeFact(key,value);
+ String key,value;if(extractFact(question,key,value) && key!="event" && key!="note")mergeFact(key,value);
  // The active recall cache updates immediately; SD persistence is deferred.
  addCache(question,answer);
  return true;
