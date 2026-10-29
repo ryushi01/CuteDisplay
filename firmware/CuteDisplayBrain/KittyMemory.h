@@ -68,12 +68,55 @@ inline String recall(const String &question){
  xSemaphoreGive(cacheMutex);
  return clipUTF8(result,540);
 }
+
+struct Fact { char key[32]; char value[96]; };
+static Fact facts[24]={};
+static uint8_t factCount=0;
+inline String factSummary(){
+ String out;
+ if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
+ for(int i=0;i<factCount;i++){out+=String(facts[i].key)+" = "+facts[i].value+"\n";if(out.length()>650)break;}
+ xSemaphoreGive(cacheMutex);return out;
+}
+inline bool extractFact(String utterance,String &key,String &value){
+ utterance.trim();String lowered=utterance;lowered.toLowerCase();
+ int pos=-1;int skip=0;
+ for(const char *pattern:{"my name is ","call me ","i am called ","私の名前は","名前は"}){
+  pos=lowered.indexOf(pattern);if(pos>=0){key="name";skip=strlen(pattern);break;}
+ }
+ if(pos<0)for(const char *pattern:{"i like ","i love ","my favorite food is ","好きな食べ物は","好きなのは"}){
+  pos=lowered.indexOf(pattern);if(pos>=0){key="likes";skip=strlen(pattern);break;}
+ }
+ if(pos<0 && lowered.indexOf("が好き")>0){
+  pos=lowered.indexOf("が好き");key="likes";value=utterance.substring(0,pos);
+ }else if(pos>=0)value=utterance.substring(pos+skip);
+ else return false;
+ for(const char *tail:{"。","、",".","!","！","です","だよ","だわ","よ","って呼んで"}){
+  int x=value.indexOf(tail);if(x>=0)value=value.substring(0,x);
+ }
+ value.trim();return !value.isEmpty() && value.length()<90;
+}
+inline void mergeFact(const String &key,const String &value){
+ if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
+ for(int i=0;i<factCount;i++)if(key==facts[i].key){
+  value.toCharArray(facts[i].value,sizeof(facts[i].value));
+  xSemaphoreGive(cacheMutex);return;
+ }
+ if(factCount<24){
+  key.toCharArray(facts[factCount].key,sizeof(facts[factCount].key));
+  value.toCharArray(facts[factCount].value,sizeof(facts[factCount].value));
+  factCount++;
+ }
+ xSemaphoreGive(cacheMutex);
+}
+
 inline bool queue(const String &question,const String &answer){
- if(!writes || !mounted || question.isEmpty() || answer.isEmpty())return false;
+ if(!writes || !mounted || question.isEmpty() || answer.isEmpty()){Serial.printf("[MEMORY] enqueue refused mounted=%d queue=%d\n",mounted?1:0,writes?1:0);return false;}
  Entry e={};
  sanitize(question,sizeof(e.question)-1).toCharArray(e.question,sizeof(e.question));
  sanitize(answer,sizeof(e.answer)-1).toCharArray(e.answer,sizeof(e.answer));
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
+ String key,value;if(extractFact(question,key,value))mergeFact(key,value);
  // The active recall cache updates immediately; SD persistence is deferred.
  addCache(question,answer);
  return true;
@@ -223,6 +266,8 @@ inline void task(void*){
   Serial.println("[MEMORY] SD mount failed: card may need FAT formatting, be damaged, or be missing; no auto erase");
  }else{
   SD_MMC.mkdir("/kitty");
+  File factFile=SD_MMC.open("/kitty/facts.tsv",FILE_READ);
+  if(factFile){while(factFile.available()){String line=factFile.readStringUntil('\n');int t=line.indexOf('\t');if(t>0)mergeFact(line.substring(0,t),line.substring(t+1));}factFile.close();}
   indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!indexRows)Serial.println("[MEMORY] PSRAM index unavailable; recent cache only");
   readIndex();
@@ -296,7 +341,12 @@ inline void task(void*){
   uint32_t offset=(uint32_t)f.size();
   bool ok=f.printf("%lu\t%s\t%s\n",(unsigned long)ts,e.question,e.answer)>0;
   f.close();
-  if(ok){saved++;appendIndex(e,offset,ts);}else failed++;
+  if(ok){saved++;appendIndex(e,offset,ts);
+   String key,value;if(extractFact(e.question,key,value)){
+    mergeFact(key,value);File ff=SD_MMC.open("/kitty/facts.tsv",FILE_WRITE);
+    if(ff){ff.print(factSummary());ff.close();}
+   }
+  }else failed++;
   if((saved%20)==0)
    Serial.printf("[MEMORY] saved=%lu failed=%lu queue=%u\n",
      (unsigned long)saved,(unsigned long)failed,(unsigned)uxQueueMessagesWaiting(writes));
