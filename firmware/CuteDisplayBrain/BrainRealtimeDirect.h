@@ -27,6 +27,8 @@ static WebSocketsClient ws;
 static bool requested=false, started=false, connected=false, ready=false;
 static bool remoteResponse=false, streamedSpeech=false;
 static bool bargeCancelling=false;
+static String deferredVoiceItem;
+static bool playbackSpeechDetected=false;
 static String delegatedCallId, animationResponseId;
 // The provider must finish the initial tool-call response before bridge.respond.
 static bool toolResponseFinished=false;
@@ -188,6 +190,7 @@ inline void diagnose(bool audioBusy){
 inline void stop(){
  pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
  requested=false;ready=false;connected=false;started=false;
+ deferredVoiceItem="";playbackSpeechDetected=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
  failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
@@ -219,6 +222,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
+ deferredVoiceItem="";playbackSpeechDetected=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
   failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
   BrainRealtimeAudio::stop();
@@ -272,6 +276,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   lastPing=millis();
  }else if(strcmp(type,"response.created")==0){
   remoteResponse=true;streamedSpeech=false;expressionIdleSince=0;
+  playbackSpeechDetected=false;
   bargeCancelling=false;BrainRealtimeAudio::resetBarge();
   BrainRealtimeAudio::setRemoteReply(true);
   status("CALL_THINKING");
@@ -299,13 +304,17 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   cJSON *id=cJSON_GetObjectItem(json,"item_id");
   cJSON *transcript=cJSON_GetObjectItem(json,"transcript");
   if(cJSON_IsString(id) && cJSON_IsString(transcript) &&
-     transcript->valuestring && transcript->valuestring[0] &&
-     !remoteResponse && delegatedCallId.isEmpty()){
-   // Open WebUI turn_detection explicitly sets create_response=false.
-   // Without bridge.respond the user would never get a spoken answer.
-   if(!bridgeRespond("item_id",String(id->valuestring)))
+     transcript->valuestring && transcript->valuestring[0]){
+   String item(id->valuestring);
+   if(remoteResponse || BrainRealtimeAudio::hasSpeakerAudio() ||
+      !delegatedCallId.isEmpty() || !animationResponseId.isEmpty()){
+    // Accept speech during playback. Don't interrupt Kitty: answer it
+    // after speaker PCM and the current response have both finished.
+    deferredVoiceItem=item;
+    Serial.println("[CALL] DEFERRED_VOICE: captured during reply");
+   }else if(!bridgeRespond("item_id",item)){
     failure="VOICE_TURN_REQUEST";
-   else status("CALL_THINKING");
+   }else status("CALL_THINKING");
   }
  }else if(strcmp(type,"conversation.item.input_audio_transcription.failed")==0){
   status("CALL_LISTENING");
@@ -551,21 +560,10 @@ inline void tick(bool audioBusy){
   }
   if(BrainRealtimeAudio::initialized()){
    if(BrainRealtimeAudio::takeBargeRequest()){
-    Serial.println("[CALL] BARGE_IN: local speech detected, stopping Kitty");
-    BrainRealtimeAudio::clearSpeaker();
-    BrainAI::cancelCallDelegation();
-    delegatedCallId="";failedCallId="";failedCallAnswer="";
-    animationResponseId="";toolResponseFinished=false;
-    // The backend should forward this standard Realtime command upstream.
-    // If the provider already finished, leave the open session intact.
-    bargeCancelling=remoteResponse;
-    if(remoteResponse && !ws.sendTXT("{\"type\":\"response.cancel\"}")){
-     fail("BARGE_CANCEL_SEND");return;
-    }
-    remoteResponse=false;streamedSpeech=false;
-    expressionIdleSince=0;pendingMood=1;currentMood=1;
-    BrainRealtimeAudio::setRemoteReply(false);
-    status("CALL_LISTENING");
+    // Listening continues while Kitty finishes her sentence.
+    // Do not cancel provider or drain the speaker ring.
+    playbackSpeechDetected=true;
+    Serial.println("[CALL] OVERLAP_VOICE: microphone open during speech");
    }
    // 20ms mono little-endian PCM16, encoded as a native Open WebUI event.
    // Never send more than 2 frames per tick (40ms maximum).
@@ -584,6 +582,17 @@ inline void tick(bool audioBusy){
     payload+=(const char*)encoded;
     payload+="\"}";
     if(!ws.sendTXT(payload)){fail("MIC_SEND");return;}
+   }
+   if(!deferredVoiceItem.isEmpty() && !remoteResponse &&
+      !BrainRealtimeAudio::hasSpeakerAudio() &&
+      delegatedCallId.isEmpty() && failedCallId.isEmpty() &&
+      animationResponseId.isEmpty()){
+    String item=deferredVoiceItem;
+    deferredVoiceItem="";
+    playbackSpeechDetected=false;
+    if(!bridgeRespond("item_id",item)){fail("DEFERRED_VOICE_REQUEST");return;}
+    Serial.println("[CALL] DEFERRED_VOICE: processing saved utterance");
+    status("CALL_THINKING");
    }
    if(BrainRealtimeAudio::hasSpeakerAudio() || (streamedSpeech&&remoteResponse)){
     expressionIdleSince=0;
