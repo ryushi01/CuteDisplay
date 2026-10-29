@@ -80,7 +80,9 @@ static int cfEyeHeight(uint8_t mood){
  if(mood==5)return 2;
  if(mood==3)return 6;
  if(mood==2 || mood==7)return 8;
- if(mood==6)return 16;
+ if(mood==6 || mood==8 || mood==13)return 16;
+ if(mood==9 || mood==11 || mood==14)return 8;
+ if(mood==10 || mood==12 || mood==15)return 10;
  return 14;
 }
 static void drawFullScreenKittyFace(){
@@ -89,27 +91,27 @@ static void drawFullScreenKittyFace(){
  const bool thinking=kittyActivity=="CALL_THINKING";
  const bool speaking=kittyActivity=="CALL_SPEAKING";
  const bool connecting=kittyActivity=="CALL_CONNECTING";
- // Only these eight temporary moods are recognized; never change the user's
+ // Only these sixteen temporary moods are recognized; never change the user's
  // persistent normal-message mascot or mood settings.
  // AI expression tool calls can arrive before any speech PCM. Keep the
  // chosen mood queued, but render it ONLY during CALL_SPEAKING. Thinking
  // always uses the C5-local thoughtful face; listening stays friendly.
- uint8_t emotion=thinking?0:(speaking && callFaceMood<=7?callFaceMood:1);
+ uint8_t emotion=thinking?0:(speaking && callFaceMood<=15?callFaceMood:1);
  const bool transitioning=speaking && callFacePreviousMood!=emotion &&
    callFaceTransitionStart &&
    (uint32_t)(t-callFaceTransitionStart)<CALL_FACE_TRANSITION_MS;
  const uint8_t mix=transitioning?
    (uint8_t)(((uint32_t)(t-callFaceTransitionStart)*255UL)/CALL_FACE_TRANSITION_MS):255;
- const uint8_t prior=callFacePreviousMood<=7?callFacePreviousMood:1;
+ const uint8_t prior=callFacePreviousMood<=15?callFacePreviousMood:1;
  const bool blink=(!speaking && (animPhase==8||animPhase==9||animPhase==25));
  const int gaze=thinking?7:listening?-3:0;
  const int bob=speaking?((t/180)%2?1:0):0;
  const uint16_t bg=emotion==3?0xFBEF:emotion==2?0xDF5D:
                    emotion==6?0xF59F:emotion==5?0xDDFB:
-                   emotion==7?0xFD9B:0xF73E;
+                   emotion==7?0xFD9B:emotion==8?0xFF5E:emotion==9?0xEF7F:emotion==10?0xFE3C:emotion==11?0xE71C:emotion==12?0xFDD8:emotion==13?0xFCD9:emotion==14?0xD65A:emotion==15?0xF6FD:0xF73E;
  const uint16_t oldBg=prior==3?0xFBEF:prior==2?0xDF5D:
                    prior==6?0xF59F:prior==5?0xDDFB:
-                   prior==7?0xFD9B:0xF73E;
+                   prior==7?0xFD9B:prior==8?0xFF5E:prior==9?0xEF7F:prior==10?0xFE3C:prior==11?0xE71C:prior==12?0xFDD8:prior==13?0xFCD9:prior==14?0xD65A:prior==15?0xF6FD:0xF73E;
  rect(0,0,LCD_W,LCD_H,transitioning?cfBlend565(oldBg,bg,mix):bg);
  // Tonal stripes emphasize the panoramic aspect ratio without gradients
  // that would waste all 256 framebuffer palette entries.
@@ -173,6 +175,35 @@ static void drawFullScreenKittyFace(){
   int height=(cfEyeHeight(prior)*(255-mix)+cfEyeHeight(emotion)*mix)/255;
   if(height<=3){cfLid(lx,ey,15,false);cfLid(rx,ey,15,false);}
   else {cfEye(lx,ey,9,height);cfEye(rx,ey,9,height);}
+ }else if(emotion==8){
+  cfEye(lx,ey,13,17);cfEye(rx,ey,13,17);
+  line(lx-13,ey-24,lx+13,ey-24,CF_INK);
+  line(rx-13,ey-24,rx+13,ey-24,CF_INK);
+ }else if(emotion==9){
+  cfEye(lx,ey+3,9,10);cfLid(rx,ey+3,13,false);
+  line(lx-14,ey-22,lx+6,ey-18,CF_INK);
+  textAt("?",292,48,2,CF_PURPLE);
+ }else if(emotion==10){
+  cfLid(lx,ey+2,15,false);cfLid(rx,ey+2,15,false);
+  oval(85,132,14,8,CF_BLUSH);oval(235,132,14,8,CF_BLUSH);
+ }else if(emotion==11){
+  cfEye(lx,ey+3,9,10);cfEye(rx,ey+3,9,10);
+  line(lx-13,ey-19,lx,ey-23,CF_INK);
+  line(rx,ey-23,rx+13,ey-19,CF_INK);
+  oval(rx+23,ey+15,3,7,CF_BLUE);
+ }else if(emotion==12){
+  cfLid(lx,ey,15,false);cfEye(rx,ey,10,14);
+  cfStar(300,49,6,CF_YELLOW);
+ }else if(emotion==13){
+  cfHeart(lx,ey,CF_PINK_DARK);cfHeart(rx,ey,CF_PINK_DARK);
+  cfHeart(296,55,CF_PINK_DARK);
+ }else if(emotion==14){
+  cfLid(lx,ey+4,15,false);cfLid(rx,ey+4,15,false);
+  line(lx-14,ey-20,lx+14,ey-20,CF_INK);
+  line(rx-14,ey-20,rx+14,ey-20,CF_INK);
+ }else if(emotion==15){
+  cfEye(lx,ey,9,11);cfLid(rx,ey,14,false);
+  cfStar(300,48,5,CF_YELLOW);
  }else if(emotion==5 || blink){
   cfLid(lx,ey,15,false);cfLid(rx,ey,15,false);
  }else if(emotion==2){
@@ -201,6 +232,13 @@ static void drawFullScreenKittyFace(){
  }
  // Lip sync is driven by *actual speaker PCM amplitude* from S3. No mouth
  // during silence, except a faint smile for friendly non-speaking states.
+ if((emotion==8 || emotion==9 || emotion==10 || emotion==11 ||
+     emotion==12 || emotion==13 || emotion==14 || emotion==15) && !speaking){
+  if(emotion==8)oval(160,145,7,9,CF_INK);
+  else if(emotion==10)oval(160,147,12,7,CF_INK);
+  else if(emotion==14)line(150,148,170,148,CF_INK);
+  else {line(151,148,160,151,CF_INK);line(160,151,169,148,CF_INK);}
+ }
  if(speaking){
   int openness=callLipLevel>=7?13:callLipLevel>=4?10:callLipLevel>=1?6:3;
   oval(160,146,9,openness,CF_INK);
