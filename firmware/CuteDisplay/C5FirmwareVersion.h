@@ -18,4 +18,5 @@
 // v26: compact live transcription caption at bottom of full-screen Call Mode.
 // v27: always-visible compact user/Kitty transcript strip in realtime Call Mode.
 // v28: two-line top conversation monitor, black text without a dark panel.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 28;
+// v29: two-line chronological captions with newest text on lower row.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 29;
