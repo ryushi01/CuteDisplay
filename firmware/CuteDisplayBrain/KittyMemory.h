@@ -712,6 +712,8 @@ inline String semanticFactRecall(const String &query,size_t limit=280){
  bool preferences=(topics&(1UL<<1)) || lower.indexOf("prefer")>=0 || lower.indexOf("好き")>=0;
  // Iterate recent facts first, prioritizing identity and matching preferences.
  for(int i=(int)factCount-1;i>=0;i--){
+  if(factExpires && factExpires[i] && time(nullptr)>1700000000 &&
+     (uint32_t)time(nullptr)>=factExpires[i])continue;
   String key(facts[i].key),value(facts[i].value);
   bool selected=(preferences && key.startsWith("pref_")) ||
    ((topics&(1UL<<12)) && key=="name") ||
