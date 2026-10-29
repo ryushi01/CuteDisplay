@@ -809,6 +809,12 @@ static void consoleCommand(String cmd){
   Serial.printf("[SYS CPU] frequency_mhz=%lu free_rtos_tasks=%lu loop_stack_highwater_bytes=%lu (instant CPU load unavailable)\n",
     (unsigned long)ESP.getCpuFreqMHz(),(unsigned long)uxTaskGetNumberOfTasks(),
     (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
+  // Task measurements are high-water stack headroom in bytes, not CPU load.
+  // Never walk the whole RTOS task list from the realtime WebSocket loop.
+  Serial.printf("[SYS TASKS] audio_core=0 audio_priority=3 audio_stack_free=%lu sd_core=0 sd_priority=1 sd_stack_free=%lu ai_core=0 ai_priority=1 ai_stack_free=%lu\\n",
+    (unsigned long)(BrainRealtimeAudio::owner?uxTaskGetStackHighWaterMark(BrainRealtimeAudio::owner):0),
+    (unsigned long)(KittyMemory::worker?uxTaskGetStackHighWaterMark(KittyMemory::worker):0),
+    (unsigned long)(BrainAI::worker?uxTaskGetStackHighWaterMark(BrainAI::worker):0));
   Serial.printf("[SYS MEMORY] mounted=%d state=%u facts=%u indexed=%lu/%lu saved=%lu failed=%lu queue=%u ai_queue=%u\n",
     KittyMemory::ready()?1:0,(unsigned)KittyMemory::status(),
     (unsigned)KittyMemory::factCount,(unsigned long)KittyMemory::indexCount,
