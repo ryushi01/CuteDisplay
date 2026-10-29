@@ -91,7 +91,7 @@ struct SearchRequest { char query[192]; uint32_t serial; };
 static QueueHandle_t searches=nullptr;
 static uint32_t nextSerial=0, finishedSerial=0;
 static String searchReply;
-static const char *topicWords[12]={
+static const char *topicWords[13]={
  "travel trip vacation kyoto osaka tokyo hotel flight train 旅行 旅 京都 大阪 東京 vacances voyage",
  "food eat restaurant cooking dinner lunch sushi ramen pizza 食事 料理 美味 レストラン manger cuisine",
  "family friend birthday wife husband child mother father 家族 友達 誕生日 母 父 famille ami",
@@ -103,12 +103,13 @@ static const char *topicWords[12]={
  "kitty cutedisplay esp32 firmware camera display audio speaker microphone sdcard",
  "schedule tomorrow yesterday next week month year appointment date 予定 明日 昨日 来週 来月 去年 rendezvous",
  "love feelings worried sad happy angry emotional 気持 愛 心配 悲し 幸せ amour triste",
- "home house pet cat dog garden move 家 自宅 引越 猫 犬 maison chien"
+ "home house pet cat dog garden move 家 自宅 引越 猫 犬 maison chien",
+ "name called nickname identity remember my name 名前 名 呼び 覚え 私の名前 名前は je m appelle prénom nom"
 };
 inline uint32_t topicsFor(String s){
  s.toLowerCase();
  uint32_t bits=0;
- for(int i=0;i<12;i++){
+ for(int i=0;i<13;i++){
   String terms=String(topicWords[i])+" ";
   int at=0;
   while(at<(int)terms.length()){
