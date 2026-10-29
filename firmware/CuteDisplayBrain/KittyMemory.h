@@ -174,6 +174,47 @@ inline bool extractFact(String utterance,String &key,String &value){
  if(pos<0)for(const char* marker:{"i work at ","i now work at ","i work for ","je travaille chez ","勤務先は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="work";skip=strlen(marker);break;}
  }
+ // Fast multilingual context classification, without extra model inference.
+ // Preserve negation and time qualifiers in the value; same topic replaces
+ // older temporary statements rather than manufacturing permanent traits.
+ if(pos<0 && lower.indexOf('?')<0 && lower.indexOf("？")<0){
+  struct Rule { const char* key; const char* trigger; };
+  static const Rule rules[]={
+   {"context_work_availability","busy with work"},
+   {"context_work_availability","too busy to take"},
+   {"context_work_availability","cannot take holidays"},
+   {"context_work_availability","can't take holidays"},
+   {"context_work_availability","je suis occupé"},
+   {"context_work_availability","je suis occupée"},
+   {"context_work_availability","trop de travail"},
+   {"context_work_availability","pas prendre de vacances"},
+   {"context_work_availability","仕事が忙しい"},
+   {"context_work_availability","休暇を取れない"},
+   {"context_work_availability","休みが取れない"},
+   {"context_upcoming_plan","tonight i"},
+   {"context_upcoming_plan","tomorrow i"},
+   {"context_upcoming_plan","i plan to"},
+   {"context_upcoming_plan","i'm going to"},
+   {"context_upcoming_plan","ce soir je"},
+   {"context_upcoming_plan","demain je"},
+   {"context_upcoming_plan","je vais "},
+   {"context_upcoming_plan","今夜は"},
+   {"context_upcoming_plan","明日は"},
+   {"context_upcoming_plan","予定がある"},
+   {"context_upcoming_plan","する予定"},
+   {"context_hobby","my hobby is"},
+   {"context_hobby","my hobbies are"},
+   {"context_hobby","mon passe-temps"},
+   {"context_hobby","mes loisirs"},
+   {"context_hobby","私の趣味は"},
+   {"context_hobby","趣味は"}
+  };
+  for(const auto &rule:rules){
+   if(lower.indexOf(rule.trigger)>=0){
+    key=rule.key;value=utterance;pos=-2;break;
+   }
+  }
+ }
  // Consolidate declarative attributes under a stable subject (not all
  // user statements are food, plans or preferences).
  if(pos<0){
