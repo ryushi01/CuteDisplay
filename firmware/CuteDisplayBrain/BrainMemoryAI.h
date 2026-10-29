@@ -54,9 +54,12 @@ inline void tick(bool busy){
    cJSON *system=cJSON_CreateObject();
    cJSON_AddStringToObject(system,"role","system");
    cJSON_AddStringToObject(system,"content",
-    "Extract ONLY clearly explicit durable user preferences from the utterance. "
+    "Extract ONLY explicitly stated personal facts from the user utterance in English, French, or Japanese. "
     "Return compact JSON only: {\"facts\":[{\"kind\":\"likes\",\"subject\":\"chocolate\"}]}. "
-    "Allowed kind: likes, dislikes. Max 3 items. Subject must be concrete and "
+    "Allowed kind: likes, dislikes, situation. For situation use subject as " 
+    "a canonical topic identifier: work_availability, upcoming_plan, or hobby; " 
+    "include detail as concise English or original-language description and " 
+    "do not imply the situation is permanent. Max 3 items. Subject must be concrete and "
     "independently meaningful (no it/this/that/one, questions, guesses, vague "
     "references or inferred emotions). A later dislike supersedes a like for "
     "the SAME subject. If no explicit stable preferences, return {\"facts\":[]}. "
@@ -74,7 +77,7 @@ inline void tick(bool busy){
    esp_http_client_config_t cfg={};
    cfg.url=url.c_str();
    cfg.crt_bundle_attach=esp_crt_bundle_attach; // Same verified CA bundle as BrainAI.
-   cfg.timeout_ms=1600; // Short network read timeout; never on audio task.
+   cfg.timeout_ms=2500; // Short network read timeout; never on audio task.
    cfg.user_data=&response;
    cfg.event_handler=[](esp_http_client_event_t *e)->esp_err_t {
     if(abortRequested || interactive)return ESP_FAIL;
@@ -115,10 +118,10 @@ inline void tick(bool busy){
          cJSON *subject=cJSON_GetObjectItem(item,"subject");
          if(!cJSON_IsString(kind)||!cJSON_IsString(subject))continue;
          String k(kind->valuestring),v(subject->valuestring);
-         if((k=="likes"||k=="dislikes") &&
-            KittyMemory::meaningfulPreferenceSubject(v) &&
+         if((k=="likes"||k=="dislikes"||k=="situation") &&
+            (k=="situation" ? (v=="work_availability"||v=="upcoming_plan"||v=="hobby") : KittyMemory::meaningfulPreferenceSubject(v)) &&
             !abortRequested && !interactive &&
-            KittyMemory::proposeConsolidatedFact(k,v))accepted++;
+            KittyMemory::proposeConsolidatedFact(k,k=="situation" ? v+":"+String(cJSON_IsString(cJSON_GetObjectItem(item,"detail"))?cJSON_GetObjectItem(item,"detail")->valuestring:"") : v))accepted++;
         }
         if(accepted)Serial.printf("[MEMORY AI] proposed=%d (idle)\\n",accepted);
        }
