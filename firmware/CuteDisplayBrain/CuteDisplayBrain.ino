@@ -33,6 +33,7 @@
 #include "BrainClock.h"
 #include "BrainAI.h"
 #include "BrainRealtimeDirect.h"
+#include "BrainMemoryAI.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr char S3_FW_VERSION[]="CallFace-v23-dev";
@@ -1263,6 +1264,12 @@ void loop(){
   if(!BrainC5OTA::updating() && !BrainAudioTest::running && !BrainVoiceSTT::running && !BrainAI::busy)
    BrainVoiceSTT::start();
  }
+ // The optional Ollama memory pass is strictly inactive throughout Call Mode
+ // and every normal STT/AI/TTS turn. It runs only after 20 seconds idle.
+ BrainMemoryAI::tick(BrainRealtimeDirect::active() || BrainRealtimeAudio::active() ||
+  BrainVoiceSTT::running || BrainVoiceSTT::capturing || BrainAI::busy ||
+  BrainTTS::running || BrainAudioTest::running || BrainC5OTA::updating() ||
+  pendingC5VoiceStart);
  BrainTTS::tick(BrainVoiceSTT::running || BrainAudioTest::running || BrainC5OTA::updating() || BrainAI::busy ||
                 BrainRealtimeDirect::active() || BrainRealtimeAudio::active());
  static String priorActivity;
