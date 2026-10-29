@@ -84,7 +84,7 @@ static String delegatedCallId, animationResponseId;
 // The provider must finish the initial tool-call response before bridge.respond.
 static bool toolResponseFinished=false;
 static String failedCallId, failedCallAnswer;
-// Temporary 0..7 Kitty expression selected by realtime avatar gestures or
+// Temporary 0..15 Kitty expression selected by realtime avatar gestures or
 // assistant speech. No change to the model, account, or persistent C5 mood.
 static int pendingMood=-1;
 static uint8_t explicitMoodQueue[8];
@@ -99,6 +99,14 @@ inline int emotionForText(String phrase){
  phrase.toLowerCase();
  // English, French and Japanese. Sentiment fallback is intentionally
  // conservative; explicitly AI-selected play_animation gestures have priority.
+ if(phrase.indexOf("surprised")>=0 || phrase.indexOf("びっくり")>=0)return 8;
+ if(phrase.indexOf("confused")>=0 || phrase.indexOf("困惑")>=0)return 9;
+ if(phrase.indexOf("laugh")>=0 || phrase.indexOf("笑っ")>=0)return 10;
+ if(phrase.indexOf("worried")>=0 || phrase.indexOf("心配")>=0)return 11;
+ if(phrase.indexOf("playful")>=0 || phrase.indexOf("いたずら")>=0)return 12;
+ if(phrase.indexOf("love")>=0 || phrase.indexOf("大好き")>=0)return 13;
+ if(phrase.indexOf("bored")>=0 || phrase.indexOf("退屈")>=0)return 14;
+ if(phrase.indexOf("proud")>=0 || phrase.indexOf("誇らし")>=0)return 15;
  if(phrase.indexOf("angry")>=0 || phrase.indexOf("furious")>=0 ||
     phrase.indexOf("fâché")>=0 || phrase.indexOf("怒")>=0)return 3;
  if(phrase.indexOf("sad")>=0 || phrase.indexOf("sorry")>=0 ||
@@ -119,6 +127,14 @@ inline int emotionForText(String phrase){
 }
 inline int emotionForGesture(String name){
  name.toLowerCase();
+ if(name.indexOf("surpris")>=0||name.indexOf("shock")>=0)return 8;
+ if(name.indexOf("confus")>=0||name.indexOf("puzzl")>=0)return 9;
+ if(name.indexOf("laugh")>=0||name.indexOf("giggl")>=0)return 10;
+ if(name.indexOf("worri")>=0||name.indexOf("nervous")>=0)return 11;
+ if(name.indexOf("playful")>=0||name.indexOf("wink")>=0)return 12;
+ if(name.indexOf("love")>=0||name.indexOf("heart")>=0)return 13;
+ if(name.indexOf("bored")>=0||name.indexOf("unimpress")>=0)return 14;
+ if(name.indexOf("proud")>=0||name.indexOf("smug")>=0)return 15;
  if(name.indexOf("angry")>=0||name.indexOf("mad")>=0||
     name.indexOf("frown")>=0)return 3;
  if(name.indexOf("sad")>=0||name.indexOf("cry")>=0||
@@ -136,7 +152,7 @@ inline int emotionForGesture(String name){
  return -1;
 }
 inline void chooseMood(int m,bool explicitGesture){
- if(m<0 || m>7 || !requested)return;
+ if(m<0 || m>15 || !requested)return;
  uint32_t now=millis();
  // An explicit realtime tool choice wins for its full displayed lifetime;
  // optional fragmentary transcript keywords must never overwrite it.
@@ -444,10 +460,11 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
     int mood=-1;
     if(cJSON_IsString(nameParam)){
      if(expressionTool){
-      static const char* const names[8]={
-       "neutral","happy","sad","angry","hungry","sleepy","excited","shy"
+      static const char* const names[16]={
+       "neutral","happy","sad","angry","hungry","sleepy","excited","shy",
+       "surprised","confused","laughing","worried","playful","love","bored","proud"
       };
-      for(int k=0;k<8;k++)if(strcmp(nameParam->valuestring,names[k])==0){
+      for(int k=0;k<16;k++)if(strcmp(nameParam->valuestring,names[k])==0){
        mood=k;break;
       }
      }else mood=emotionForGesture(nameParam->valuestring);
