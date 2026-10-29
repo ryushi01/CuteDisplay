@@ -83,40 +83,59 @@ static uint8_t factCount=0;
 inline String factSummary(size_t maxLen=700){
  String out;
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
- for(int i=0;i<factCount;i++){out+=String(facts[i].key)+"\t"+facts[i].value+"\n";if(out.length()>=maxLen)break;}
+ for(int i=0;i<factCount;i++){\n  String record=String(facts[i].key)+"\\t"+facts[i].value+"\\n";\n  if(out.length()+record.length()>maxLen)break;\n  out+=record;\n }
  xSemaphoreGive(cacheMutex);return out;
 }
 inline bool extractFact(String utterance,String &key,String &value){
- utterance.trim();String lowered=utterance;lowered.toLowerCase();
- int pos=-1;int skip=0;
- for(const char *pattern:{"my name is ","call me ","i am called ","私の名前は","名前は"}){
-  pos=lowered.indexOf(pattern);if(pos>=0){key="name";skip=strlen(pattern);break;}
+ utterance.trim();if(utterance.length()<5)return false;
+ String lower=utterance;lower.toLowerCase();
+ int pos=-1,skip=0;
+ for(const char* marker:{"my name is ","call me ","i am called ","私の名前は","名前は"}){
+  pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
  }
- if(pos<0)for(const char *pattern:{"i like ","i love ","my favorite food is ","好きな食べ物は","好きなのは"}){
-  pos=lowered.indexOf(pattern);if(pos>=0){key="likes";skip=strlen(pattern);break;}
+ if(pos<0)for(const char* marker:{"i like ","i love ","my favorite food is ","好きな食べ物は","好きなのは"}){
+  pos=lower.indexOf(marker);if(pos>=0){key="likes";skip=strlen(marker);break;}
  }
- if(pos<0 && lowered.indexOf("が好き")>0){
-  pos=lowered.indexOf("が好き");key="likes";value=utterance.substring(0,pos);
- }else if(pos>=0)value=utterance.substring(pos+skip);
- else {
-  // Episodic memories preserve user statements about plans, events, projects,
-  // friends and preferences without pretending to fully understand them.
-  // Keep the exact statement as the value to avoid hallucinated facts.
-  const char *signals[]={"tomorrow","next week","next month","after tomorrow","day after tomorrow",
-    "yesterday","last week","going to","i will ","i'm going","i have ","we will ",
-    "remember this","please remember","in two days","the day after","on saturday","on sunday","my project","i started","i bought","i visited","i met ","i prefer","remember this","remember that","i plan","i am planning","we are going","we plan",
-    "明日","明後日","来週","来月","昨日","予定","行く","食べる","買った","会った",
-    "demain","apres-demain","après-demain","semaine prochaine","je vais","j'aime"};
-  bool relevant=false;
-  for(const char *signal:signals)if(lowered.indexOf(signal)>=0){relevant=true;break;}
-  if(!relevant || utterance.length()<12)return false;
-  key="event";
+ if(pos<0 && lower.indexOf("が好き")>0){
+  key="likes";value=utterance.substring(0,lower.indexOf("が好き"));
+ }else if(pos>=0){
+  value=utterance.substring(pos+skip);
+ }else{
+  // Broad topic capture: don't restrict memories to hardcoded food/events.
+  // Explicit remember requests and personal statements are preserved as
+  // concise, dated notes. Avoid archiving routine questions and greetings.
+  bool explicitSave=false;
+  for(const char* marker:{"remember ","remember this","don't forget","please remember",
+    "覚えて","記憶して","souviens-toi","rappelle-toi"}){
+   if(lower.indexOf(marker)>=0){explicitSave=true;break;}
+  }
+  bool personal=false;
+  for(const char* marker:{"i ","i'm ","i’ve ","i've ","my ","mine ","we ","our ",
+    "私は","私が","私の","僕は","僕の","俺は","うちは",
+    "je ","j'ai ","mon ","ma ","mes ","nous ","notre "}){
+   if(lower.indexOf(marker)>=0){personal=true;break;}
+  }
+  // Avoid turning questions and one-word acknowledgements into "facts".
+  if((!explicitSave && !personal) || lower.indexOf('?')>=0 ||
+     lower.indexOf("？")>=0 || utterance.length()<12)return false;
+  key="note";
   value=utterance;
+  // Strip metacommands to store the underlying fact, not the instruction.
+  for(const char* marker:{"please remember this:","remember this:","remember that ",
+    "please remember ","remember ","覚えておいて","覚えてね"}){
+   String m(marker);int start=lower.indexOf(m);
+   if(start>=0 && start<=12){
+    value=utterance.substring(start+m.length());value.trim();break;
+   }
+  }
  }
- if(key!="event")for(const char *tail:{"。","、",".","!","！","です","だよ","だわ","よ","って呼んで"}){
-  int x=value.indexOf(tail);if(x>=0)value=value.substring(0,x);
+ if(key!="note")for(const char* ending:{"。","、",".","!","！","です","だよ","だわ","よ","って呼んで"}){
+  int k=value.indexOf(ending);if(k>=0)value=value.substring(0,k);
  }
- value.trim();return !value.isEmpty() && value.length()<(key=="event"?180:90);
+ value.trim();
+ // Do not chop off a UTF-8 scalar or store a sprawling paragraph.
+ if(value.length()>112)value=clipUTF8(value,112);
+ return value.length()>=2;
 }
 inline void mergeFact(const String &key,const String &value){
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
@@ -132,7 +151,7 @@ inline void mergeFact(const String &key,const String &value){
   // Rotate oldest episodic memory, never evict stable profile facts.
   int victim=-1;
   for(int i=0;i<factCount;i++)
-   if(strncmp(facts[i].key,"event_",6)==0){victim=i;break;}
+   if(strncmp(facts[i].key,"note_",5)==0 || strncmp(facts[i].key,"event_",6)==0){victim=i;break;}
   if(victim>=0){
    for(int i=victim;i<factCount-1;i++)facts[i]=facts[i+1];
    key.toCharArray(facts[factCount-1].key,sizeof(facts[0].key));
@@ -378,7 +397,7 @@ inline void task(void*){
   f.close();
   if(ok){saved++;appendIndex(e,offset,ts);
    String key,value;if(extractFact(e.question,key,value)){
-    if(key=="event")key="event_"+String(ts%1000000UL)+"_"+String(saved%100UL);
+    if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
     mergeFact(key,value);File ff=SD_MMC.open("/kitty/facts.tsv","w");
     if(ff){ff.print(factSummary(6000));ff.close();}
     Serial.printf("[MEMORY] saved fact key=%s total=%u\n",key.c_str(),(unsigned)factCount);
