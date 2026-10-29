@@ -165,7 +165,7 @@ inline bool extractFact(String utterance,String &key,String &value){
  utterance.trim();if(utterance.length()<5)return false;
  String lower=utterance;lower.toLowerCase();
  int pos=-1,skip=0;
- for(const char* marker:{"my name is ","call me ","i am called ","私の名前は","名前は"}){
+ for(const char* marker:{"my name is ","call me ","i am called ","je m’appelle ","je m'appelle ","私の名前は","名前は","私は","僕は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
  }
  if(pos<0)for(const char* marker:{"i live in ","i moved to ","i now live in ","j'habite à ","j'habite a ","住んでいるのは"}){
@@ -281,6 +281,14 @@ inline bool extractFact(String utterance,String &key,String &value){
   int k=value.indexOf(ending);if(k>=0)value=value.substring(0,k);
  }
  value.trim();
+ if(key=="name"){
+  // Trim spoken Japanese identity endings and French self-introduction.
+  for(const char* suffix:{"と申します","といいます","と言います","です","だよ","だ","って呼んで","と呼んで"}){
+   if(value.endsWith(suffix)){value.remove(value.length()-strlen(suffix));break;}
+  }
+  if(value.startsWith("シャナ") || value.startsWith("しゃな"))value="Shana";
+  value.trim();
+ }
  // Do not chop off a UTF-8 scalar or store a sprawling paragraph.
  if(value.length()>112)value=clipUTF8(value,112);
  return value.length()>=2;
@@ -740,7 +748,8 @@ inline void task(void*){
    uint32_t revisionBefore=factRevision;
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
-    // Save short, explicit multilingual preferences immediately on the SD worker.\n   // No network or model inference is required while Call Mode is active.\n   mergeFact(key,value);
+    // Persist parsed facts on the SD worker, never on the audio callback.
+    mergeFact(key,value);
    }
    if(gymCancellation(String(e.question)))removeSupersededGymPlan();
    consolidatePreferences(String(e.question));
