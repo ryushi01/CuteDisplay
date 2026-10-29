@@ -135,6 +135,8 @@ inline String factSummary(size_t maxLen=700){
   int count=(int)factCount;
   for(int n=0;n<count;n++){
    int i=pass==2?(count-1-n):n;
+   if(factExpires && factExpires[i] && time(nullptr)>1700000000 &&
+      (uint32_t)time(nullptr)>=factExpires[i])continue;
    String k(facts[i].key);
    bool episodic=k.startsWith("note_") || k.startsWith("event_");
    bool important=k=="name" || k=="home" || k=="work" || k.startsWith("context_");
