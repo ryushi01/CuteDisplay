@@ -11,6 +11,23 @@ namespace KittyMemory {
 static constexpr size_t SLOT_BYTES=768;
 struct Entry { char question[256]; char answer[512]; };
 static QueueHandle_t writes=nullptr;
+// Bounded RAM handoff to the optional idle-only AI consolidator.
+// Never waits on inference, and never touches SD in a network task.
+struct ConsolidationCandidate { char utterance[256]; };
+static QueueHandle_t consolidationCandidates=nullptr;
+struct ConsolidatedFact { char key[32]; char value[128]; };
+static QueueHandle_t consolidatedFacts=nullptr;
+inline bool takeConsolidationCandidate(String &value){
+ ConsolidationCandidate item={};
+ if(!consolidationCandidates || xQueueReceive(consolidationCandidates,&item,0)!=pdTRUE)return false;
+ value=String(item.utterance);return !value.isEmpty();
+}
+inline bool proposeConsolidatedFact(const String &key,const String &value){
+ if(!consolidatedFacts || key.isEmpty() || value.isEmpty() || key.length()>31 || value.length()>112)return false;
+ ConsolidatedFact item={};key.toCharArray(item.key,sizeof(item.key));value.toCharArray(item.value,sizeof(item.value));
+ return xQueueSend(consolidatedFacts,&item,0)==pdTRUE;
+}
+
 static TaskHandle_t worker=nullptr;
 static volatile bool mounted=false;
 static volatile uint8_t cardState=0; // 0=starting,1=ready,2=needs format/check,3=formatting,4=error
@@ -545,6 +562,20 @@ inline void task(void*){
  Entry e={};
  SearchRequest query={};
  while(true){
+  // S3's network task proposes changes only; the SD worker owns persistence.
+  ConsolidatedFact aiFact={};
+  if(mounted && consolidatedFacts && xQueueReceive(consolidatedFacts,&aiFact,0)==pdTRUE){
+   String kind(aiFact.key),subject(aiFact.value);
+   if((kind=="likes"||kind=="dislikes") && meaningfulPreferenceSubject(subject)){
+    uint32_t before=factRevision;
+    mergeFact(kind,subject);
+    if(factRevision!=before){
+     File ff=SD_MMC.open("/kitty/facts.tsv","w");
+     if(ff){size_t bytes=ff.print(factSummary(6000));ff.close();if(bytes)memorizedNoticeSeq++;}
+     Serial.printf("[MEMORY AI] consolidated %s\n",kind.c_str());
+    }
+   }
+  }
   static uint32_t lastStorageAt=0;
   if(mounted && (uint32_t)(millis()-lastStorageAt)>30000UL){updateStorage();lastStorageAt=millis();}
   if(formatRequested && cardState==2){
@@ -574,6 +605,14 @@ inline void task(void*){
   bool ok=f.printf("%lu\t%s\t%s\n",(unsigned long)ts,e.question,e.answer)>0;
   f.close();
   if(ok){saved++;appendIndex(e,offset,ts);
+   if(consolidationCandidates && strlen(e.question)>=12){
+    ConsolidationCandidate c={};strlcpy(c.utterance,e.question,sizeof(c.utterance));
+    // Drop oldest if overloaded: never block speech or the SD archive.
+    if(xQueueSend(consolidationCandidates,&c,0)!=pdTRUE){
+     ConsolidationCandidate old={};xQueueReceive(consolidationCandidates,&old,0);
+     xQueueSend(consolidationCandidates,&c,0);
+    }
+   }
    uint32_t revisionBefore=factRevision;
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
@@ -598,6 +637,8 @@ inline void task(void*){
 inline void init(){
  if(!cacheMutex)cacheMutex=xSemaphoreCreateMutex();
  if(!writes)writes=xQueueCreate(10,sizeof(Entry));
+ if(!consolidationCandidates)consolidationCandidates=xQueueCreate(8,sizeof(ConsolidationCandidate));
+ if(!consolidatedFacts)consolidatedFacts=xQueueCreate(8,sizeof(ConsolidatedFact));
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
  if(writes && !worker)
   xTaskCreatePinnedToCore(task,"kitty_sd",6144,nullptr,1,&worker,0);
