@@ -13,4 +13,5 @@
 // v22: C5 left short tap toggles realtime call; long hold preserves PTT.
 // v23: 320x170 bespoke full-screen Kitty call face with 8 moods, lip sync and
 // immediate return to the original normal message/mascot on CALL_OFF.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 23;
+// v24: dedicated C5-local animated thinking face; keep spoken mood until audio ends.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 24;
