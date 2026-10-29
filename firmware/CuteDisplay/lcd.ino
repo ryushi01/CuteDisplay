@@ -2908,10 +2908,14 @@ static void serviceBrain() {
    }
   }
   else if(f.type=="CALL_TEXT"){
-   if(callModeActive && !f.payload.isEmpty() && f.payload.length()<=80){
-    callCaptionPrevious=callCaption;
-    callCaption=f.payload;
-    if(lcdReady)redrawCurrent();
+   if(callModeActive && f.payload.length()>=2 && f.payload.length()<=80){
+    const char mode=f.payload[0];
+    if(mode=='0' || mode=='1'){
+     if(mode=='0'){callCaptionPrevious=callCaption;callCaption="";}
+     if(callCaption.length()+f.payload.length()-1<=768)
+      callCaption+=f.payload.substring(1);
+     if(lcdReady)redrawCurrent();
+    }
    }
   }
   else if(f.type=="CALL_LIP"){
