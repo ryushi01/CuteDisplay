@@ -104,6 +104,23 @@ class Handler(BaseHTTPRequestHandler):
             if length<2 or length>MAX_BODY:return self._reply(413,{"error":"invalid_length"})
             data=json.loads(self.rfile.read(length))
             if not isinstance(data,dict):raise ValueError("Expected object")
+            if self.path=="/calendar":
+                # Parsing is CPU-only and bounded by the HTTP body. The clock
+                # and timezone are explicit inputs; completion is never inferred.
+                from kitty_calendar import interpret
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                zone=str(data.get("timezone","Asia/Tokyo"))[:64]
+                now=datetime.now(ZoneInfo(zone))
+                return self._reply(200,interpret(str(data.get("text",""))[:300],now,zone))
+            if self.path=="/semantic":
+                # Optional local index, refreshed from a read-only SD export.
+                # Disabled when the DB/model aren't configured.
+                index=os.environ.get("KITTY_SEMANTIC_DB","")
+                if not index or not os.path.isfile(index):
+                    return self._reply(503,{"error":"semantic_index_unavailable"})
+                from kitty_sd_semantic_index import search
+                return self._reply(200,{"results":search(index,str(data.get("query",""))[:300])})
             if self.path=="/recall":
                 return self._reply(200,{"memories":recall(str(data.get("query",""))[:500])})
             if self.path in ("/turn","/remember","/forget"):
