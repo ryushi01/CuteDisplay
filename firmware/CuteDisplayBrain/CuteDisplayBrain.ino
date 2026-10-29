@@ -783,6 +783,8 @@ static void consoleCommand(String cmd){
     (unsigned)KittyMemory::INDEX_MAX,(unsigned long)KittyMemory::saved,
     (unsigned long)KittyMemory::failed,
     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  Serial.printf("[MEMORY] profile_facts=%u\n",(unsigned)KittyMemory::factCount);
+  Serial.print(KittyMemory::factSummary());
   return;
  }
  if(cmd=="c5 ota status"){
