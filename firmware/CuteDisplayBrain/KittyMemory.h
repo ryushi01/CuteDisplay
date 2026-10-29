@@ -140,7 +140,10 @@ inline bool persistFacts(){
   if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(50))!=pdTRUE){ok=false;break;}
   item=facts[i];
   xSemaphoreGive(cacheMutex);
-  if(f.printf("%s\t%s\n",item.key,item.value)<=0){ok=false;break;}
+  const uint32_t changed=factUpdated?factUpdated[i]:0;
+  const uint32_t expiry=factExpires?factExpires[i]:0;
+  if(f.printf("%s\t%s\t%lu\t%lu\n",item.key,item.value,
+      (unsigned long)changed,(unsigned long)expiry)<=0){ok=false;break;}
   if((i&31)==0)vTaskDelay(1);
  }
  f.flush();f.close();
@@ -163,8 +166,21 @@ inline void restoreFactSnapshots(){
   size_t before=factCount;
   while(f.available()){
    String line=f.readStringUntil('\n');int tab=line.indexOf('\t');
-   if(tab>0 && tab<32 && line.length()<240)
-    mergeFact(line.substring(0,tab),line.substring(tab+1));
+   if(tab>0 && tab<32 && line.length()<280){
+    int second=line.indexOf('\t',tab+1);
+    int third=second>=0?line.indexOf('\t',second+1):-1;
+    String k=line.substring(0,tab);
+    String v=second>=0?line.substring(tab+1,second):line.substring(tab+1);
+    mergeFact(k,v);
+    if(second>=0 && third>second && factCount && factUpdated){
+     // Metadata is optional: legacy two-column snapshots still load.
+     for(size_t i=0;i<factCount;i++)if(k==facts[i].key){
+      factUpdated[i]=(uint32_t)line.substring(second+1,third).toInt();
+      if(factExpires)factExpires[i]=(uint32_t)line.substring(third+1).toInt();
+      break;
+     }
+    }
+   }
   }
   f.close();
   if(factCount>before){
