@@ -61,7 +61,7 @@ class ExpressionToolContract(unittest.TestCase):
 
     def test_allowlist_and_device_opt_in(self):
         self.assertEqual(tuple(self.allowed),
-                         ("neutral","happy","sad","angry","hungry","sleepy","excited","shy"))
+                         ("neutral","happy","sad","angry","hungry","sleepy","excited","shy","surprised","confused","laughing","worried","playful","love","bored","proud"))
         protocol = self.CallProtocol(kitty_expressions=True)
         for i, mood in enumerate(self.allowed):
             item = self.event(mood, call_id=f"id-{i}", response_id=f"resp-{i}")
