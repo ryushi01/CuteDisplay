@@ -248,7 +248,8 @@ def main():
     # pristine auth backup may already exist from its first Docker build.
     # Preserve it untouched and create a separate expression rollback copy.
     backup = target.with_suffix(
-        ".py.cutedisplay-pre-expression" if MARKER in original
+        ".py.cutedisplay-pre-expression-v2" if EXPRESSION_MARKER in original
+        else ".py.cutedisplay-pre-expression" if MARKER in original
         else ".py.cutedisplay-original"
     )
     if backup.exists() and updated != original:
