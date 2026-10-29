@@ -112,6 +112,7 @@ static Fact *facts=nullptr; // PSRAM catalog; SD remains durable
 // Future lifecycle metadata will be stored alongside the catalog.
 static uint32_t *factUpdated=nullptr;
 static uint32_t *factExpires=nullptr;
+static uint8_t *factConfidence=nullptr;
 static volatile uint32_t sdTotalKB=0, sdUsedKB=0;
 inline uint32_t capacityKB(){return sdTotalKB;}
 inline uint32_t usedKB(){return sdUsedKB;}
@@ -161,8 +162,9 @@ inline bool persistFacts(){
   xSemaphoreGive(cacheMutex);
   const uint32_t changed=factUpdated?factUpdated[i]:0;
   const uint32_t expiry=factExpires?factExpires[i]:0;
-  if(f.printf("%s\t%s\t%lu\t%lu\n",item.key,item.value,
-      (unsigned long)changed,(unsigned long)expiry)<=0){ok=false;break;}
+  const unsigned confidence=factConfidence?factConfidence[i]:100;
+  if(f.printf("%s\t%s\t%lu\t%lu\t%u\n",item.key,item.value,
+      (unsigned long)changed,(unsigned long)expiry,confidence)<=0){ok=false;break;}
   if((i&31)==0)vTaskDelay(1);
  }
  f.flush();f.close();
@@ -195,7 +197,9 @@ inline void restoreFactSnapshots(){
      // Metadata is optional: legacy two-column snapshots still load.
      for(size_t i=0;i<factCount;i++)if(k==facts[i].key){
       factUpdated[i]=(uint32_t)line.substring(second+1,third).toInt();
-      if(factExpires)factExpires[i]=(uint32_t)line.substring(third+1).toInt();
+      int fourth=line.indexOf('\t',third+1);
+      if(factExpires)factExpires[i]=(uint32_t)line.substring(third+1,fourth<0?line.length():fourth).toInt();
+      if(factConfidence)factConfidence[i]=(uint8_t)(fourth<0?100:constrain(line.substring(fourth+1).toInt(),0L,100L));
       break;
      }
     }
@@ -425,6 +429,7 @@ inline void mergeFact(const String &key,const String &value){
    if(entry==String(facts[i].value)){xSemaphoreGive(cacheMutex);return;}
    entry.toCharArray(facts[i].value,sizeof(facts[i].value));
    if(factUpdated)factUpdated[i]=(uint32_t)time(nullptr);
+   if(factConfidence)factConfidence[i]=100;
    if(factExpires)factExpires[i]=expiryForFact(key,value);
    factRevision++;
    xSemaphoreGive(cacheMutex);return;
@@ -439,6 +444,7 @@ inline void mergeFact(const String &key,const String &value){
   finalKey.toCharArray(facts[factCount].key,sizeof(facts[factCount].key));
   stored.toCharArray(facts[factCount].value,sizeof(facts[factCount].value));
   if(factUpdated)factUpdated[factCount]=(uint32_t)time(nullptr);
+  if(factConfidence)factConfidence[factCount]=100;
   if(factExpires)factExpires[factCount]=expiryForFact(key,value);
   factCount++;factRevision++;
  }else{
@@ -757,6 +763,7 @@ inline void task(void*){
  if(!facts)Serial.println("[MEMORY] ERROR: PSRAM fact catalog unavailable");
  if(!factUpdated)factUpdated=(uint32_t*)heap_caps_calloc(MAX_FACTS,sizeof(uint32_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
  if(!factExpires)factExpires=(uint32_t*)heap_caps_calloc(MAX_FACTS,sizeof(uint32_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ if(!factConfidence)factConfidence=(uint8_t*)heap_caps_calloc(MAX_FACTS,sizeof(uint8_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
  SD_MMC.setPins(39,38,40);
  mounted=SD_MMC.begin("/sdcard",true,false,20000,5);
  cardState=mounted?1:2;
@@ -901,6 +908,7 @@ inline void task(void*){
      if(facts)memset(facts,0,MAX_FACTS*sizeof(Fact));
      if(factUpdated)memset(factUpdated,0,MAX_FACTS*sizeof(uint32_t));
      if(factExpires)memset(factExpires,0,MAX_FACTS*sizeof(uint32_t));
+     if(factConfidence)memset(factConfidence,0,MAX_FACTS*sizeof(uint8_t));
      factCount=0;factRevision++;
      for(auto &v:recent)v="";
      recentCount=0;recentNext=0;
