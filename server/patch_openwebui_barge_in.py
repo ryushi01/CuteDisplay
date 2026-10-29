@@ -31,7 +31,8 @@ indent=line[:len(line)-len(line.lstrip())]
 # Existing verified API-key WebSocket admission precedes client_events.
 addition=(indent+marker+"\n"+
           indent+"if isinstance(event, dict) and event.get('type') == 'response.cancel' and set(event) == {'type'}:\n"+
-          indent+"    await upstream.send_json({'type': 'response.cancel'})\n"+
+          indent+"    if protocol.responses - protocol.finished_responses:\n"+
+          indent+"        await upstream.send_json({'type': 'response.cancel'})\n"+
           indent+"    continue\n")
 lines.insert(idx,addition)
 new=source[:start]+''.join(lines)+source[end if end>=0 else len(source):]
