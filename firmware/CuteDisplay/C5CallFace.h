@@ -78,8 +78,10 @@ static void drawFullScreenKittyFace(){
  const bool connecting=kittyActivity=="CALL_CONNECTING";
  // Only these eight temporary moods are recognized; never change the user's
  // persistent normal-message mascot or mood settings.
- // Thinking is a C5-owned temporary expression. Preserve the AI mood for speaking.
- uint8_t emotion=thinking?0:(callFaceMood<=7?callFaceMood:1);
+ // AI expression tool calls can arrive before any speech PCM. Keep the
+ // chosen mood queued, but render it ONLY during CALL_SPEAKING. Thinking
+ // always uses the C5-local thoughtful face; listening stays friendly.
+ uint8_t emotion=thinking?0:(speaking && callFaceMood<=7?callFaceMood:1);
  const bool blink=(!speaking && (animPhase==8||animPhase==9||animPhase==25));
  const int gaze=thinking?7:listening?-3:0;
  const int bob=speaking?((t/180)%2?1:0):0;
