@@ -149,6 +149,33 @@ inline String factSummary(size_t maxLen=700){
  xSemaphoreGive(cacheMutex);return out;
 }
 // Recoverable SD fact snapshots: never truncate the only good copy.
+inline bool persistFactMetadata(){
+ if(!facts || !factUpdated || !factExpires || !factConfidence)return false;
+ const char *tmp="/kitty/factsmeta.next",*main="/kitty/factsmeta.tsv",*backup="/kitty/factsmeta.bak";
+ SD_MMC.remove(tmp);
+ File f=SD_MMC.open(tmp,FILE_WRITE);
+ if(!f)return false;
+ bool ok=true;
+ for(size_t i=0;i<factCount;i++){
+  Fact item={};uint32_t changed=0,expiry=0;unsigned confidence=100;
+  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(50))!=pdTRUE){ok=false;break;}
+  item=facts[i];changed=factUpdated[i];expiry=factExpires[i];confidence=factConfidence[i];
+  xSemaphoreGive(cacheMutex);
+  if(f.printf("%s\\t%lu\\t%lu\\t%u\\n",item.key,
+    (unsigned long)changed,(unsigned long)expiry,confidence)<=0){ok=false;break;}
+  if((i&31)==0)vTaskDelay(1);
+ }
+ f.flush();f.close();
+ if(!ok){SD_MMC.remove(tmp);return false;}
+ if(SD_MMC.exists(main)){SD_MMC.remove(backup);
+  if(!SD_MMC.rename(main,backup)){SD_MMC.remove(tmp);return false;}
+ }
+ if(!SD_MMC.rename(tmp,main)){
+  if(SD_MMC.exists(backup))SD_MMC.rename(backup,main);
+  return false;
+ }
+ return true;
+}
 inline bool persistFacts(){
  if(!facts || factCount==0)return false;
  const char *tmp="/kitty/facts.next",*main="/kitty/facts.tsv",*backup="/kitty/facts.bak";
@@ -163,11 +190,7 @@ inline bool persistFacts(){
   if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(50))!=pdTRUE){ok=false;break;}
   item=facts[i];
   xSemaphoreGive(cacheMutex);
-  const uint32_t changed=factUpdated?factUpdated[i]:0;
-  const uint32_t expiry=factExpires?factExpires[i]:0;
-  const unsigned confidence=factConfidence?factConfidence[i]:100;
-  if(f.printf("%s\t%s\t%lu\t%lu\t%u\n",item.key,item.value,
-      (unsigned long)changed,(unsigned long)expiry,confidence)<=0){ok=false;break;}
+  if(f.printf("%s\t%s\n",item.key,item.value)<=0){ok=false;break;}
   if((i&31)==0)vTaskDelay(1);
  }
  f.flush();f.close();
@@ -180,6 +203,8 @@ inline bool persistFacts(){
   if(SD_MMC.exists(backup))SD_MMC.rename(backup,main);
   return false;
  }
+ // Metadata is a sidecar: older firmware still reads the two-column facts.
+ if(!persistFactMetadata())Serial.println("[MEMORY] Warning: metadata sidecar write failed");
  return true;
 }
 inline void mergeFact(const String &key,const String &value);
