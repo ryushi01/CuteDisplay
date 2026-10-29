@@ -14,4 +14,5 @@
 // v23: 320x170 bespoke full-screen Kitty call face with 8 moods, lip sync and
 // immediate return to the original normal message/mascot on CALL_OFF.
 // v24: dedicated C5-local animated thinking face; keep spoken mood until audio ends.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 24;
+// v25: AI-selected emotions appear only during CALL_SPEAKING, never THINKING/LISTENING.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 25;
