@@ -741,9 +741,9 @@ static void pollBLECommands(){
 static void consoleCommand(String cmd){
  cmd.trim();
  if(cmd=="help"){
-  Serial.println("[S3] call status / call diagnose / call start / call stop / call mood 0..7");
+  Serial.println("[S3] call status / call diagnose / call start / call stop / call mood 0..15");
   Serial.println("[S3] c5 ota status (automatic OTA when a newer embedded C5 image is available)");
-  Serial.println("[S3] audio beep / audio diagnose / audio test");
+  Serial.println("[S3] audio beep / audio diagnose / audio test / memory status");
   Serial.println("[S3] help status ping battery msg <text> mascot <0-5> mood <0-7> proxy on proxy off ble bonds clear");
   return;
  }
@@ -760,6 +760,14 @@ static void consoleCommand(String cmd){
  if(cmd=="audio test"){
   if(BrainC5OTA::updating())Serial.println("[AUDIO] Wait until C5 OTA completes");
   else BrainAudioTest::start();
+  return;
+ }
+ if(cmd=="memory status"){
+  Serial.printf("[MEMORY] mounted=%d indexed=%u/%u saved=%lu failed=%lu free_psram=%lu\n",
+    KittyMemory::ready()?1:0,(unsigned)KittyMemory::indexCount,
+    (unsigned)KittyMemory::INDEX_MAX,(unsigned long)KittyMemory::saved,
+    (unsigned long)KittyMemory::failed,
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   return;
  }
  if(cmd=="c5 ota status"){
