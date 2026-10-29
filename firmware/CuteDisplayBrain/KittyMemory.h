@@ -195,12 +195,14 @@ inline String preferenceKey(const String &kind,const String &value){
 inline bool isEpisodic(const String &key){
  return key.startsWith("note_")||key.startsWith("event_");
 }
+inline bool meaningfulPreferenceSubject(String subject);
 inline void mergeFact(const String &key,const String &value){
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return;
  // Consolidate exact duplicates and corrections: dislikes replace likes
  // for the same subject, while different preferences coexist.
  String normalized=normalizeSubject(value);
  String finalKey=key;
+ if((key=="likes"||key=="dislikes") && !meaningfulPreferenceSubject(value)){xSemaphoreGive(cacheMutex);return;}
  if(key=="likes"||key=="dislikes")finalKey=preferenceKey(key,value);
  for(int i=0;i<factCount;i++){
   if(finalKey==facts[i].key){
@@ -257,6 +259,31 @@ inline void removeSupersededGymPlan(){
  }
  xSemaphoreGive(cacheMutex);
 }
+inline bool meaningfulPreferenceSubject(String subject){
+ subject.trim();subject.toLowerCase();
+ while(subject.endsWith(".")||subject.endsWith("!")||subject.endsWith("。"))subject.remove(subject.length()-1);
+ subject.trim();
+ if(subject.length()<3 || subject.length()>72)return false;
+ for(const char* v:{"it","this","that","them","those","these","one","something","anything","everything","the joke","that joke","this joke","what food i dislike","what i like","what i dislike","you","your joke"})
+  if(subject==v)return false;
+ for(const char* prefix:{"and ","what ","how ","why ","if ","because ","when ","the one ","that one ","your "})
+  if(subject.startsWith(prefix))return false;
+ return true;
+}
+inline bool pruneInvalidPreferences(){
+ bool changed=false;
+ if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))!=pdTRUE)return false;
+ for(int i=0;i<factCount;){
+  String k(facts[i].key),v(facts[i].value);
+  int sep=v.indexOf(':');
+  if(k.startsWith("pref_") && sep>=0 && !meaningfulPreferenceSubject(v.substring(sep+1))){
+   for(int j=i;j<factCount-1;j++)facts[j]=facts[j+1];
+   factCount--;changed=true;
+  }else i++;
+ }
+ xSemaphoreGive(cacheMutex);
+ return changed;
+}
 inline void consolidatePreferences(const String &utterance){
  // Break short compound English statements into independent preference facts.
  // Generic subjects: food, games, people, music, hobbies, technology, etc.
@@ -292,7 +319,7 @@ inline void consolidatePreferences(const String &utterance){
     if(subject.startsWith("and "))subject.remove(0,4);
     if(subject.startsWith("especially "))subject.remove(0,11);
     subject.trim();
-    if(subject.length()>1 && subject.length()<=72 &&
+    if(meaningfulPreferenceSubject(subject) &&
        subject.indexOf('?')<0 && subject.indexOf("？")<0)
      mergeFact(dislike?"dislikes":"likes",subject);
     at=split+5;
@@ -463,6 +490,11 @@ inline void task(void*){
   updateStorage();
   File factFile=SD_MMC.open("/kitty/facts.tsv",FILE_READ);
   if(factFile){while(factFile.available()){String line=factFile.readStringUntil('\n');int t=line.indexOf('\t');if(t>0)mergeFact(line.substring(0,t),line.substring(t+1));}factFile.close();}
+  if(pruneInvalidPreferences()){
+   File clean=SD_MMC.open("/kitty/facts.tsv","w");
+   if(clean){clean.print(factSummary(6000));clean.close();}
+   Serial.println("[MEMORY] pruned ambiguous preferences");
+  }
   indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!indexRows)Serial.println("[MEMORY] PSRAM index unavailable; recent cache only");
   readIndex();
