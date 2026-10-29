@@ -339,7 +339,9 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   // ordinary browser/mobile voice clients.
   cJSON_AddBoolToObject(auth,"kitty_expressions",true);
   // Only ephemeral facts travel with this authenticated session. No server storage.
-  String facts=KittyMemory::factSummary();
+  String facts=KittyMemory::factSummary(580);
+  String summary=KittyMemory::latestSummaryContext(170);
+  if(!summary.isEmpty()){if(!facts.isEmpty())facts+='\n';facts+="recent_summary: "+summary;}
   if(!facts.isEmpty())cJSON_AddStringToObject(auth,"kitty_sd_memory",facts.c_str());
   char* json=cJSON_PrintUnformatted(auth);
   cJSON_Delete(auth);
