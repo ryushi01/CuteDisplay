@@ -17,6 +17,13 @@ namespace BrainAI {
 struct Packet { char kind[12]; char text[81]; };
 static QueueHandle_t out=nullptr;
 static QueueHandle_t statusOut=nullptr;
+struct LiveText { char text[97]; };
+static QueueHandle_t liveTextQueue=nullptr;
+inline bool takeCallStream(String &text){
+ LiveText item={};
+ if(!liveTextQueue || xQueueReceive(liveTextQueue,&item,0)!=pdTRUE)return false;
+ text=String(item.text);return true;
+}
 inline void report(const char *state){if(statusOut){char entry[36]={};strlcpy(entry,state,sizeof(entry));xQueueSend(statusOut,entry,0);}}
 inline bool takeStatus(String &value){char entry[36]={};if(!statusOut||xQueueReceive(statusOut,entry,0)!=pdTRUE)return false;value=String("AI:STATUS:")+entry;return true;}
 
@@ -124,7 +131,11 @@ static String provisioningField,provisioningBuffer;
 static size_t provisioningExpected=0;
 static uint32_t provisioningAt=0;
 
-inline void init(){if(!out)out=xQueueCreate(16,sizeof(Packet));if(!statusOut)statusOut=xQueueCreate(12,36);}
+inline void init(){
+ if(!out)out=xQueueCreate(16,sizeof(Packet));
+ if(!statusOut)statusOut=xQueueCreate(12,36);
+ if(!liveTextQueue)liveTextQueue=xQueueCreate(16,sizeof(LiveText));
+}
 inline bool sendPacket(const char *kind,const String &payload) {
  if(!out || payload.length()>80)return false;
  Packet row={};
@@ -163,6 +174,25 @@ inline void processSSELine(String line){
  if(cJSON_IsString(txt) && txt->valuestring){
   // Single stream delta; never split a multi-byte Unicode scalar on the UART.
   String chunk(txt->valuestring);
+  // An independent bounded queue lets Call Mode display each LLM delta
+  // before delegation completes, without reading cross-core Strings.
+  if(callDelegated && liveTextQueue && chunk.length()){
+   size_t at=0;
+   while(at<chunk.length()){
+    size_t len=min((size_t)92,chunk.length()-at);
+    if(at+len<chunk.length())
+     while(len>0 && ((uint8_t)chunk[at+len]&0xC0)==0x80)len--;
+    if(!len)break;
+    LiveText item={};
+    chunk.substring(at,at+len).toCharArray(item.text,sizeof(item.text));
+    if(xQueueSend(liveTextQueue,&item,0)!=pdTRUE){
+     LiveText old={};
+     (void)xQueueReceive(liveTextQueue,&old,0);
+     (void)xQueueSend(liveTextQueue,&item,0);
+    }
+    at+=len;
+   }
+  }
   if(currentAnswer.length()<HISTORY_RESPONSE_LIMIT){
    size_t available=HISTORY_RESPONSE_LIMIT-currentAnswer.length();
    size_t n=min(available,chunk.length());
