@@ -55,11 +55,11 @@ inline void tick(bool busy){
    cJSON_AddStringToObject(system,"role","system");
    cJSON_AddStringToObject(system,"content",
     "Extract ONLY clearly explicit durable user preferences from the utterance. "
-    "Return compact JSON only: {\\\"facts\\\":[{\\\"kind\\\":\\\"likes\\\",\\\"subject\\\":\\\"chocolate\\\"}]}. "
+    "Return compact JSON only: {\"facts\":[{\"kind\":\"likes\",\"subject\":\"chocolate\"}]}. "
     "Allowed kind: likes, dislikes. Max 3 items. Subject must be concrete and "
     "independently meaningful (no it/this/that/one, questions, guesses, vague "
     "references or inferred emotions). A later dislike supersedes a like for "
-    "the SAME subject. If no explicit stable preferences, return {\\\"facts\\\":[]}. "
+    "the SAME subject. If no explicit stable preferences, return {\"facts\":[]}. "
     "Never extract preferences about the assistant, hypothetical examples or jokes.");
    cJSON_AddItemToArray(messages,system);
    cJSON *user=cJSON_CreateObject();
