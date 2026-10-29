@@ -590,6 +590,7 @@ inline void tick(bool audioBusy){
   if(BrainAI::takeCallDelegation(answer,ok)){
    String doneId=delegatedCallId;
    delegatedCallId="";toolResponseFinished=false;
+   if(ok && !answer.isEmpty())queueCaption("KITTY: ",answer.c_str());
    if(!bridgeResult(doneId,ok?"completed":"failed",answer)||
       !bridgeRespond("call_id",doneId)){
     fail("DELEGATION_RESULT_SEND");return;
