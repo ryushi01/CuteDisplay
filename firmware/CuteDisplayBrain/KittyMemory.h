@@ -898,12 +898,16 @@ inline void task(void*){
    if(mounted){
     SD_MMC.mkdir("/kitty");
     if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(500))==pdTRUE){
-     if(facts)memset(facts,0,MAX_FACTS*sizeof(Fact));factCount=0;factRevision++;
+     if(facts)memset(facts,0,MAX_FACTS*sizeof(Fact));
+     if(factUpdated)memset(factUpdated,0,MAX_FACTS*sizeof(uint32_t));
+     if(factExpires)memset(factExpires,0,MAX_FACTS*sizeof(uint32_t));
+     factCount=0;factRevision++;
      for(auto &v:recent)v="";
      recentCount=0;recentNext=0;
      xSemaphoreGive(cacheMutex);
     }
     indexCount=0;finishedSerial=0;nextSerial=0;searchReply="";
+    latestSummary="";summaryBatch="";summaryTurnCount=0;
     saved=0;failed=0;updateStorage();cardState=1;
     Serial.println("[MEMORY] FORMAT COMPLETE: card mounted, memory cache cleared");
    }else{
