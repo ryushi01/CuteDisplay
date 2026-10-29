@@ -464,7 +464,7 @@ inline bool anchorDatedPlan(const String &source,String &key,String &value){
  else if(t.indexOf("today")>=0||t.indexOf("aujourd")>=0||t.indexOf("今日")>=0)offset=0;
  else if(t.indexOf("next week")>=0||t.indexOf("semaine prochaine")>=0||t.indexOf("来週")>=0)offset=7;
  else if(t.indexOf("next month")>=0||t.indexOf("mois prochain")>=0||t.indexOf("来月")>=0){
-  day.tm_mon++;day.tm_isdst=-1;mktime(&day);
+  day.tm_mday=1;day.tm_mon++;day.tm_isdst=-1;mktime(&day);
  }else{
   found=false;
   const char *en[]={"sunday","monday","tuesday","wednesday","thursday","friday","saturday"};
