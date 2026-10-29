@@ -32,9 +32,9 @@ inline void tick(bool busy){
    // Conservative candidate filter: avoid Ollama requests for jokes,
    // questions, greetings and the majority of ordinary conversation.
    if(l.indexOf('?')>=0 || l.indexOf("？")>=0 ||
-      (l.indexOf("i ")<0 && l.indexOf("my ")<0 &&
+      (l.indexOf("i ")<0 && l.indexOf("my ")<0 && l.indexOf("im ")<0 &&
        l.indexOf("je ")<0 && l.indexOf("j'")<0 &&
-       l.indexOf("私は")<0 && l.indexOf("私の")<0)){
+       l.indexOf("私は")<0 && l.indexOf("私の")<0 && l.indexOf("今日は")<0)){
      finish();return;
    }
    Preferences prefs;String url,model,key;
@@ -49,7 +49,7 @@ inline void tick(bool busy){
    cJSON *root=cJSON_CreateObject();
    cJSON_AddStringToObject(root,"model",model.c_str());
    cJSON_AddBoolToObject(root,"stream",false);
-   cJSON_AddNumberToObject(root,"max_tokens",100);
+   cJSON_AddNumberToObject(root,"max_tokens",160);
    cJSON *messages=cJSON_AddArrayToObject(root,"messages");
    cJSON *system=cJSON_CreateObject();
    cJSON_AddStringToObject(system,"role","system");
@@ -73,6 +73,7 @@ inline void tick(bool busy){
    Response response={&reply};
    esp_http_client_config_t cfg={};
    cfg.url=url.c_str();
+   cfg.crt_bundle_attach=esp_crt_bundle_attach; // Same verified CA bundle as BrainAI.
    cfg.timeout_ms=1600; // Short network read timeout; never on audio task.
    cfg.user_data=&response;
    cfg.event_handler=[](esp_http_client_event_t *e)->esp_err_t {
