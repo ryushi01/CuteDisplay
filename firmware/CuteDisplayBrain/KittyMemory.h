@@ -140,7 +140,7 @@ inline String factSummary(size_t maxLen=700){
       (uint32_t)time(nullptr)>=factExpires[i])continue;
    String k(facts[i].key);
    bool episodic=k.startsWith("note_") || k.startsWith("event_");
-   bool important=k=="name" || k=="home" || k=="work" || k.startsWith("context_");
+   bool important=k=="name" || k=="home" || k=="work" || k.startsWith("context_") || k.startsWith("dated_plan_");
    if((pass==0 && !important) ||
       (pass==1 && (important || episodic)) ||
       (pass==2 && !episodic))continue;
@@ -450,6 +450,26 @@ inline String preferenceKey(const String &kind,const String &value){
 inline bool isEpisodic(const String &key){
  return key.startsWith("note_")||key.startsWith("event_");
 }
+// Resolve relative calendar references at the time the statement is saved,
+// not at the time it is recalled days later. History remains on SD.
+inline bool anchorDatedPlan(const String &source,String &key,String &value){
+ if(key!="context_upcoming_plan")return false;
+ time_t now=time(nullptr);
+ if(now<1735689600LL)return false;
+ String text=source;text.toLowerCase();
+ int days=0;
+ if(text.indexOf("tomorrow")>=0||text.indexOf("demain")>=0||text.indexOf("明日")>=0)days=1;
+ else if(text.indexOf("yesterday")>=0||text.indexOf("hier")>=0||text.indexOf("昨日")>=0)days=-1;
+ else if(text.indexOf("today")>=0||text.indexOf("aujourd")>=0||text.indexOf("今日")>=0)days=0;
+ else return false;
+ time_t target=now+(time_t)days*86400;
+ tm local={};localtime_r(&target,&local);
+ char date[16];snprintf(date,sizeof(date),"%04d-%02d-%02d",
+    local.tm_year+1900,local.tm_mon+1,local.tm_mday);
+ key=String("dated_plan_")+date;
+ value=String("Plan for ")+date+" (completion not confirmed): "+value;
+ return true;
+}
 inline uint32_t expiryForFact(const String &key,const String &value){
  time_t now=time(nullptr);
  if(now<1700000000)return 0; // Do not expire anything before NTP sync.
@@ -718,7 +738,7 @@ inline String semanticFactRecall(const String &query,size_t limit=280){
   bool selected=(preferences && key.startsWith("pref_")) ||
    ((topics&(1UL<<12)) && key=="name") ||
    ((topics&(1UL<<3)) && (key=="work" || key=="context_work_availability")) ||
-   ((topics&(1UL<<9)) && key=="context_upcoming_plan") ||
+   ((topics&(1UL<<9)) && (key=="context_upcoming_plan" || key.startsWith("dated_plan_"))) ||
    ((topics&(1UL<<11)) && key=="home");
   if(!selected)continue;
   String line=key+"\\t"+value+"\\n";
@@ -922,7 +942,11 @@ inline void task(void*){
     uint32_t before=factRevision;
     String effectiveKey=preference?preferenceKey(kind,subject):"context_"+topic;
     if(preference)mergeFact(kind,subject);
-    else mergeFact("context_"+topic,detail);
+    else{
+     String key="context_"+topic, value=detail;
+     (void)anchorDatedPlan(detail,key,value);
+     mergeFact(key,value);
+    }
     if(factConfidence && cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
      for(size_t i=0;i<factCount;i++)if(effectiveKey==facts[i].key){factConfidence[i]=70;break;}
      xSemaphoreGive(cacheMutex);
@@ -1035,7 +1059,8 @@ inline void task(void*){
    }
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
-    // Persist parsed facts on the SD worker, never on the audio callback.
+    // Resolve today/tomorrow once, on the SD worker, before saving.
+    (void)anchorDatedPlan(String(e.question),key,value);
     mergeFact(key,value);
    }
    if(gymCancellation(String(e.question)))removeSupersededGymPlan();
