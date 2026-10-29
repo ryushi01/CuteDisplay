@@ -1086,6 +1086,11 @@ static void pollBrainLAN(){
 }
 void setup(){
  Serial.begin(115200);delay(250);
+ Serial.printf("[S3 BOOT] reset_reason=%d free_internal=%lu min_internal=%lu free_psram=%lu\\n",
+  (int)esp_reset_reason(),
+  (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+  (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+  (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
  Serial.printf("[S3] CuteDisplay Brain FW=%s\n",S3_FW_VERSION);
 #if defined(CONFIG_NIMBLE_ENABLED)
  Serial.println("[S3] BLE host=NimBLE");
