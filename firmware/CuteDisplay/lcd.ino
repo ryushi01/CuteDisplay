@@ -492,6 +492,7 @@ bool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false,voi
 bool callModeActive=false;
 // Transient full-screen call artwork state; normal user settings are untouched.
 static String callCaption;
+static String callCaptionPrevious;
 static uint8_t callFaceMood=1; // neutral 0, happy 1, sad 2, angry 3 ...
 static uint8_t callLipLevel=0; // S3 speaker PCM intensity 0..9
 static uint32_t callFaceMoodSince=0,callLipAt=0;
@@ -2884,7 +2885,7 @@ static void serviceBrain() {
    bool wasActive=callModeActive;
    if(next.startsWith("CALL_"))callModeActive=next!="CALL_OFF" && next!="CALL_ERROR";
    else if(next.isEmpty())callModeActive=false;
-   if(!callModeActive){callFaceMood=1;callLipLevel=0;callCaption="";}
+   if(!callModeActive){callFaceMood=1;callLipLevel=0;callCaption="";callCaptionPrevious="";}
    if(next!=kittyActivity || wasActive!=callModeActive){
     kittyActivity=next;if(lcdReady)redrawCurrent();
    }
@@ -2900,6 +2901,7 @@ static void serviceBrain() {
   }
   else if(f.type=="CALL_TEXT"){
    if(callModeActive && !f.payload.isEmpty() && f.payload.length()<=80){
+    callCaptionPrevious=callCaption;
     callCaption=f.payload;
     if(lcdReady)redrawCurrent();
    }
