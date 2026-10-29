@@ -90,8 +90,22 @@ inline bool extractFact(String utterance,String &key,String &value){
  if(pos<0 && lowered.indexOf("が好き")>0){
   pos=lowered.indexOf("が好き");key="likes";value=utterance.substring(0,pos);
  }else if(pos>=0)value=utterance.substring(pos+skip);
- else return false;
- for(const char *tail:{"。","、",".","!","！","です","だよ","だわ","よ","って呼んで"}){
+ else {
+  // Episodic memories preserve user statements about plans, events, projects,
+  // friends and preferences without pretending to fully understand them.
+  // Keep the exact statement as the value to avoid hallucinated facts.
+  const char *signals[]={"tomorrow","next week","next month","after tomorrow","day after tomorrow",
+    "yesterday","last week","going to","i will ","i'm going","i have ","we will ",
+    "my project","i started","i bought","i visited","i met ","i prefer",
+    "明日","明後日","来週","来月","昨日","予定","行く","食べる","買った","会った",
+    "demain","apres-demain","après-demain","semaine prochaine","je vais","j'aime"};
+  bool relevant=false;
+  for(const char *signal:signals)if(lowered.indexOf(signal)>=0){relevant=true;break;}
+  if(!relevant || utterance.length()<12)return false;
+  key="event";
+  value=utterance;
+ }
+ if(key!="event")for(const char *tail:{"。","、",".","!","！","です","だよ","だわ","よ","って呼んで"}){
   int x=value.indexOf(tail);if(x>=0)value=value.substring(0,x);
  }
  value.trim();return !value.isEmpty() && value.length()<90;
@@ -116,7 +130,7 @@ inline bool queue(const String &question,const String &answer){
  sanitize(question,sizeof(e.question)-1).toCharArray(e.question,sizeof(e.question));
  sanitize(answer,sizeof(e.answer)-1).toCharArray(e.answer,sizeof(e.answer));
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
- String key,value;if(extractFact(question,key,value))mergeFact(key,value);
+ String key,value;if(extractFact(question,key,value) && key!="event")mergeFact(key,value);
  // The active recall cache updates immediately; SD persistence is deferred.
  addCache(question,answer);
  return true;
@@ -343,6 +357,7 @@ inline void task(void*){
   f.close();
   if(ok){saved++;appendIndex(e,offset,ts);
    String key,value;if(extractFact(e.question,key,value)){
+    if(key=="event")key="event_"+String(ts%1000000UL);
     mergeFact(key,value);File ff=SD_MMC.open("/kitty/facts.tsv","w");
     if(ff){ff.print(factSummary());ff.close();}
    }
