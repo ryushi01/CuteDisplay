@@ -15,4 +15,5 @@
 // immediate return to the original normal message/mascot on CALL_OFF.
 // v24: dedicated C5-local animated thinking face; keep spoken mood until audio ends.
 // v25: AI-selected emotions appear only during CALL_SPEAKING, never THINKING/LISTENING.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 25;
+// v26: compact live transcription caption at bottom of full-screen Call Mode.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 26;
