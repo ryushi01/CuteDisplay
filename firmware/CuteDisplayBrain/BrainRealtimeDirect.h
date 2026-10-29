@@ -36,6 +36,7 @@ static int pendingMood=-1;
 static uint8_t currentMood=1;
 static uint32_t moodUpdatedAt=0;
 static uint32_t lastExplicitMoodAt=0; // AI tool is authoritative over text heuristics
+static uint32_t expressionIdleSince=0; // debounce gaps between tool responses/audio chunks
 inline int emotionForText(String phrase){
  phrase.toLowerCase();
  // English, French and Japanese. Sentiment fallback is intentionally
@@ -87,6 +88,7 @@ inline void chooseMood(int m,bool explicitGesture){
  if(explicitGesture)lastExplicitMoodAt=now;
  if(m==currentMood && !explicitGesture)return;
  currentMood=(uint8_t)m;pendingMood=m;moodUpdatedAt=now;
+ expressionIdleSince=0;
 }
 inline bool takeMood(uint8_t &result){
  if(pendingMood<0 || !requested)return false;
@@ -183,7 +185,7 @@ inline void diagnose(bool audioBusy){
   key.startsWith("sk-")&&key.length()>20?1:0,audioBusy?1:0);
 }
 inline void stop(){
- pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
+ pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -268,7 +270,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  }else if(strcmp(type,"bridge.pong")==0){
   lastPing=millis();
  }else if(strcmp(type,"response.created")==0){
-  remoteResponse=true;streamedSpeech=false;
+  remoteResponse=true;streamedSpeech=false;expressionIdleSince=0;
   BrainRealtimeAudio::setRemoteReply(true);
   status("CALL_THINKING");
  }else if(strcmp(type,"response.done")==0){
@@ -564,20 +566,23 @@ inline void tick(bool audioBusy){
     if(!ws.sendTXT(payload)){fail("MIC_SEND");return;}
    }
    if(BrainRealtimeAudio::hasSpeakerAudio() || (streamedSpeech&&remoteResponse)){
+    expressionIdleSince=0;
     status("CALL_SPEAKING");
    }else if(remoteResponse || !delegatedCallId.isEmpty() ||
              !failedCallId.isEmpty() || !animationResponseId.isEmpty()){
     status("CALL_THINKING");
    }else{
-    // The provider has completed its response AND speaker PCM has drained.
-    // Restore the gentle default only now, never on a ten-second timer.
-    // Keep pendingMood until the main loop forwards it to the C5.
-    if(currentMood!=1){
+    // An empty speaker ring can occur between tool calls or audio frames.
+    // Never erase a freshly-selected emotion on the first idle tick.
+    // A completed spoken turn must remain idle for a grace period before
+    // reverting to the normal face. New audio/tool activity cancels this.
+    if(!expressionIdleSince)expressionIdleSince=millis();
+    if(currentMood!=1 && (uint32_t)(millis()-expressionIdleSince)>=2000UL){
      currentMood=1;
      pendingMood=1;
      moodUpdatedAt=millis();
      lastExplicitMoodAt=0;
-     Serial.println("[CALL FACE] response playback complete; reset mood=1");
+     Serial.println("[CALL FACE] spoken turn idle; reset mood=1");
     }
     streamedSpeech=false;
     status("CALL_LISTENING");
