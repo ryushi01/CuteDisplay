@@ -12,7 +12,14 @@ static constexpr size_t SLOT_BYTES=768;
 struct Entry { char question[256]; char answer[512]; };
 static QueueHandle_t writes=nullptr;
 static TaskHandle_t worker=nullptr;
-static bool mounted=false;
+static volatile bool mounted=false;
+static volatile uint8_t cardState=0; // 0=starting,1=ready,2=needs format/check,3=formatting,4=error
+static volatile bool formatRequested=false;
+inline uint8_t status(){return cardState;}
+inline bool requestFormat(){
+ if(cardState!=2 || formatRequested)return false;
+ formatRequested=true;return true;
+}
 static volatile uint32_t saved=0, failed=0;
 static String recent[8];
 static uint8_t recentCount=0,recentNext=0;
@@ -209,9 +216,10 @@ inline String takeSearch(uint32_t serial){
 inline void task(void*){
  SD_MMC.setPins(39,38,40);
  mounted=SD_MMC.begin("/sdcard",true,false,20000,5);
+ cardState=mounted?1:2;
  if(!mounted || SD_MMC.cardType()==CARD_NONE){
   mounted=false;
-  Serial.println("[MEMORY] SD unavailable; normal voice unaffected");
+  Serial.println("[MEMORY] SD mount failed: card may need FAT formatting, be damaged, or be missing; no auto erase");
  }else{
   SD_MMC.mkdir("/kitty");
   indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -261,6 +269,22 @@ inline void task(void*){
  Entry e={};
  SearchRequest query={};
  while(true){
+  if(formatRequested && cardState==2){
+   formatRequested=false;
+   cardState=3;
+   Serial.println("[MEMORY] FORMATTING: requested explicitly; all card data will be erased");
+   SD_MMC.end();
+   mounted=SD_MMC.begin("/sdcard",true,true,20000,5);
+   if(mounted && SD_MMC.cardType()!=CARD_NONE){
+    cardState=1;SD_MMC.mkdir("/kitty");
+    if(!indexRows)indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    indexCount=0;readIndex();
+    Serial.println("[MEMORY] FORMAT COMPLETE: SD ready");
+   }else{
+    mounted=false;cardState=4;
+    Serial.println("[MEMORY] FORMAT FAILED: check card and connections");
+   }
+  }
   if(searches && xQueueReceive(searches,&query,0)==pdTRUE && mounted)searchOnSD(query);
   if(xQueueReceive(writes,&e,pdMS_TO_TICKS(15))!=pdTRUE)continue;
   if(!mounted)continue;
