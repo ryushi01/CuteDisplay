@@ -42,7 +42,7 @@ inline void tick(bool busy){
     url=prefs.getString("url","");model=prefs.getString("model","");
     key=prefs.getString("key","");prefs.end();
    }
-   if((!url.startsWith("http://") && !url.startsWith("https://")) || url.indexOf('@')>=0 ||
+   if(!url.startsWith("https://") || url.indexOf('@')>=0 ||
       model.isEmpty() || key.isEmpty() || abortRequested){finish();return;}
    if(url.endsWith("/"))url.remove(url.length()-1);
    url+="/api/chat/completions";
@@ -76,7 +76,7 @@ inline void tick(bool busy){
    Response response={&reply};
    esp_http_client_config_t cfg={};
    cfg.url=url.c_str();
-   if(url.startsWith("https://"))cfg.crt_bundle_attach=esp_crt_bundle_attach; // HTTPS optional for local-only memory analysis.
+   cfg.crt_bundle_attach=esp_crt_bundle_attach; // Verified HTTPS to remote Open WebUI.
    cfg.timeout_ms=2500; // Short network read timeout; never on audio task.
    cfg.user_data=&response;
    cfg.event_handler=[](esp_http_client_event_t *e)->esp_err_t {
