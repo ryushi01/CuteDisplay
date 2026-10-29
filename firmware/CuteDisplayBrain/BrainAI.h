@@ -338,9 +338,25 @@ inline void run(void*){
  cJSON_AddStringToObject(m,"role","user");
  cJSON_AddStringToObject(m,"content",prompt.c_str());
  cJSON_AddItemToArray(msgs,m);
- char *json=cJSON_PrintUnformatted(root);
+ // Serialize directly into PSRAM: cJSON_PrintUnformatted otherwise places the
+ // entire HTTP request in heap memory needed by Wi-Fi/TLS and realtime audio.
+ // Preallocated printing avoids the intermediate full-size heap copy.
+ char *json=nullptr;
+ size_t jsonCapacity=4096;
+ while(root && jsonCapacity<=131072){
+  char *candidate=(char*)heap_caps_malloc(jsonCapacity,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!candidate)break;
+  if(cJSON_PrintPreallocated(root,candidate,(int)jsonCapacity,0)){
+   json=candidate;break;
+  }
+  heap_caps_free(candidate);
+  jsonCapacity*=2;
+ }
  cJSON_Delete(root);
  if(json){
+  Serial.printf("[AI MEMORY] JSON in PSRAM capacity=%u bytes=%u internal=%lu\\n",
+   (unsigned)jsonCapacity,(unsigned)strlen(json),
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
   esp_http_client_config_t cfg={};
   cfg.url=address.c_str();
   cfg.crt_bundle_attach=esp_crt_bundle_attach;
@@ -396,8 +412,8 @@ inline void run(void*){
    if(rc!=ESP_OK || code!=200 || !doneSeen)failed=true;
    if(http)esp_http_client_cleanup(http);
   }else failed=true;
-  free(json);
- }else failed=true;
+  heap_caps_free(json);
+ }else {Serial.println("[AI MEMORY] PSRAM JSON allocation/serialization failed");failed=true;}
  if(cancelRequested){
   failed=true;
   staged="";
