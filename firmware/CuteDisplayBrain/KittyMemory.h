@@ -217,6 +217,30 @@ inline void task(void*){
   indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!indexRows)Serial.println("[MEMORY] PSRAM index unavailable; recent cache only");
   readIndex();
+  // Rebuild an absent index from the SD-only archive. Old conversations
+  // remain recoverable after an interrupted or missing index file.
+  if(indexRows && indexCount==0){
+   File archive=SD_MMC.open("/kitty/conversations.tsv",FILE_READ);
+   if(archive){
+    Serial.println("[MEMORY] rebuilding missing SD search index");
+    unsigned rebuilt=0;
+    while(archive.available()){
+     uint32_t offset=(uint32_t)archive.position();
+     String line=archive.readStringUntil('\\n');
+     int a=line.indexOf('\\t'),b=line.indexOf('\\t',a+1);
+     if(a>=0 && b>a){
+      Entry item={};
+      line.substring(a+1,b).toCharArray(item.question,sizeof(item.question));
+      line.substring(b+1).toCharArray(item.answer,sizeof(item.answer));
+      appendIndex(item,offset,(uint32_t)line.substring(0,a).toInt());
+      rebuilt++;
+     }
+     if((rebuilt%256)==0)vTaskDelay(1);
+    }
+    archive.close();
+    Serial.printf("[MEMORY] rebuilt=%u index entries\\n",rebuilt);
+   }
+  }
   Serial.printf("[MEMORY] SD mounted: total=%llu MB free~=%llu MB\n",
     (unsigned long long)(SD_MMC.totalBytes()/1048576ULL),
     (unsigned long long)((SD_MMC.totalBytes()-SD_MMC.usedBytes())/1048576ULL));
