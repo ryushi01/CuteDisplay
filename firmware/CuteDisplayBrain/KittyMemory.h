@@ -22,6 +22,7 @@ struct SummaryCandidate {char turns[768];};
 struct SummaryResult {char text[256];};
 static QueueHandle_t summaryCandidates=nullptr, summaryResults=nullptr;
 static String latestSummary;
+static uint32_t latestSummaryAt=0;
 inline bool takeSummaryCandidate(String &out){
  SummaryCandidate c={};
  if(!summaryCandidates || xQueueReceive(summaryCandidates,&c,0)!=pdTRUE)return false;
@@ -79,6 +80,8 @@ inline void addCache(const String &question,const String &answer){
 inline String latestSummaryContext(size_t maxBytes=180){
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(2))!=pdTRUE)return "";
  String value=clipUTF8(latestSummary,maxBytes);
+ if(latestSummaryAt && time(nullptr)>1700000000 &&
+    (uint32_t)time(nullptr)>latestSummaryAt+7UL*86400UL)value="";
  xSemaphoreGive(cacheMutex);return value;
 }
 inline String recall(const String &question){
@@ -715,6 +718,9 @@ inline void searchOnSD(const SearchRequest &q){
    // Keeps large 150k-row scans cooperative with the Core 0 I2S task.
    if((i&255)==0)vTaskDelay(1);
    IndexRow row=indexRows[i];
+   // Preserve old plans on SD but exclude aged entries from upcoming queries.
+   if((topics&(1UL<<9)) && row.time && time(nullptr)>1700000000 &&
+      (uint32_t)time(nullptr)>row.time+48UL*3600UL)continue;
    int score=__builtin_popcount(row.terms&bits);
    if(topics && (row.topics&topics))score+=12;
    // Topic match is mandatory: avoid hallucinated memories from 32-bit\n   // fingerprint collisions on unrelated conversations.\n   if(!topics || !(row.topics&topics) || score<12)continue;
@@ -815,7 +821,10 @@ inline void task(void*){
    while(summaryFile.available()){
     String line=summaryFile.readStringUntil('\\n');
     int tab=line.indexOf('\\t');
-    if(tab>=0 && tab+1<(int)line.length())latestSummary=sanitize(line.substring(tab+1),220);
+    if(tab>=0 && tab+1<(int)line.length()){
+     latestSummary=sanitize(line.substring(tab+1),220);
+     latestSummaryAt=(uint32_t)line.substring(0,tab).toInt();
+    }
    }
    summaryFile.close();
   }
@@ -845,7 +854,7 @@ inline void task(void*){
    File f=SD_MMC.open("/kitty/summaries.tsv",FILE_APPEND);
    if(f){f.printf("%lu\\t%s\\n",(unsigned long)time(nullptr),item.c_str());f.close();
     if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
-     latestSummary=item;xSemaphoreGive(cacheMutex);
+     latestSummary=item;latestSummaryAt=(uint32_t)time(nullptr);xSemaphoreGive(cacheMutex);
     }
    }
   }
@@ -920,7 +929,7 @@ inline void task(void*){
      xSemaphoreGive(cacheMutex);
     }
     indexCount=0;finishedSerial=0;nextSerial=0;searchReply="";
-    latestSummary="";summaryBatch="";summaryTurnCount=0;
+    latestSummary="";latestSummaryAt=0;summaryBatch="";summaryTurnCount=0;
     saved=0;failed=0;updateStorage();cardState=1;
     Serial.println("[MEMORY] FORMAT COMPLETE: card mounted, memory cache cleared");
    }else{
