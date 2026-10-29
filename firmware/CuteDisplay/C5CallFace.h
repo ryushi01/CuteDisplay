@@ -201,4 +201,10 @@ static void drawFullScreenKittyFace(){
  oval(x+8,160,8,8,CF_INK);oval(x+width-8,160,8,8,CF_INK);
  rect(x+8,152,width-16,17,CF_INK);
  textAt(label,x+12,155,1,CF_WHITE);
+ // Small live caption overlay to inspect recognized conversation on-device.
+ // Draw after the face, within the bottom 19px: avoid covering eyes/mouth.
+ if(!callCaption.isEmpty()){
+  rect(106,151,214,19,CF_INK);
+  richText(callCaption,110,152,1,1,CF_WHITE,318);
+ }
 }
