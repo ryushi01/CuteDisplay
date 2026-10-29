@@ -357,6 +357,12 @@ const unsigned long BATTERY_CARD_MS = 6000UL;
 const unsigned long CHARGE_NOTICE_MS = 3000UL;
 const unsigned long BATTERY_SAMPLE_MS = 2000UL;
 unsigned long batteryOverlayUntil = 0;
+static uint32_t sdUsedKB=0,sdTotalKB=0;
+static bool sdUsageReported=false;
+static String sdFormatSize(uint32_t kb){
+ if(kb>=1024UL)return String((float)kb/1024.0f,1)+" MB";
+ return String(kb)+" KB";
+}
 static uint8_t sdCardNoticeState=0;
 static uint32_t sdCardNoticeUntil=0;
 unsigned long chargeNoticeUntil = 0;
@@ -1021,6 +1027,13 @@ void drawBatteryOverlay(){
   if(!brainRadioFresh())
    textAt("BRAIN LINK: UNAVAILABLE",42,131,1,0xF800);
   else textAt("C5 RADIO: DISABLED",42,131,1,WHITE);
+  if(sdUsageReported && sdTotalKB>0){
+   uint32_t percent=(uint32_t)(((uint64_t)sdUsedKB*100ULL+sdTotalKB/2)/sdTotalKB);
+   textAt("SD: "+String(percent)+"% USED",42,143,1,themeColor());
+   textAt("USED: "+sdFormatSize(sdUsedKB)+" / "+sdFormatSize(sdTotalKB),42,155,1,WHITE);
+  }else{
+   textAt("SD: NOT READY / NO DATA",42,143,1,0xFFE0);
+  }
  }
 }
 String cleanText(String s,int limit) {
@@ -2925,6 +2938,15 @@ static void serviceBrain() {
      callFaceTransitionStart=millis();
      if(lcdReady)redrawCurrent();
     }
+   }
+  }
+  else if(f.type=="SD_USAGE"){
+   int sep=f.payload.indexOf(':');
+   if(sep>0 && sep<=10 && f.payload.length()<=22){
+    sdUsedKB=(uint32_t)strtoul(f.payload.substring(0,sep).c_str(),nullptr,10);
+    sdTotalKB=(uint32_t)strtoul(f.payload.substring(sep+1).c_str(),nullptr,10);
+    sdUsageReported=true;
+    if(batteryOverlayUntil && lcdReady)redrawCurrent();
    }
   }
   else if(f.type=="SD_STATE"){
