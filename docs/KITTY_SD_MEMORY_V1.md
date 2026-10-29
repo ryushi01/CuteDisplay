@@ -1,3 +1,5 @@
+> **October 29 update:** See [current validated system checkpoint](VALIDATED_SYSTEM_CHECKPOINT_2026-10-29.md) for the latest v35 notification, cross-topic consolidation, performance bounds, hardware verification status, and limitations. Sections below retain the v1 design history.
+
 # Kitty SD-only Memory v1 (S3)
 
 ## Source of truth and privacy
