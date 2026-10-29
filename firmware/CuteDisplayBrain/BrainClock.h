@@ -50,9 +50,10 @@ inline String calendarContext(){
  char date[20];snprintf(date,sizeof(date),"%04d-%02d-%02d",d.tm_year+1900,d.tm_mon+1,d.tm_mday);
  // A signed UTC offset avoids incorrect assumptions about DST.
  char tz[12]={};strftime(tz,sizeof(tz),"%z",&d);
+ char hhmm[6];snprintf(hhmm,sizeof(hhmm),"%02d:%02d",d.tm_hour,d.tm_min);
  return String("Current local date: ")+date+" ("+weekdays[d.tm_wday]+
-  "), UTC offset "+tz+
-  ". Interpret today/yesterday/tomorrow relative to this local date. "
+  "), current local time: "+hhmm+", UTC offset "+tz+
+  ". When asked for the time, answer using this clock snapshot (HH:MM), not a guessed time. Interpret today/yesterday/tomorrow relative to this local date. "
   "A plan from a past day is historical, not automatically completed. "
   "Preserve its original date, and never invent whether it happened.";
 }
