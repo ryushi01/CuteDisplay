@@ -1181,6 +1181,10 @@ void loop(){
  // Face Control is a lightweight S3->C5 UART side channel; the 24kHz I2S
  // Core 0 task never draws, transmits UART, or performs extra network work.
  if(faceOnline && !BrainC5OTA::updating() && BrainRealtimeDirect::active()){
+  String caption;
+  if(BrainRealtimeDirect::takeCaption(caption)){
+   CuteLink::send(Serial1,++brainActivitySeq,"CALL_TEXT",caption);
+  }
   uint8_t emotion=1;
   if(BrainRealtimeDirect::takeMood(emotion)){
    CuteLink::send(Serial1,++brainActivitySeq,"CALL_MOOD",String((int)emotion));
