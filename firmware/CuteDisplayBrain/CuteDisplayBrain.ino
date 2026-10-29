@@ -1215,6 +1215,15 @@ void loop(){
   lastCardState=cardState;
  }
 
+ // Capacity comes from cached SD worker readings; no card I/O on loop/audio.
+ static uint32_t lastSDUsageSend=0;
+ if(faceOnline && !BrainC5OTA::updating() &&
+    ((uint32_t)(millis()-lastSDUsageSend)>=15000UL || lastSDUsageSend==0)){
+  lastSDUsageSend=millis();
+  String usage=String((unsigned long)KittyMemory::usedKB())+":"+
+               String((unsigned long)KittyMemory::capacityKB());
+  CuteLink::send(Serial1,++brainActivitySeq,"SD_USAGE",usage);
+ }
  BrainRealtimeDirect::tick(BrainVoiceSTT::running || BrainTTS::running ||
                            BrainAudioTest::running || BrainC5OTA::updating());
  // Face Control is a lightweight S3->C5 UART side channel; the 24kHz I2S
