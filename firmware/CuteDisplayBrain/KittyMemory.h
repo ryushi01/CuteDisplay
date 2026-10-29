@@ -817,9 +817,9 @@ inline void task(void*){
   // Restore only the newest concise summary; the full history stays on SD.
   File summaryFile=SD_MMC.open("/kitty/summaries.tsv",FILE_READ);
   if(summaryFile){
-   if(summaryFile.size()>1024){summaryFile.seek(summaryFile.size()-1024);summaryFile.readStringUntil('\\n');}
+   if(summaryFile.size()>1024){summaryFile.seek(summaryFile.size()-1024);summaryFile.readStringUntil('\n');}
    while(summaryFile.available()){
-    String line=summaryFile.readStringUntil('\\n');
+    String line=summaryFile.readStringUntil('\n');
     int tab=line.indexOf('\\t');
     if(tab>=0 && tab+1<(int)line.length()){
      latestSummary=sanitize(line.substring(tab+1),220);
@@ -953,7 +953,7 @@ inline void task(void*){
    // summary write occurs on the websocket or I2S execution path.
    String snippet=sanitize(String(e.question),115);
    if(summaryBatch.length()+snippet.length()+2>740){summaryBatch="";summaryTurnCount=0;}
-   if(!summaryBatch.isEmpty())summaryBatch+='\\n';
+   if(!summaryBatch.isEmpty())summaryBatch+='\n';
    summaryBatch+=snippet;
    if(++summaryTurnCount>=6){
     if(summaryCandidates){
@@ -980,7 +980,7 @@ inline void task(void*){
     }
     if(!oldValue.isEmpty() && oldValue!=routineValue){
      File history=SD_MMC.open("/kitty/corrections.tsv",FILE_APPEND);
-     if(history){history.printf("%lu\\t%s\\t%s\\t%s\\n",(unsigned long)ts,routineKey.c_str(),oldValue.c_str(),routineValue.c_str());history.close();}
+     if(history){history.printf("%lu\t%s\t%s\t%s\n",(unsigned long)ts,routineKey.c_str(),oldValue.c_str(),routineValue.c_str());history.close();}
     }
     mergeFact(routineKey,routineValue);
    }
