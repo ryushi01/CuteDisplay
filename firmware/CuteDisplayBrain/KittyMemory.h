@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <FS.h>
 #include <SD_MMC.h>
+#include <ff.h>
 #include <time.h>
 
 namespace KittyMemory {
@@ -34,7 +35,7 @@ static volatile uint8_t cardState=0; // 0=starting,1=ready,2=needs format/check,
 static volatile bool formatRequested=false;
 inline uint8_t status(){return cardState;}
 inline bool requestFormat(){
- if(cardState!=2 || formatRequested)return false;
+ if(cardState==0 || cardState==3 || formatRequested)return false;
  formatRequested=true;return true;
 }
 static volatile uint32_t saved=0, failed=0;
@@ -624,21 +625,52 @@ inline void task(void*){
   }
   static uint32_t lastStorageAt=0;
   if(mounted && (uint32_t)(millis()-lastStorageAt)>30000UL){updateStorage();lastStorageAt=millis();}
-  if(formatRequested && cardState==2){
+  if(formatRequested){
    formatRequested=false;
-   cardState=3;
-   Serial.println("[MEMORY] FORMATTING: requested explicitly; all card data will be erased");
-   SD_MMC.end();
-   mounted=SD_MMC.begin("/sdcard",true,true,20000,5);
-   if(mounted && SD_MMC.cardType()!=CARD_NONE){
-    cardState=1;SD_MMC.mkdir("/kitty");updateStorage();
-    if(!indexRows)indexRows=(IndexRow*)heap_caps_malloc(INDEX_MAX*sizeof(IndexRow),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    indexCount=0;readIndex();
-    Serial.println("[MEMORY] FORMAT COMPLETE: SD ready");
+   const bool wasMounted=mounted;
+   cardState=3;mounted=false; // suspend enqueue and memory I/O during format
+   Serial.println("[MEMORY] FORMATTING: permanently erasing all SD content");
+   if(writes)xQueueReset(writes);
+   if(searches)xQueueReset(searches);
+   if(consolidationCandidates)xQueueReset(consolidationCandidates);
+   if(consolidatedFacts)xQueueReset(consolidatedFacts);
+   bool ok=false;
+   if(wasMounted){
+    // Unlike begin(format_if_mount_failed=true), f_mkfs reformats even a
+    // previously healthy FAT volume. The SD worker is the only FS owner.
+    BYTE* work=(BYTE*)heap_caps_malloc(4096,MALLOC_CAP_8BIT);
+    if(work){
+     MKFS_PARM opt={};opt.fmt=FM_FAT|FM_FAT32;opt.n_fat=1;
+     FRESULT result=f_mkfs("0:",&opt,work,4096);
+     free(work);
+     Serial.printf("[MEMORY] FAT format result=%d\\n",(int)result);
+     ok=(result==FR_OK);
+    }
+    SD_MMC.end();
+    if(ok)ok=SD_MMC.begin("/sdcard",true,false,20000,5);
    }else{
-    mounted=false;cardState=4;
-    Serial.println("[MEMORY] FORMAT FAILED: check card and connections");
+    // Mount failed: allow the Arduino SD driver to initialize and
+    // format an unmountable FAT volume.
+    SD_MMC.end();
+    ok=SD_MMC.begin("/sdcard",true,true,20000,5);
    }
+   mounted=ok && SD_MMC.cardType()!=CARD_NONE;
+   if(mounted){
+    SD_MMC.mkdir("/kitty");
+    if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(500))==pdTRUE){
+     memset(facts,0,sizeof(facts));factCount=0;factRevision++;
+     for(auto &v:recent)v="";
+     recentCount=0;recentNext=0;
+     xSemaphoreGive(cacheMutex);
+    }
+    indexCount=0;finishedSerial=0;nextSerial=0;searchReply="";
+    saved=0;failed=0;updateStorage();cardState=1;
+    Serial.println("[MEMORY] FORMAT COMPLETE: card mounted, memory cache cleared");
+   }else{
+    cardState=4;
+    Serial.println("[MEMORY] FORMAT FAILED: check SD card and wiring");
+   }
+   continue;
   }
   if(searches && xQueueReceive(searches,&query,0)==pdTRUE && mounted)searchOnSD(query);
   if(xQueueReceive(writes,&e,pdMS_TO_TICKS(15))!=pdTRUE)continue;
