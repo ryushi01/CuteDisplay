@@ -81,6 +81,7 @@ inline void updateStorage(){
  sdTotalKB=(uint32_t)(total/1024ULL);sdUsedKB=(uint32_t)(used/1024ULL);
 }
 static uint8_t factCount=0;
+static volatile uint32_t factRevision=0, memorizedNoticeSeq=0;
 inline String factSummary(size_t maxLen=700){
  String out;
  if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(3))!=pdTRUE)return out;
@@ -211,6 +212,7 @@ inline void mergeFact(const String &key,const String &value){
     String entry=key+":"+value;
     entry.toCharArray(facts[i].value,sizeof(facts[i].value));
    }else value.toCharArray(facts[i].value,sizeof(facts[i].value));
+   factRevision++;
    xSemaphoreGive(cacheMutex);return;
   }
   if(isEpisodic(key) && isEpisodic(String(facts[i].key)) &&
@@ -222,7 +224,7 @@ inline void mergeFact(const String &key,const String &value){
  if(factCount<MAX_FACTS){
   finalKey.toCharArray(facts[factCount].key,sizeof(facts[factCount].key));
   stored.toCharArray(facts[factCount].value,sizeof(facts[factCount].value));
-  factCount++;
+  factCount++;factRevision++;
  }else{
   // Fixed memory budget: rotate episodic notes first, preserving identity
   // and known preferences until new information needs the slots.
@@ -235,6 +237,7 @@ inline void mergeFact(const String &key,const String &value){
    for(int i=victim;i<factCount-1;i++)facts[i]=facts[i+1];
    finalKey.toCharArray(facts[factCount-1].key,sizeof(facts[0].key));
    stored.toCharArray(facts[factCount-1].value,sizeof(facts[0].value));
+   factRevision++;
   }
  }
  xSemaphoreGive(cacheMutex);
@@ -571,6 +574,7 @@ inline void task(void*){
   bool ok=f.printf("%lu\t%s\t%s\n",(unsigned long)ts,e.question,e.answer)>0;
   f.close();
   if(ok){saved++;appendIndex(e,offset,ts);
+   uint32_t revisionBefore=factRevision;
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
     if(key!="likes" && key!="dislikes")mergeFact(key,value);
@@ -579,7 +583,9 @@ inline void task(void*){
    consolidatePreferences(String(e.question));
    {
     File ff=SD_MMC.open("/kitty/facts.tsv","w");
-    if(ff){ff.print(factSummary(6000));ff.close();}
+    if(ff){size_t written=ff.print(factSummary(6000));ff.close();
+     if(written && factRevision!=revisionBefore)memorizedNoticeSeq++;
+    }
     Serial.printf("[MEMORY] saved fact key=%s total=%u\n",key.c_str(),(unsigned)factCount);
    }
   }else failed++;
