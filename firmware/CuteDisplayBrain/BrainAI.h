@@ -311,7 +311,7 @@ inline void run(void*){
   while((uint32_t)(millis()-began)<40UL){
    String old=KittyMemory::takeSearch(searchId);
    if(!old.isEmpty()){
-    remembered=old;break;
+    // Do not discard structured facts when a search result arrives.\n    if(!remembered.isEmpty())remembered+="\n";\n    remembered+=old;break;
    }
    vTaskDelay(pdMS_TO_TICKS(5));
   }
