@@ -238,13 +238,54 @@ inline void mergeFact(const String &key,const String &value){
  xSemaphoreGive(cacheMutex);
 }
 
+
+inline void consolidatePreferences(const String &utterance){
+ // Break short compound English statements into independent preference facts.
+ // Generic subjects: food, games, people, music, hobbies, technology, etc.
+ String lowered=utterance;lowered.toLowerCase();
+ const char *markers[]={"i no longer like ","i don't like ","i do not like ",
+   "i dislike ","i hate ","i like ","i love ","but hate ","but dislike ",
+   "but i hate ","but i dislike ","but i like ","but i love "};
+ const bool negative[]={true,true,true,true,true,false,false,true,true,true,true,false,false};
+ size_t cursor=0;bool active=false;bool dislike=false;
+ while(cursor<utterance.length()){
+  int best=-1;int bestPos=utterance.length();
+  for(int i=0;i<13;i++){
+   int at=lowered.indexOf(markers[i],cursor);
+   if(at>=0 && at<bestPos){best=i;bestPos=at;}
+  }
+  if(active){
+   size_t end=best>=0?(size_t)bestPos:utterance.length();
+   String group=utterance.substring(cursor,end);
+   group.replace(", and "," and ");group.replace(", "," and ");
+   int at=0;
+   while(at<(int)group.length()){
+    int split=group.indexOf(" and ",at);
+    if(split<0)split=group.length();
+    String subject=group.substring(at,split);subject.trim();
+    for(const char *tail:{".","!","。"," but"," though"}){
+     if(subject.endsWith(tail))subject.remove(subject.length()-strlen(tail));
+    }
+    subject.trim();
+    if(subject.length()>1 && subject.length()<=72 &&
+       subject.indexOf('?')<0 && subject.indexOf("？")<0)
+     mergeFact(dislike?"dislikes":"likes",subject);
+    at=split+5;
+   }
+  }
+  if(best<0)break;
+  dislike=negative[best];active=true;
+  cursor=bestPos+strlen(markers[best]);
+ }
+}
+
 inline bool queue(const String &question,const String &answer){
  if(!writes || !mounted || question.isEmpty() || answer.isEmpty()){Serial.printf("[MEMORY] enqueue refused mounted=%d queue=%d\n",mounted?1:0,writes?1:0);return false;}
  Entry e={};
  sanitize(question,sizeof(e.question)-1).toCharArray(e.question,sizeof(e.question));
  sanitize(answer,sizeof(e.answer)-1).toCharArray(e.answer,sizeof(e.answer));
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
- String key,value;if(extractFact(question,key,value) && key!="event" && key!="note")mergeFact(key,value);
+ String key,value;if(extractFact(question,key,value) && key!="event" && key!="note" && key!="likes" && key!="dislikes")mergeFact(key,value);
  // The active recall cache updates immediately; SD persistence is deferred.
  addCache(question,answer);
  return true;
@@ -475,7 +516,11 @@ inline void task(void*){
   if(ok){saved++;appendIndex(e,offset,ts);
    String key,value;if(extractFact(e.question,key,value)){
     if(key=="note")key="note_"+String(ts%1000000UL)+"_"+String(saved%100UL);
-    mergeFact(key,value);File ff=SD_MMC.open("/kitty/facts.tsv","w");
+    if(key!="likes" && key!="dislikes")mergeFact(key,value);
+   }
+   consolidatePreferences(String(e.question));
+   {
+    File ff=SD_MMC.open("/kitty/facts.tsv","w");
     if(ff){ff.print(factSummary(6000));ff.close();}
     Serial.printf("[MEMORY] saved fact key=%s total=%u\n",key.c_str(),(unsigned)factCount);
    }
