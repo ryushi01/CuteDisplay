@@ -119,6 +119,44 @@ inline String factSummary(size_t maxLen=700){
  }
  xSemaphoreGive(cacheMutex);return out;
 }
+// Recoverable SD fact snapshots: never truncate the only good copy.
+inline bool persistFacts(){
+ String data=factSummary(6000);
+ if(data.isEmpty())return false; // never replace a non-empty cache with an empty file
+ const char *tmp="/kitty/facts.next",*main="/kitty/facts.tsv",*backup="/kitty/facts.bak";
+ SD_MMC.remove(tmp);
+ File f=SD_MMC.open(tmp,FILE_WRITE);
+ if(!f)return false;
+ size_t written=f.print(data);f.flush();f.close();
+ if(written!=data.length()){SD_MMC.remove(tmp);return false;}
+ // Keep the previous valid snapshot until the new one is committed.
+ if(SD_MMC.exists(main)){
+  SD_MMC.remove(backup);
+  if(!SD_MMC.rename(main,backup)){SD_MMC.remove(tmp);return false;}
+ }
+ if(!SD_MMC.rename(tmp,main)){
+  if(SD_MMC.exists(backup))SD_MMC.rename(backup,main);
+  return false;
+ }
+ return true;
+}
+inline void restoreFactSnapshots(){
+ const char* candidates[]={"/kitty/facts.tsv","/kitty/facts.bak"};
+ for(const char *path:candidates){
+  File f=SD_MMC.open(path,FILE_READ);if(!f)continue;
+  uint8_t before=factCount;
+  while(f.available()){
+   String line=f.readStringUntil('\n');int tab=line.indexOf('\t');
+   if(tab>0 && tab<32 && line.length()<240)
+    mergeFact(line.substring(0,tab),line.substring(tab+1));
+  }
+  f.close();
+  if(factCount>before){
+   if(String(path)!="/kitty/facts.tsv")Serial.println("[MEMORY] recovered facts from backup");
+   break;
+  }
+ }
+}
 inline bool extractFact(String utterance,String &key,String &value){
  utterance.trim();if(utterance.length()<5)return false;
  String lower=utterance;lower.toLowerCase();
@@ -570,8 +608,7 @@ inline void task(void*){
     uint32_t before=factRevision;
     mergeFact(kind,subject);
     if(factRevision!=before){
-     File ff=SD_MMC.open("/kitty/facts.tsv","w");
-     if(ff){size_t bytes=ff.print(factSummary(6000));ff.close();if(bytes)memorizedNoticeSeq++;}
+     if(persistFacts())memorizedNoticeSeq++;
      Serial.printf("[MEMORY AI] consolidated %s\n",kind.c_str());
     }
    }
@@ -621,10 +658,7 @@ inline void task(void*){
    if(gymCancellation(String(e.question)))removeSupersededGymPlan();
    consolidatePreferences(String(e.question));
    {
-    File ff=SD_MMC.open("/kitty/facts.tsv","w");
-    if(ff){size_t written=ff.print(factSummary(6000));ff.close();
-     if(written && factRevision!=revisionBefore)memorizedNoticeSeq++;
-    }
+    if(factRevision!=revisionBefore && persistFacts())memorizedNoticeSeq++;
     Serial.printf("[MEMORY] saved fact key=%s total=%u\n",key.c_str(),(unsigned)factCount);
    }
   }else failed++;
