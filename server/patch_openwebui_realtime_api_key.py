@@ -123,6 +123,18 @@ EXPRESSION_ANCHORS = {
 
 def patch_expressions(source):
     if EXPRESSION_MARKER in source:
+        # Refresh the instructions even if expression tools were installed.
+        # The prompt changes without replacing existing authentication.
+        start = source.find("KITTY_EXPRESSION_INSTRUCTIONS = (")
+        end = source.find("KITTY_EXPRESSION_INSTRUCTIONS", start + 1)
+        block_start = EXPRESSION_TOOL.find("KITTY_EXPRESSION_INSTRUCTIONS = (")
+        block_end = EXPRESSION_TOOL.find(EXPRESSION_MARKER, block_start)
+        if start >= 0 and block_start >= 0 and block_end > block_start:
+            # Prompt block is followed immediately by the expression marker.
+            marker_at = source.find(EXPRESSION_MARKER, start)
+            if marker_at >= 0:
+                prompt = EXPRESSION_TOOL[block_start:block_end]
+                return source[:start] + prompt + source[marker_at:]
         if '"surprised", "confused", "laughing"' in source:
             return source
         # Upgrade an already-installed v1 expression tool in place.
