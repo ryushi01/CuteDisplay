@@ -302,7 +302,21 @@ inline void run(void*){
   cJSON_AddStringToObject(a,"content",history[i].assistant.c_str());
   cJSON_AddItemToArray(msgs,a);
  }
+ // Search the entire SD index asynchronously; wait at most 40ms.
+ // A slow or busy card never blocks the model beyond this fixed deadline.
+ uint32_t searchId=KittyMemory::requestSearch(prompt);
  String remembered=KittyMemory::recall(prompt);
+ if(searchId){
+  uint32_t began=millis();
+  while((uint32_t)(millis()-began)<40UL){
+   String old=KittyMemory::takeSearch(searchId);
+   if(!old.isEmpty()){
+    remembered=old;break;
+   }
+   vTaskDelay(pdMS_TO_TICKS(5));
+  }
+ }
+ remembered=KittyMemory::clipUTF8(remembered,850);
  if(!remembered.isEmpty()){
   cJSON *memory=cJSON_CreateObject();
   cJSON_AddStringToObject(memory,"role","system");
