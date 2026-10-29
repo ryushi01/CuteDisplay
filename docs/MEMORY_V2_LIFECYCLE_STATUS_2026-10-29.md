@@ -1,28 +1,39 @@
-# Kitty Memory v2 experimental implementation — 2026-10-29
+# Kitty Memory v2 — Experimental implementation (2026-10-29)
 
-## Safety and checkpoints
-- Production baseline: main commit `5458dd4d3f0e6a9744729ff1312e72898cf85b3d`.
-- Rollback: `checkpoint/2026-10-29-main-before-memory-v2`.
-- Feature: `feature/memory-v2-lifecycle`. Do not merge until the final combined firmware CI and real S3 regression tests succeed.
-- Existing `/kitty/facts.tsv` retains its **two-column** legacy format. Added metadata is stored separately in `/kitty/factsmeta.tsv`, with temporary/backup rename recovery. No SD format is required.
+**Recovery baseline:** `main` commit `5458dd4d3f0e6a9744729ff1312e72898cf85b3d` and `checkpoint/2026-10-29-main-before-memory-v2`. New code lives on `feature/memory-v2-lifecycle`. Do not merge until full CI and hardware regression tests.
 
-## Implemented
-- Fact timestamps and confidence in a fixed, PSRAM-backed sidecar. Direct facts use confidence 100 and AI-suggested facts 70; these are heuristic source grades, not calibrated probabilities.
-- Explicit English/French/Japanese weekday-work assertions use stable keys such as `routine_work_monday`. A later correction replaces the current value; old versions go to `/kitty/corrections.tsv`.
-- Stable facts have no expiry. Only explicitly time-qualified upcoming plans for today/tomorrow receive a bounded 24–48-hour expiry. Historical archive data remains on SD, and old schedule matches are downranked/excluded from upcoming recall.
-- Every six saved user utterances, the SD worker queues a bounded, user-only batch. The existing low-priority analysis worker may summarize it after 20 seconds idle. Accepted summaries are appended to `/kitty/summaries.tsv`; only a recent bounded summary is sent as memory context on subsequent AI requests or new realtime connections. No inference occurs on I2S or WebSocket callbacks.
+## 3. Corrections, confidence and supersession
+- Added 256-entry PSRAM metadata for update timestamps, expiry and confidence, persisted in a **separate** `/kitty/factsmeta.tsv` snapshot. `/kitty/facts.tsv` remains the original two-column format for backward compatibility.
+- Direct facts use confidence grade 100, AI-extracted proposals 70 (heuristic origin labels, not statistically calibrated probabilities).
+- Explicit EN/FR/JA workday statements use canonical keys such as `routine_work_monday`. A later contradictory statement replaces the active value and records the old value in `/kitty/corrections.tsv`.
+- Arbitrary natural-language contradiction handling is not yet comprehensive. Existing preference deduplication and same-key replacements continue working.
 
-## Known limitations and incomplete features
-- General contradiction resolution (arbitrary topics, sophisticated date schedules, indirect negation) is **not** complete. The explicit workday example and previously supported same-key facts are handled.
-- Time-specific expiry currently handles basic today/tomorrow phrases in EN/FR/JA; other future dates remain until corrected. Do not present this as a full calendar or natural-language date resolver.
-- Summaries are asynchronous and best-effort; model timeout/idle requirements may skip them. They are not automatically injected mid-call.
-- **In-session realtime provider memory refresh is not yet implemented.** The existing server-side gateway only accepts `kitty_sd_memory` during WebSocket authentication. A version-checked authenticated update event, server acknowledgment, and live provider prompt update must be implemented and verified together on the actual Open WebUI image. Do not send a speculative update event or restart calls. Delegated S3 AI requests already assemble fresh memory on each request.
-- No changes have been deployed to Ubuntu, Mac, or iPhone.
+## 4. Permanent vs temporary
+- Identity, preferences, jobs and undated notes remain permanent until corrected or removed.
+- Time-qualified upcoming plans for today/tomorrow in English, French or Japanese receive a bounded 24–48-hour expiry. Other dates are intentionally **not guessed** and currently remain until corrected.
+- Expired plans are filtered from structured and upcoming-plan recall but remain in the historical SD archive.
+- Date classification is conservative, not a full calendar or natural-language date engine.
 
-## Required validation before promoting
-1. Combined CI S3/C5 compilation from the exact latest commit.
-2. Existing SD card loads legacy facts unchanged; `factsmeta.tsv` is created after new writes; reboot persists timestamp/expiry/confidence.
-3. Try: `I work on Mondays`; `Actually I no longer work on Mondays`; then reboot and ask in Japanese/French. Verify corrections.tsv contains prior value.
-4. Test today's/tomorrow's plan expiry with a clock that has synchronized; old user memories remain in archive, but not active future plans.
-5. Say six meaningful project decisions. After idle, verify summaries.tsv and new-session recall. Confirm no audio dropout, memory pressure, or extra latency.
-6. `system status` throughout realtime calls; keep validated main if any regressions.
+## 5. Compact conversation summaries
+- The SD worker batches six bounded user utterances and enqueues one best-effort summary request. The existing low-priority AI analysis worker operates only after 20 seconds idle, never during realtime audio.
+- Successful concise summaries are appended to `/kitty/summaries.tsv`; newest summary is restored at boot and injected into bounded AI / realtime authentication memory context. Old summaries expire from active context after seven days but remain historical records on SD.
+- No additional Ubuntu model or memory database is required; uses existing Open WebUI/Ollama endpoint. Model timeouts or device activity may skip summary generation.
+
+## 6. Live memory refresh — protocol included, deployment required
+- The S3 now opts in with `kitty_memory_refresh=true` during authenticated realtime WebSocket setup. Older Open WebUI gateways silently ignore it, retaining original audio behavior.
+- New server extension `server/patch_openwebui_memory_refresh.py` advertises `kitty.memory.capabilities` only to authenticated, opted-in Kitty sessions and accepts bounded, revisioned `kitty.memory.refresh` events.
+- It replaces the previous current-memory system-context item in the **existing provider conversation**, without restarting the call; the S3 sends only during idle voice-output windows and waits for feature negotiation.
+- The extension is version-guarded, fails closed on incompatible source, and is included in the optional Dockerfile. Offline protocol tests run in GitHub Actions. **The patch has not been deployed to the currently running Ubuntu/Open WebUI service; live refresh will not activate there until that deployment and end-to-end testing.**
+- On a gateway without this extension, session memory remains the initial snapshot (delegated AI requests continue to use fresh SD memory on each request).
+
+## Validation and safe rollout
+1. Compile combined S3+C5 firmware, run `server/test_patch_openwebui_memory_refresh.py`, review GitHub Actions; retain checkpoint.
+2. Verify existing SD facts load unmodified, and `factsmeta.tsv` survives reboot. Never format the SD card for this upgrade.
+3. Test explicit workday correction across English, French and Japanese, plus `corrections.tsv` history.
+4. Check only relative today/tomorrow plans expire, and older plans remain in the SD archive.
+5. Say six factual project statements; leave idle; inspect `summaries.tsv` and reboot/session recall.
+6. Test realtime voice, barge-in, lip animations, I2S stack and RAM headroom before any server change.
+7. Only after matching server patch is installed on the **pinned running image** and a verified backup made: reconnect a call once for negotiation, teach a new fact during the call, let audio finish, confirm `[CALL MEMORY] context refresh accepted`, then ask about it in another language without reconnecting.
+8. Roll back server image and feature firmware to the saved baseline if audio or provider errors occur.
+
+Do not treat a successful CI compile as evidence of working hardware or a completed server deployment.
