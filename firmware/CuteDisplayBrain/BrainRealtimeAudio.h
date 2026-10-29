@@ -18,7 +18,7 @@
 namespace BrainRealtimeAudio {
 static constexpr uint32_t RATE=24000;
 static constexpr size_t SAMPLES=480; // 20ms at 24kHz
-static constexpr uint32_t TAIL_MUTE_MS=300;
+static constexpr uint32_t TAIL_MUTE_MS=450;
 struct Frame { int16_t pcm[SAMPLES]; };
 // Allocate the 2x 3.8KB DMA staging arrays and audio frames in PSRAM,
 // avoiding a large internal task stack after Wi-Fi/BLE/TLS handshake.
@@ -184,9 +184,9 @@ static void audioTask(void *){
   // direction (60KB duplex). After TLS that frequently exhausts DRAM.
   // Use smaller DMA-capable internal allocations per direction. The audio
   // task transfers 10ms frames and handles speaker bursts in the PSRAM ring.
-  // Four 120-frame descriptors give 20ms DMA slack per direction; this keeps
-  // the same frame size while halving persistent DMA descriptor demand.
-  channel.dma_desc_num=4;
+  // Six 120-frame descriptors give 30ms DMA slack per direction: a balance
+  // between playback continuity and internal DMA allocation pressure.
+  channel.dma_desc_num=6;
   channel.dma_frame_num=120;
   esp_err_t rc=i2s_new_channel(&channel,&tx,&rx);
   if(rc!=ESP_OK){reportError("CHANNEL_ALLOC",rc);break;}
@@ -312,6 +312,15 @@ static void audioTask(void *){
    }else if(!outputActive)bargeFrames=0;
    // Never duck, mute, or cancel Kitty just because the user is talking.
    if(!outputActive && bargeActive)bargeActive=false;
+   // During speaker output and its acoustic tail, transmit silence instead
+   // of unreliable AEC residuals that can create phantom STT transcripts.
+   // Keep the audio cadence and mic queue active (no socket reconnect).
+   const bool echoGuard=outputActive ||
+      (uint32_t)(millis()-lastPlaybackMs)<TAIL_MUTE_MS;
+   if(echoGuard){
+    memset(work->mic.pcm,0,sizeof(work->mic.pcm));
+    bargeFrames=0;bargeActive=false;bargeRequested=false;
+   }
    if(xQueueSend(micQueue,&work->mic,0)!=pdTRUE){
     // Prefer freshest audio instead of accumulating latency on a slow Wi-Fi link.
     (void)xQueueReceive(micQueue,&work->discard,0);
