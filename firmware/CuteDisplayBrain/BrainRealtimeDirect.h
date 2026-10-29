@@ -25,6 +25,10 @@ extern const uint8_t ca_bundle_start[] asm("_binary_x509_crt_bundle_start");
 extern const uint8_t ca_bundle_end[] asm("_binary_x509_crt_bundle_end");
 static WebSocketsClient ws;
 static bool requested=false, started=false, connected=false, ready=false;
+// Provider memory updates are opt-in and disabled unless the authenticated
+// gateway explicitly advertises support. Never require them for a voice call.
+static bool memoryRefreshSupported=false;
+static uint32_t memoryFactSeen=0,memorySummarySeen=0,memoryRefreshSeq=0,memoryLastAttempt=0;
 static bool remoteResponse=false, streamedSpeech=false;
 static bool bargeCancelling=false;
 static String deferredVoiceItem;
@@ -319,6 +323,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
+  memoryRefreshSupported=false;memoryRefreshSeq=0;
  deferredVoiceItem="";playbackSpeechDetected=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
   failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
@@ -338,6 +343,10 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   // It enables set_expression ONLY for this Kitty-capable S3, never for
   // ordinary browser/mobile voice clients.
   cJSON_AddBoolToObject(auth,"kitty_expressions",true);
+  cJSON_AddBoolToObject(auth,"kitty_memory_refresh",true);
+  memoryRefreshSupported=false;memoryRefreshSeq=0;
+  memoryFactSeen=KittyMemory::factRevision;
+  memorySummarySeen=KittyMemory::summaryRevision;
   // Only ephemeral facts travel with this authenticated session. No server storage.
   String facts=KittyMemory::factSummary(580);
   String summary=KittyMemory::latestSummaryContext(170);
@@ -371,6 +380,13 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   else{
    ready=true;lastPing=millis();status("CALL_CONNECTING");
   }
+ }else if(strcmp(type,"kitty.memory.capabilities")==0){
+  cJSON* flag=cJSON_GetObjectItem(json,"refresh");
+  memoryRefreshSupported=cJSON_IsTrue(flag);
+  Serial.printf("[CALL MEMORY] live_refresh=%d\n",memoryRefreshSupported?1:0);
+ }else if(strcmp(type,"kitty.memory.refreshed")==0){
+  // ACK only: never log the user's personal memory text.
+  Serial.println("[CALL MEMORY] context refresh accepted");
  }else if(strcmp(type,"bridge.error")==0){
   failure="AUTH_OR_PROVIDER_ERROR"; // Never log server's sensitive detail.
  }else if(strcmp(type,"bridge.pong")==0){
@@ -673,6 +689,35 @@ inline void tick(bool audioBusy){
     fail("DELEGATION_RESULT_SEND");return;
    }
    status("CALL_THINKING");
+  }
+ }
+ // Update changed facts without reconnecting, only while voice output and
+ // delegated responses are idle. Old gateways never advertise capability.
+ if(ready && memoryRefreshSupported && !remoteResponse &&
+    !BrainRealtimeAudio::hasSpeakerAudio() &&
+    delegatedCallId.isEmpty() && failedCallId.isEmpty() &&
+    animationResponseId.isEmpty() && deferredVoiceItem.isEmpty() &&
+    (uint32_t)(millis()-memoryLastAttempt)>=3000UL &&
+    (KittyMemory::factRevision!=memoryFactSeen ||
+     KittyMemory::summaryRevision!=memorySummarySeen)){
+  memoryLastAttempt=millis();
+  uint32_t factVersion=KittyMemory::factRevision;
+  uint32_t summaryVersion=KittyMemory::summaryRevision;
+  String context=KittyMemory::factSummary(550);
+  String brief=KittyMemory::latestSummaryContext(160);
+  if(!brief.isEmpty()){if(!context.isEmpty())context+='\n';context+="recent_summary: "+brief;}
+  context=KittyMemory::clipUTF8(context,790);
+  cJSON *message=cJSON_CreateObject();
+  if(message){
+   cJSON_AddStringToObject(message,"type","kitty.memory.refresh");
+   cJSON_AddNumberToObject(message,"revision",++memoryRefreshSeq);
+   cJSON_AddStringToObject(message,"memory",context.c_str());
+   char *wire=cJSON_PrintUnformatted(message);
+   if(wire){
+    if(ws.sendTXT(wire)){memoryFactSeen=factVersion;memorySummarySeen=summaryVersion;}
+    free(wire);
+   }
+   cJSON_Delete(message);
   }
  }
  if(ready){
