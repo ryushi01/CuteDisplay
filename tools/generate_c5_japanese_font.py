@@ -16,10 +16,32 @@ def repertoire():
             except UnicodeDecodeError: continue
             if len(c)==1 and ord(c)>=128:
                 chars.add(ord(c))
-    # Japanese typographic characters plus fullwidth forms.
-    chars.update(range(0x3040,0x30FF+1))
-    chars.update(range(0x3000,0x303F+1))
-    chars.update(range(0xFF01,0xFF60))
+    # Western European text: precomposed French accents (é, è, ê, ë,
+    # à, â, î, ï, ô, ù, û, ü, ç, œ, æ, ÿ), extended Latin, and phonetics.
+    chars.update(range(0x00A0,0x0250))
+    chars.update(range(0x1E00,0x1F00))
+    # Smart quotes, dashes, ellipses, currency, arrows and math symbols.
+    # Include common symbols without depending on glyphs supplied by iOS.
+    for start, end in (
+        (0x2000,0x2070), (0x20A0,0x20D0), (0x2100,0x2150),
+        (0x2190,0x2300), (0x2300,0x2500),
+        (0x2500,0x2C00),  # box drawing, geometric shapes, dingbats, arrows
+        (0x2E00,0x3000),  # supplemental punctuation / ideographic description
+        (0x0300,0x0370),  # combining diacritics (precomposed preferred)
+        (0x0370,0x0530),  # Greek, Coptic, Cyrillic
+        (0x1D00,0x1E00),  # phonetic/Latin extensions
+    ):
+        chars.update(range(start,end))
+    # Full BMP CJK Unified Ideographs and Extension A, so Japanese kanji
+    # outside the smaller Shift-JIS/CP932 repertoire also have a fallback.
+    # Bitmap data is stored in program flash (not runtime PSRAM).
+    chars.update(range(0x3400,0xA000))
+    chars.update(range(0xF900,0xFB00))  # CJK compatibility ideographs
+    chars.update(range(0xFE10,0xFE70))  # vertical and compatibility forms
+    chars.update(range(0x3040,0x3100))  # Hiragana + Katakana
+    chars.update(range(0x31F0,0x3200))  # Katakana phonetic extensions
+    chars.update(range(0x3000,0x3040))  # Japanese punctuation
+    chars.update(range(0xFF01,0xFFA0))  # Fullwidth / halfwidth forms
     return sorted(x for x in chars if x<=0xFFFF)
 
 def main():
@@ -44,7 +66,24 @@ def main():
             img=Image.new("L",(16,16),0)
             d=ImageDraw.Draw(img)
             # Anchor glyph to top/left with consistent 16px CJK advances.
-            d.text((0,0),chr(cp),fill=255,font=font,anchor="lt")
+            # Accented Latin only: a subtle one-pixel stroke to match the
+            # existing scaled 5x7 ASCII weight, without changing ASCII.
+            latin = (0x00C0 <= cp <= 0x024F) or (0x1E00 <= cp <= 0x1EFF)
+            d.text((0,0),chr(cp),fill=255,font=font,anchor="lt",
+                   stroke_width=1 if latin else 0,stroke_fill=255)
+            # Western Latin bitmaps occupy less ink than the native 5x7
+            # uppercase font enlarged 2x. Normalize ink height, including
+            # accents, to make É/À/Ç/Œ visually consistent with ASCII.
+            if (0x00A0 <= cp <= 0x024F) or (0x1E00 <= cp <= 0x1EFF):
+                bbox=img.getbbox()
+                if bbox:
+                    crop=img.crop(bbox)
+                    w,h=crop.size
+                    target_h=14
+                    target_w=min(13,max(1,round(w*target_h/h)))
+                    crop=crop.resize((target_w,target_h),Image.Resampling.NEAREST)
+                    img=Image.new("L",(16,16),0)
+                    img.paste(crop,(max(0,(16-target_w)//2),1))
             bits=[]
             for y in range(16):
                 for xbase in (0,8):

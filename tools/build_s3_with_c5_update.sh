@@ -63,6 +63,17 @@ mkdir -p "$OUT/lcd"
 cp -R "$WORK/lcd/." "$OUT/lcd/"
 cp "$WORK/build-c5/lcd.ino.bin" "$OUT/C5-v${VERSION}-application.bin"
 
+# Preserve original automatic version-checked OTA. No ad-hoc USB enable gate.
+# Package tests ensure the C5 image is present and the OTA state machine
+# still compares versions and verifies the running version after reboot.
+grep -Fq 'BrainC5OTA::permitUpdate=!activeSeq && !lanAwaitingCommand &&' \
+  "$ROOT/firmware/CuteDisplayBrain/CuteDisplayBrain.ino"
+grep -Fq 'if(C5Image::version<=currentVersion)' \
+  "$ROOT/firmware/CuteDisplayBrain/BrainC5OTA.h"
+grep -Fq 'SUCCESS: new display firmware confirmed after reboot' \
+  "$ROOT/firmware/CuteDisplayBrain/BrainC5OTA.h"
+echo "PASS: automatic C5 OTA allowed only when version is newer and devices are idle"
+
 echo "[3/5] Embed C5 v$VERSION in S3 firmware"
 mkdir -p "$WORK/CuteDisplayBrain"
 cp -R "$ROOT/firmware/CuteDisplayBrain/." "$WORK/CuteDisplayBrain/"
@@ -91,19 +102,31 @@ cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
 cat > "$OUT/READ_ME_FIRST.txt" <<EOF
 CuteDisplay combined firmware build: S3 Brain + C5 v$VERSION
 =======================================================
-HARDWARE-TESTED: on 2026-10-27 user confirmed C5 v1 -> v2 UART OTA,
-C5 reboot, post-boot version success, Kitty and iPhone app functionality.
+Realtime voice transport was hardware-validated at commit 78d4abd9.
+NEW: C5 v$VERSION panoramic Kitty Call Face is experimental.
+Preserve the previous tested S3+C5 v22 archive for recovery.
 
 NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
 1. Open CuteDisplayBrain/CuteDisplayBrain.ino FROM THIS ARTIFACT.
 2. Choose ESP32S3 Dev Module, 16 MB flash, OPI PSRAM, Custom
    partition scheme (included partitions.csv); select S3 USB port.
-3. Before compiling in Arduino IDE, install ESP8266Audio 2.4.1
-   for MP3 voice replies. Recording sends 8-bit PCM WAV (16 kHz)
-   with 16-bit PCM WAV fallback; no extra recording codec library.
+3. BEFORE clicking Arduino IDE Verify or Upload, open Library Manager
+   and install both exact libraries:
+   - WebSockets by Markus Sattler (Links2004), version 2.7.2
+     REQUIRED for BrainRealtimeDirect.h: #include <WebSocketsClient.h>
+     (Not ArduinoWebsockets by Gil Maimon.)
+   - ESP8266Audio by Earle F. Philhower, version 2.4.1
+     REQUIRED for existing MP3 voice playback.
+   Core: Espressif esp32 3.3.12. Recording uses WAV only.
 4. Upload ONLY the S3 sketch, then open Serial Monitor at 115200.
-5. S3 upgrades C5 automatically ONLY if bundled version is newer.
-   Expect: [S3 OTA] SUCCESS: new display firmware confirmed after reboot
+5. As in previous CuteDisplay combined firmware builds, S3 automatically
+   sends the embedded C5 v$VERSION image if C5 currently runs an older version.
+   This may upgrade older C5 to v$VERSION on your first S3 boot after uploading.
+   OTA waits for the system to be idle and verifies the resulting version.
+6. Expect: [S3 OTA] SUCCESS: new display firmware confirmed after reboot.
+   USB Serial Monitor: c5 ota status / call diagnose / call start / call stop.
+   There is NO manual c5 ota enable command; save your previous stable firmware
+   firmware before upload because full-screen face v$VERSION is new.
 
 The CombinedFirmwareImage.h from the normal repository is deliberately EMPTY.
 Never upload the repository's S3 sketch as a combined firmware release;
@@ -119,6 +142,51 @@ Avoid powering two USB sources with a shared 5V bridge connected.
 CuteDisplay-CombinedFirmware.bin is the SINGLE compiled S3 application that embeds the C5 firmware.\nIt already contains all S3 .ino/.h/.cpp changes and the C5 firmware update.\nThe .bin files are APPLICATION images, NOT complete factory images.
 Do not flash app-only binaries to offset 0x0.
 EOF
+# Bundle every user-updated source alongside the matching compiled S3 build.
+# The existing iOS Xcode project/signing is intentionally not included.
+mkdir -p "$OUT/iPhone-app"
+cp "$ROOT/ios/CuteDisplay/ContentView.swift" "$OUT/iPhone-app/ContentView.swift"
+cp "$ROOT/ios/CuteDisplay/BluetoothManager.swift" "$OUT/iPhone-app/BluetoothManager.swift"
+cp "$ROOT/docs/INSTALL_REALTIME_COMPLETE.md" "$OUT/README_STEP_BY_STEP.md"
+cp "$ROOT/docs/REALTIME_I2S_AUDIO_EXPERIMENT.md" "$OUT/REALTIME_I2S_AUDIO_EXPERIMENT.md"
+cp "$ROOT/docs/REALTIME_KITTY_FACE_V23.md" "$OUT/REALTIME_KITTY_FACE_V23.md"
+cp "$ROOT/docs/REALTIME_KITTY_EXPRESSION_TOOL.md" "$OUT/REALTIME_KITTY_EXPRESSION_TOOL.md"
+mkdir -p "$OUT/server"
+cp "$ROOT/server/upgrade_kitty_expressions.sh" "$OUT/server/upgrade_kitty_expressions.sh"
+cp "$ROOT/server/patch_openwebui_realtime_api_key.py" "$OUT/server/patch_openwebui_realtime_api_key.py"
+cp "$ROOT/server/Dockerfile.openwebui-realtime-apikey" "$OUT/server/Dockerfile.openwebui-realtime-apikey"
+cp "$ROOT/server/check_openwebui_compose_config.py" "$OUT/server/check_openwebui_compose_config.py"
+python3 - "$OUT" <<'PY'
+from pathlib import Path
+import hashlib
+import sys
+root = Path(sys.argv[1])
+targets = [
+    root / "CuteDisplay-CombinedFirmware.bin",
+    root / f"S3-Brain-includes-C5-v{(root / 'lcd' / 'C5FirmwareVersion.h').read_text().split('C5_FIRMWARE_VERSION = ')[1].split(';')[0]}-application.bin",
+    root / f"C5-v{(root / 'lcd' / 'C5FirmwareVersion.h').read_text().split('C5_FIRMWARE_VERSION = ')[1].split(';')[0]}-application.bin",
+    root / "iPhone-app/ContentView.swift",
+    root / "iPhone-app/BluetoothManager.swift",
+    root / "CuteDisplayBrain/CuteDisplayBrain.ino",
+    root / "CuteDisplayBrain/BrainAI.h",
+    root / "CuteDisplayBrain/BrainRealtimeDirect.h",
+    root / "CuteDisplayBrain/BrainRealtimeAudio.h",
+    root / "lcd/C5CallFace.h",
+    root / "lcd/C5FirmwareVersion.h",
+    root / "server/upgrade_kitty_expressions.sh",
+    root / "server/patch_openwebui_realtime_api_key.py",
+    root / "REALTIME_KITTY_EXPRESSION_TOOL.md",
+]
+lines = []
+for path in targets:
+    if not path.is_file():
+        raise SystemExit(f"Required release file missing: {path}")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    lines.append(f"{digest}  {path.relative_to(root)}")
+(root / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n")
+PY
+git -C "$ROOT" rev-parse HEAD > "$OUT/SOURCE_COMMIT.txt"
+
 echo "[5/5] Combined firmware available at: $OUT"
 ls -lh "$OUT/"*.bin
 echo "Open $OUT/CuteDisplayBrain/CuteDisplayBrain.ino in Arduino IDE"

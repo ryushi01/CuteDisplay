@@ -3,7 +3,7 @@ name: Build combined S3 + C5 firmware
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/s3-ai-streaming, feature/wav-only-baseline-candidate]
+    branches: [main, feature/s3-ai-streaming, feature/wav-only-baseline-candidate, feature/c5-unicode-font-coverage, feature/c5-color-emoji-v16, feature/uart-ota-fast-v17, feature/c5-uniform-chat-font-v18, feature/c5-v19-selective-font-fix, feature/c5-v20-latin-glyph-priority, feature/c5-v21-latin-composed-accents, feature/realtime-call-c5v21, feature/realtime-kitty-fullscreen-expressions]
     paths:
       - ".github/workflows/build-s3-with-c5-update.yml"
       - "tools/build_s3_with_c5_update.sh"
@@ -11,6 +11,12 @@ on:
       - "tools/generate_c5_japanese_font.py"
       - "firmware/CuteDisplay/**"
       - "firmware/CuteDisplayBrain/**"
+      - "ios/CuteDisplay/**"
+      - "docs/INSTALL_REALTIME_COMPLETE.md"
+      - "docs/REALTIME_I2S_AUDIO_EXPERIMENT.md"
+      - "docs/REALTIME_KITTY_FACE_V23.md"
+      - "docs/REALTIME_KITTY_EXPRESSION_TOOL.md"
+      - "server/**"
       - "README.md"
 
 permissions:
@@ -48,6 +54,9 @@ jobs:
         run: |
           arduino-cli lib install "ESP8266Audio@2.4.1"
 
+      - name: Install WebSocket library for direct Open WebUI Call Mode
+        run: arduino-cli lib install "WebSockets@2.7.2"
+
       - name: Show available C5 and S3 board menu options
         shell: bash
         run: |
@@ -59,6 +68,16 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y fonts-noto-cjk python3-pil
+
+      - name: Verify S3 Kitty expression call handshake
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=firmware/CuteDisplayBrain/BrainRealtimeDirect.h
+          grep -Fq 'cJSON_AddStringToObject(event,"type","bridge.animation.respond")' "$FILE"
+          grep -Fq 'if(!bridgeAnimationRespond(animationResponseId))' "$FILE"
+          ! grep -Fq 'bridgeRespond("response_id",animationResponseId)' "$FILE"
+          grep -Fq 'cJSON_AddBoolToObject(auth,"kitty_expressions",true)' "$FILE"
 
       - name: Compile current C5 and bundled S3 firmware
         shell: bash

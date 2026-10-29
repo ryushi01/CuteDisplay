@@ -28,6 +28,9 @@
 #include "CuteLink.h"
 #include "C5FirmwareVersion.h"
 #include "C5JapaneseFont.h"
+#include "C5LatinUpper.h"
+#include "C5LatinAccent.h"
+#include "C5Emoji.h"
 #include "C5UARTOTA.h"
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
@@ -354,6 +357,14 @@ const unsigned long BATTERY_CARD_MS = 6000UL;
 const unsigned long CHARGE_NOTICE_MS = 3000UL;
 const unsigned long BATTERY_SAMPLE_MS = 2000UL;
 unsigned long batteryOverlayUntil = 0;
+static uint32_t sdUsedKB=0,sdTotalKB=0;
+static bool sdUsageReported=false;
+static String sdFormatSize(uint32_t kb){
+ if(kb>=1024UL)return String((float)kb/1024.0f,1)+" MB";
+ return String(kb)+" KB";
+}
+static uint8_t sdCardNoticeState=0;
+static uint32_t sdCardNoticeUntil=0;
 unsigned long chargeNoticeUntil = 0;
 unsigned long fullNoticeUntil = 0;
 unsigned long lowNoticeUntil = 0;
@@ -484,12 +495,27 @@ bool userButtonStable = HIGH;
 unsigned long userButtonChangedAt = 0;
 unsigned long userButtonPressedAt = 0;
 bool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false,voiceButtonHoldStarted=false;
+// C5 left BOOT short tap toggles Realtime Call; S3 is authoritative.
+// Long hold retains legacy manual PTT only when Call Mode is off.
+bool callModeActive=false;
+// Transient full-screen call artwork state; normal user settings are untouched.
+static String callCaption;
+static String callCaptionPrevious;
+static uint8_t callFaceMood=1; // target mood; 0..7
+static uint8_t callFacePreviousMood=1;
+static uint32_t callFaceTransitionStart=0;
+static constexpr uint32_t CALL_FACE_TRANSITION_MS=200UL;
+static uint8_t callLipLevel=0; // S3 speaker PCM intensity 0..9
+static uint32_t callFaceMoodSince=0,callLipAt=0;
+static constexpr uint32_t CALL_MOOD_HOLD_MS=10000UL;
 unsigned long voiceButtonChangedAt=0,voiceButtonHeldAt=0;
 bool userButtonLongHandled = false;
 const unsigned long WIFI_HOLD_MS = 1400UL;
 unsigned long wifiToastUntil = 0;
 bool wifiToastEnabled = false;
 static String kittyActivity; // short S3-reported status at bottom-left
+static uint32_t factSavedToastUntil=0;
+static constexpr uint32_t FACT_SAVED_TOAST_MS=3500UL;
 static String brainWifiToastLabel; // GUI feedback from S3, never from local C5 Wi-Fi.
 
 unsigned long lastScroll = 0;
@@ -691,8 +717,25 @@ uint32_t decodeUTF8(const String &s, int &offset) {
  }
  return value;
 }
+// Unify precomposed and decomposed French letters for CHAT layout/drawing.
+uint32_t decodeChatLatin(const String &s,int &offset){
+ uint32_t cp=c5LatinUpper(decodeUTF8(s,offset));
+ if(cp>='A' && cp<='Z' && offset<(int)s.length()){
+  int peek=offset;
+  uint32_t mark=decodeUTF8(s,peek);
+  uint32_t merged=c5LatinCompose(cp,mark);
+  if(merged){offset=peek;return merged;}
+ }
+ return cp;
+}
+// Keep Latin accented glyphs the same width as ordinary ASCII.
+bool narrowUnicodeGlyph(uint32_t cp) {
+ return (cp >= 0x00A0 && cp <= 0x024F) ||
+        (cp >= 0x1E00 && cp <= 0x1EFF);
+}
 int utfWidth(uint32_t cp, int asciiScale, int jpScale) {
- return cp < 128 ? 6*asciiScale : 16*jpScale;
+ if(cp==0xFE0E || cp==0xFE0F || cp==0x200D) return 0;
+ return (cp < 128 || narrowUnicodeGlyph(cp)) ? 6*asciiScale : 16*jpScale;
 }
 int richWidth(const String &s, int asciiScale, int jpScale) {
  int maxWidth=0, current=0;
@@ -986,6 +1029,13 @@ void drawBatteryOverlay(){
   if(!brainRadioFresh())
    textAt("BRAIN LINK: UNAVAILABLE",42,131,1,0xF800);
   else textAt("C5 RADIO: DISABLED",42,131,1,WHITE);
+  if(sdUsageReported && sdTotalKB>0){
+   uint32_t percent=(uint32_t)(((uint64_t)sdUsedKB*100ULL+sdTotalKB/2)/sdTotalKB);
+   textAt("SD: "+String(percent)+"% USED",42,143,1,themeColor());
+   textAt("USED: "+sdFormatSize(sdUsedKB)+" / "+sdFormatSize(sdTotalKB),42,155,1,WHITE);
+  }else{
+   textAt("SD: NOT READY / NO DATA",42,143,1,0xFFE0);
+  }
  }
 }
 String cleanText(String s,int limit) {
@@ -997,28 +1047,69 @@ String cleanText(String s,int limit) {
  }
  return out;
 }
+// Accent geometry is drawn over/under an UNMODIFIED 5x7 ASCII letter.
+// Thus É has exactly the E body, Ç exactly the C body, and so on.
+void drawLatinAccent(int x,int y,int scale,uint8_t mark,uint16_t color,int clipRight){
+ auto px=[&](int col,int row){
+  int xx=x+col*scale, yy=y+row*scale;
+  if(xx>=0 && xx+scale<=clipRight)rect(xx,yy,scale,scale,color);
+ };
+ if(mark==6){ px(2,7);px(3,8);return; } // cedilla
+ if(mark==7){px(2,-3);px(1,-2);px(3,-2);px(2,-1);return;}
+ if(mark==4){px(1,-2);px(3,-2);return;}
+ if(mark==3){px(1,-1);px(2,-2);px(3,-1);return;}
+ if(mark==5){px(0,-1);px(1,-2);px(2,-1);px(3,-2);px(4,-1);return;}
+ if(mark==1){px(2,-2);px(3,-3);return;} // acute
+ if(mark==2){px(2,-2);px(1,-3);return;} // grave
+}
 void drawSmoothGlyph(const SmoothGlyph &g,int x,int y,int w,int h,uint16_t ink,int clipRight);
 void richText(const String &str, int x, int y, int ascScale, int jpScale,
               uint16_t color, int clipRight) {
  int startX=x;
  int lineH=max(7*ascScale,16*jpScale)+4;
  for(int p=0;p<(int)str.length();) {
-  uint32_t cp=decodeUTF8(str,p);
+  uint32_t cp=decodeChatLatin(str,p);
   if(cp=='\r')continue;
   if(cp=='\n'){x=startX;y+=lineH;continue;}
   if(cp=='\t'){x+=24*ascScale;continue;}
   int width=utfWidth(cp,ascScale,jpScale);
+  if(width==0)continue;
   if(x + width > 0 && x < clipRight) {
-   int smooth=findSmoothGlyph(cp);
+   if(c5EmojiSupported(cp)){
+    c5DrawEmoji(cp,x,y,jpScale,[&](int px,int py,uint16_t ink){
+     if(px>=0 && px<clipRight && py>=0 && py<LCD_H)
+      rect(px,py,1,1,ink);
+    });
+    x+=width;
+    continue;
+   }
+   // ASCII and Western accented Latin must use the built-in consistent
+   // chat font, not older persisted smooth glyphs of varying dimensions.
+   // Other Unicode ranges keep their existing smooth-glyph behavior.
+   bool fixedLatin=(cp<128) || narrowUnicodeGlyph(cp);
+   int smooth=fixedLatin?-1:findSmoothGlyph(cp);
    if(smooth>=0){
     int h=cp<128?7*ascScale:16*jpScale;
     drawSmoothGlyph(smoothGlyphs[smooth],x,y,width,h,color,clipRight);
    }else if(cp < 128) {
     if(x + width <= clipRight) glyph(x,y,(char)cp,ascScale,color);
    }else {
+    char latinBase=0;uint8_t latinMark=0;
+    if(c5LatinAccent(cp,latinBase,latinMark)){
+     if(x+width<=clipRight) {
+      glyph(x,y,latinBase,ascScale,color);
+      drawLatinAccent(x,y,ascScale,latinMark,color,clipRight);
+     }
+     x+=width;
+     continue;
+    }
     const uint8_t *bitmap=nullptr;
-    for(int k=0;k<glyphCount;k++){
-     if(glyphCache[k].code==cp){bitmap=glyphCache[k].bits;break;}
+    // Western Latin always uses the shipped font, not a smaller saved
+    // 16x16 custom glyph. Leave Japanese and other Unicode cache untouched.
+    if(!narrowUnicodeGlyph(cp)){
+     for(int k=0;k<glyphCount;k++){
+      if(glyphCache[k].code==cp){bitmap=glyphCache[k].bits;break;}
+     }
     }
     const C5JPEntry *embedded=bitmap?nullptr:c5JPFind(cp);
     if(bitmap || embedded) {
@@ -1027,10 +1118,19 @@ void richText(const String &str, int x, int y, int ascScale, int jpScale,
       uint8_t lo=bitmap?bitmap[row*2+1]:pgm_read_byte(&embedded->bitmap[row*2+1]);
       uint16_t bits=((uint16_t)hi<<8)|lo;
       for(int col=0;col<16;col++)if(bits&(0x8000>>col)){
-       int xx=x+col*jpScale;
-       if(xx+jpScale<=clipRight)rect(xx,y+row*jpScale,jpScale,jpScale,color);
+       // Scale the 16px source horizontally into its measured advance.
+       // Accented Latin letters therefore align with unaccented ASCII.
+       int left=x+(col*width)/16;
+       int right=x+((col+1)*width)/16;
+       if(right>left && right<=clipRight)
+        rect(left,y+row*jpScale,right-left,jpScale,color);
       }
      }
+    }else{
+      // Never silently hide unsupported Unicode (e.g. emoji outside BMP).
+      // Show a visible fallback until a dedicated glyph is supplied.
+      int markWidth=6*ascScale;
+      glyph(x+max(0,(width-markWidth)/2),y,'?',ascScale,color);
     }
    }
   }
@@ -1971,7 +2071,7 @@ void drawSpeechBubble() {
  int totalLines=1, measureX=innerLeft;
  if(aiScrollMode){
   for(int t=0;t<(int)shown.length();){
-   uint32_t cp=decodeUTF8(shown,t);
+   uint32_t cp=decodeChatLatin(shown,t);
    if(cp=='\r')continue;
    if(cp=='\n'){totalLines++;measureX=innerLeft;continue;}
    int cw=utfWidth(cp,a,j);
@@ -1982,7 +2082,7 @@ void drawSpeechBubble() {
  const int firstLine=aiScrollMode?min(aiFirstVisibleLine,max(0,totalLines-visibleLines)):0;
  int x=innerLeft,y=by+13-firstLine*lineH;
  for(int p=0;p<(int)shown.length();) {
-  int begin=p;uint32_t cp=decodeUTF8(shown,p);
+  int begin=p;uint32_t cp=decodeChatLatin(shown,p);
   if(cp=='\r')continue;
   if(cp=='\n'){x=innerLeft;y+=lineH;continue;}
   if(cp=='\t'){x+=24*a;continue;}
@@ -1997,8 +2097,37 @@ void drawSpeechBubble() {
     && ((millis()/280)%2==0) && y<by+bh-14)
   rect(min(x,innerRight-3),y,2,max(7*a,16*j),BLACK);
 }
+#include "C5CallFace.h"
+static void drawSDCardNotice(){
+ if(!sdCardNoticeState || (int32_t)(sdCardNoticeUntil-millis())<=0)return;
+ rect(24,55,272,67,0xFFFF);
+ rect(27,58,266,61,0x2104);
+ if(sdCardNoticeState==3){
+  textAt("SD CARD FORMATTING",51,70,2,0xFFE0);
+  textAt("DO NOT REMOVE CARD",93,101,1,0xFFFF);
+ }else if(sdCardNoticeState==1){
+  textAt("SD CARD READY",73,72,2,0x07E0);
+ }else if(sdCardNoticeState==2){
+  textAt("SD CARD NOT READY",53,72,2,0xFFE0);
+  textAt("CHECK / FORMAT ON S3",85,101,1,0xFFFF);
+ }else{
+  textAt("SD CARD ERROR",74,74,2,0xF800);
+ }
+}
 void drawMessage() {
  if(!beginDrawing())return;
+ if(callModeActive && !C5UARTOTA::active()){
+  drawFullScreenKittyFace();
+  if(factSavedToastUntil && (int32_t)(factSavedToastUntil-millis())>0){
+   rect(119,LCD_H-18,116,17,0x18C3);
+   textAt("FACT MEMORIZED",124,LCD_H-14,1,0x07E0);
+  }
+  drawBatteryOverlay(); // Right-button status remains available in Call Mode.
+  drawBrainLinkOverlay();
+  drawSDCardNotice();
+  finishDrawing();
+  return;
+ }
  int a=asciiMessageScale(), j=jpMessageScale();
  int height=max(7*a,16*j);
  int multilineHeight=height+(richLineCount(message)-1)*(height+4);
@@ -2008,8 +2137,21 @@ void drawMessage() {
  drawConnectivityHUD();
  // Bottom-left unobtrusive activity label at HUD font scale.
  if(!kittyActivity.isEmpty()){
+  // The CALL_ prefix is retained internally for button state, but the HUD
+  // shows a readable short word in the existing narrow bottom-left region.
+  String label=kittyActivity;
+  if(label=="CALL_LISTENING")label="Listening";
+  else if(label=="CALL_THINKING")label="Thinking";
+  else if(label=="CALL_SPEAKING")label="Speaking";
+  else if(label=="CALL_CONNECTING")label="Connecting";
+  else if(label=="CALL_READY")label="Call ready";
+  else if(label=="CALL_ERROR")label="Call error";
   rect(0,LCD_H-13,104,13,BLACK);
-  textAt(kittyActivity,3,LCD_H-11,1,0x07FF);
+  textAt(label,3,LCD_H-11,1,0x07FF);
+ }
+ if(factSavedToastUntil && (int32_t)(factSavedToastUntil-millis())>0){
+  rect(117,LCD_H-14,123,13,BLACK);
+  textAt("FACT MEMORIZED",123,LCD_H-11,1,0x07E0);
  }
  // Must be LAST so the warning cannot be covered by any other overlay,
  // including battery/charging popups or mascot animations.
@@ -2034,6 +2176,7 @@ void drawMessage() {
    textAt(C5UARTOTA::error(),74,94,1,0xFFFF);
   }
  }
+ drawSDCardNotice();
  finishDrawing();
 }
 void showMessage(String s) {
@@ -2746,6 +2889,7 @@ static void serviceBrain() {
    continue;
   }
   if(f.type=="HELLO"){
+   callModeActive=false;callFaceMood=1;callLipLevel=0;
    // Remote reboot: require a NEW successful round trip.
    lastProbeAck=0;
    resetCmdParts();
@@ -2783,9 +2927,69 @@ static void serviceBrain() {
    wifiToastUntil=millis()+2500UL;
    if(lcdReady)redrawCurrent();
   }
+  else if(f.type=="FACT_SAVED"){
+   factSavedToastUntil=millis()+FACT_SAVED_TOAST_MS;
+   if(lcdReady)redrawCurrent();
+  }
   else if(f.type=="ACTIVITY"){
    String next=f.payload.substring(0,18);
-   if(next!=kittyActivity){kittyActivity=next;if(lcdReady)redrawCurrent();}
+   bool wasActive=callModeActive;
+   if(next.startsWith("CALL_"))callModeActive=next!="CALL_OFF" && next!="CALL_ERROR";
+   else if(next.isEmpty())callModeActive=false;
+   if(!callModeActive){callFaceMood=1;callFacePreviousMood=1;callFaceTransitionStart=0;callLipLevel=0;callCaption="";callCaptionPrevious="";}
+   if(next!=kittyActivity || wasActive!=callModeActive){
+    kittyActivity=next;if(lcdReady)redrawCurrent();
+   }
+  }
+  else if(f.type=="CALL_MOOD"){
+   // AI expressions never overwrite the user's regular persisted mood.
+   if(callModeActive && f.payload.length()>=1 && f.payload.length()<=2 &&
+      f.payload.toInt()>=0 && f.payload.toInt()<=15){
+    uint8_t next=(uint8_t)f.payload.toInt();
+    callFaceMoodSince=millis();
+    if(callFaceMood!=next){
+     callFacePreviousMood=callFaceMood;
+     callFaceMood=next;
+     callFaceTransitionStart=millis();
+     if(lcdReady)redrawCurrent();
+    }
+   }
+  }
+  else if(f.type=="SD_USAGE"){
+   int sep=f.payload.indexOf(':');
+   if(sep>0 && sep<=10 && f.payload.length()<=22){
+    sdUsedKB=(uint32_t)strtoul(f.payload.substring(0,sep).c_str(),nullptr,10);
+    sdTotalKB=(uint32_t)strtoul(f.payload.substring(sep+1).c_str(),nullptr,10);
+    sdUsageReported=true;
+    if(batteryOverlayUntil && lcdReady)redrawCurrent();
+   }
+  }
+  else if(f.type=="SD_STATE"){
+   int code=f.payload.toInt();
+   if(code>=1 && code<=4){
+    sdCardNoticeState=(uint8_t)code;
+    sdCardNoticeUntil=millis()+(code==3?90000UL:6000UL);
+    if(lcdReady)redrawCurrent();
+   }
+  }
+  else if(f.type=="CALL_TEXT"){
+   if(callModeActive && f.payload.length()>=2 && f.payload.length()<=80){
+    const char mode=f.payload[0];
+    if(mode=='0' || mode=='1'){
+     if(mode=='0'){callCaptionPrevious=callCaption;callCaption="";}
+     if(callCaption.length()+f.payload.length()-1<=768)
+      callCaption+=f.payload.substring(1);
+     if(lcdReady)redrawCurrent();
+    }
+   }
+  }
+  else if(f.type=="CALL_LIP"){
+   if(callModeActive && f.payload.length()==1 &&
+      f.payload[0]>='0'&&f.payload[0]<='9'){
+    uint8_t next=(uint8_t)(f.payload[0]-'0');
+    callLipAt=millis();
+    if(callLipLevel!=next){callLipLevel=next;if(lcdReady)redrawCurrent();}
+   }
   }
   else if(f.type=="AI_BEGIN"){
    if(!lcdReady){CuteLink::send(Serial1,f.seq,"NACK","DISPLAY");}
@@ -2840,6 +3044,7 @@ static void serviceBrain() {
  }
  uint32_t now=millis();
  if(s3Online&&(uint32_t)(now-lastS3)>BRAIN_LOST_MS){
+  callModeActive=false;callFaceMood=1;callLipLevel=0;
   s3Online=false;
   lastProbeAck=0;
   pendingProbeSeq=0;
@@ -2991,8 +3196,9 @@ void loop(){
   }
   if(lcdReady)redrawCurrent();
  }
- // Dedicated BOOT GPIO28: press interrupts speech; short tap stops,
- // hold 320ms starts recording; release sends captured speech.
+ // Dedicated BOOT GPIO28: short tap toggles Call Mode ON/OFF.
+ // Long hold (>=320 ms) is legacy manual PTT only while Call Mode is OFF.
+ // No press-down interruption: otherwise short taps cancel the current speech.
  bool voiceRaw=digitalRead(PIN_VOICE_BUTTON);
  if(voiceRaw!=voiceButtonLastRaw){voiceButtonChangedAt=now;voiceButtonLastRaw=voiceRaw;}
  if(now-voiceButtonChangedAt>=35 && voiceRaw!=voiceButtonStable){
@@ -3001,10 +3207,18 @@ void loop(){
    voiceButtonHeldAt=now;
    voiceButtonHoldStarted=false;
    voiceButtonSession=s3Online;
-   if(s3Online)toS3("VOICE_INTERRUPT");
   }else{
-   if(voiceButtonHoldStarted && voiceButtonSession && s3Online)toS3("VOICE_STOP");
-   else if(voiceButtonSession && s3Online)toS3("VOICE_CANCEL");
+   if(voiceButtonSession && s3Online){
+    if(voiceButtonHoldStarted){
+     if(!callModeActive)toS3("VOICE_STOP");
+    }else{
+     toS3("CALL_TOGGLE");
+     // Optimistic local state for the very next press, corrected by S3 ACTIVITY.
+     callModeActive=!callModeActive;
+     callFaceMood=1;callFaceMoodSince=now;callLipLevel=0;
+     if(lcdReady)redrawCurrent();
+    }
+   }
    voiceButtonSession=false;
    voiceButtonHoldStarted=false;
    voiceButtonHeldAt=0;
@@ -3013,7 +3227,10 @@ void loop(){
  if(voiceButtonStable==LOW && voiceButtonSession && !voiceButtonHoldStarted &&
     (uint32_t)(now-voiceButtonHeldAt)>=320UL){
   voiceButtonHoldStarted=true;
-  if(s3Online)toS3("VOICE_START");
+  if(s3Online && !callModeActive){
+   toS3("VOICE_INTERRUPT");
+   toS3("VOICE_START");
+  }
  }
  if(now-lastBatteryRead>=BATTERY_SAMPLE_MS){
   lastBatteryRead=now;
@@ -3026,6 +3243,12 @@ void loop(){
  if(batteryOverlayUntil && (int32_t)(now-batteryOverlayUntil)>=0){
   batteryOverlayUntil=0;redrawCurrent();
  }
+ if(factSavedToastUntil && (int32_t)(now-factSavedToastUntil)>=0){
+  factSavedToastUntil=0;if(lcdReady)redrawCurrent();
+ }
+ if(sdCardNoticeState && (int32_t)(now-sdCardNoticeUntil)>=0){
+  sdCardNoticeState=0;if(lcdReady)redrawCurrent();
+ }
  if(fullNoticeUntil && (int32_t)(now-fullNoticeUntil)>=0){fullNoticeUntil=0;redrawCurrent();}
  if(lowNoticeUntil && (int32_t)(now-lowNoticeUntil)>=0){lowNoticeUntil=0;redrawCurrent();}
  if(chargeNoticeUntil && (int32_t)(now-chargeNoticeUntil)>=0){
@@ -3036,6 +3259,12 @@ void loop(){
   lastBatteryOverlayFrame=now;
   if(!batteryOverlayUntil)redrawCurrent();
  }
+ if(callModeActive){
+  // Hold selected emotion for the whole spoken reply; S3 resets on playback drain.
+  if(callLipLevel && (uint32_t)(now-callLipAt)>500UL){
+   callLipLevel=0;if(lcdReady)redrawCurrent();
+  }
+ }
  // Surprise actions start at randomized intervals and automatically end.
  // They never alter the user's chosen mood or mascot.
  if(!nextSurpriseAt)scheduleNextSurprise(millis());
@@ -3043,13 +3272,13 @@ void loop(){
   surpriseAction=0;
   scheduleNextSurprise(millis());
   if(mascotVisible && !scrolling)redrawCurrent();
- }else if(surprisesEnabled && mascotVisible && !surpriseAction
+ }else if(surprisesEnabled && mascotVisible && !callModeActive && !surpriseAction
           && (int32_t)(millis()-nextSurpriseAt)>=0){
   surpriseAction=choosePerformance((esp_random()%3)==0);
   surpriseStart=millis();
   if(!scrolling)redrawCurrent();
  }
- if(mascotVisible && millis()-lastMascotAnimation>=MASCOT_ANIMATION_MS){
+ if((mascotVisible || callModeActive) && millis()-lastMascotAnimation>=MASCOT_ANIMATION_MS){
   lastMascotAnimation=millis();animPhase=(animPhase+1)%32;
   updateExpressiveEyes(lastMascotAnimation);
   // The scrolling message already redraws frequently; avoid unnecessary transfers.
@@ -3104,7 +3333,7 @@ void loop(){
   if(remaining<=0){sleepMs=1;return;}
   if((uint32_t)remaining<sleepMs)sleepMs=(uint32_t)remaining;
  };
- if(mascotVisible)untilDue(lastMascotAnimation+MASCOT_ANIMATION_MS);
+ if(mascotVisible || callModeActive)untilDue(lastMascotAnimation+MASCOT_ANIMATION_MS);
  if(scrolling)untilDue(lastScroll+55UL);
  if((bubbleEnabled && bubbleTypewriter || aiScrollMode) &&
     revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+(aiScrollMode?65UL:BUBBLE_LETTER_MS));

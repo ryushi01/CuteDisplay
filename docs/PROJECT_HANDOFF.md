@@ -1,3 +1,5 @@
+> **Latest handoff 2026-10-29:** Read [VALIDATED_SYSTEM_CHECKPOINT_2026-10-29.md](VALIDATED_SYSTEM_CHECKPOINT_2026-10-29.md) first. Earlier portions of this document are dated development history, not current installation instructions.
+
 ## 2026-10-27 — AI integration phase 1: Open WebUI text chat (pending iPhone test)
 
 Topology confirmed by user: **Open WebUI runs on AI-SERVER**; **Ollama and real-time voice services run on the MacBook**; voice conversations already work via Open WebUI. Preserve the existing server setup and avoid assuming Ollama lives on AI-SERVER. S3 Brain and Kitty communicate over encrypted BLE/UART.

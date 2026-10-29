@@ -1,0 +1,24 @@
+# Opt-in extension of the user's EXISTING Open WebUI Docker image.
+# Keeps the SAME host, port, HTTP REST and Realtime WSS endpoints.
+# Never deploy automatically. BASE_IMAGE must be an explicitly pinned image.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG ORIGINAL_USER=0:0
+USER 0:0
+COPY server/patch_openwebui_realtime_api_key.py /tmp/cutedisplay-openwebui-patch.py
+# Fail fast when the installed Open WebUI source does not match reviewed API.
+RUN python /tmp/cutedisplay-openwebui-patch.py --source-root /app --check && \
+    python /tmp/cutedisplay-openwebui-patch.py --source-root /app --apply && \
+    python -m py_compile /app/backend/open_webui/routers/audio/realtime.py && \
+    rm /tmp/cutedisplay-openwebui-patch.py
+COPY server/patch_openwebui_barge_in.py /tmp/cutedisplay-barge-in-patch.py
+RUN python /tmp/cutedisplay-barge-in-patch.py --source-root /app --check && \
+    python /tmp/cutedisplay-barge-in-patch.py --source-root /app --apply && \
+    python -m py_compile /app/backend/open_webui/routers/audio/realtime.py && \
+    rm /tmp/cutedisplay-barge-in-patch.py
+COPY server/patch_openwebui_conversation_v2.py /tmp/cutedisplay-conversation-v2.py
+RUN python /tmp/cutedisplay-conversation-v2.py --source-root /app --check && \
+    python /tmp/cutedisplay-conversation-v2.py --source-root /app --apply && \
+    python -m py_compile /app/backend/open_webui/routers/audio/realtime.py && \
+    rm /tmp/cutedisplay-conversation-v2.py
+USER ${ORIGINAL_USER}

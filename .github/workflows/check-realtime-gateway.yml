@@ -1,0 +1,130 @@
+name: Check Realtime gateway and iPhone pairing source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/realtime-call-c5v21, feature/realtime-kitty-fullscreen-expressions]
+    paths:
+      - 'gateway/**'
+      - 'server/**'
+      - 'ios/CuteDisplay/**'
+      - '.github/workflows/check-realtime-gateway.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install WebSocket client/server
+        run: python -m pip install 'websockets>=14,<17'
+      - name: Syntax check
+        run: python -m compileall -q gateway
+      - name: Unit tests — no accounts or network needed
+        run: python -m unittest discover -s gateway -p 'test_*.py' -v
+      - name: Ensure no credentials accidentally committed
+        run: |
+          test ! -e gateway/private-config.json
+          ! grep -R -E 'shana\.deroose@gmail\.com|sk-[A-Za-z0-9]{32}' gateway/ --include='*.py'
+
+  ios-parse:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse SwiftUI source (existing Xcode project is not in repository)
+        run: |
+          xcrun swiftc -frontend -parse ios/CuteDisplay/ContentView.swift
+          xcrun swiftc -frontend -parse ios/CuteDisplay/BluetoothManager.swift
+      - name: Typecheck the paired iPhone source files against iOS Simulator SDK
+        run: |
+          SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun swiftc -typecheck \
+            -target arm64-apple-ios18.0-simulator \
+            -sdk "$SDK" \
+            ios/CuteDisplay/BluetoothManager.swift \
+            ios/CuteDisplay/ContentView.swift
+
+  server-auth-patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile direct WebUI realtime auth patch
+        run: python -m py_compile server/patch_openwebui_realtime_api_key.py
+      - name: Validate existing-Compose safe deployment and rollback script shell syntax
+        run: |
+          bash -n server/deploy_existing_openwebui.sh
+          bash -n server/create_verified_openwebui_backup.sh
+          bash -n server/upgrade_kitty_expressions.sh
+      - name: Regression — never trust or restore a truncated gzip archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          printf 'valid known user data' > "$scratch/user-data.txt"
+          tar -czf "$scratch/valid.tar.gz" -C "$scratch" user-data.txt
+          gzip -t "$scratch/valid.tar.gz"
+          tar -tzf "$scratch/valid.tar.gz" >/dev/null
+          size="$(stat -c %s "$scratch/valid.tar.gz")"
+          head -c "$(( size - 4 ))" "$scratch/valid.tar.gz" > "$scratch/incomplete.tar.gz"
+          if gzip -t "$scratch/incomplete.tar.gz" >/dev/null 2>&1; then
+            echo "ERROR: truncated gzip passed integrity verification"
+            exit 1
+          fi
+          grep -Fq 'gzip -t "$BACKUP/openwebui-data.tar.gz.partial"' server/create_verified_openwebui_backup.sh
+          grep -Fq 'sudo sha256sum -c SHA256SUMS' server/deploy_existing_openwebui.sh
+          ! grep -Fq 'tar -czf "$BACKUP/openwebui-data.tar.gz"' server/deploy_existing_openwebui.sh
+      - name: Regression — root-owned Compose backup must not block unprivileged chmod
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          trap 'sudo rm -rf "$scratch"' EXIT
+          sudo install -m 600 /dev/null "$scratch/docker-compose.yaml"
+          touch "$scratch/candidate.yaml" "$scratch/rollback.yaml"
+          chmod 600 "$scratch/candidate.yaml" "$scratch/rollback.yaml"
+          test "$(stat -c '%a' "$scratch/candidate.yaml")" = 600
+          test "$(sudo stat -c '%a' "$scratch/docker-compose.yaml")" = 600
+          grep -Fq 'chmod 600 "$BACKUP/rollback.yaml" "$BACKUP/candidate.yaml"' server/create_verified_openwebui_backup.sh
+          ! grep -Fq 'chmod 600 "$BACKUP"/*.yaml' server/create_verified_openwebui_backup.sh
+      - name: Test version guard and API-key permission delegation
+        run: python -m unittest discover -s server -p 'test_*.py' -v
+      - name: Compile patch against actual upstream Open WebUI source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/owui-src/backend/open_webui/routers/audio
+          curl --fail --show-error --silent --location \
+            https://raw.githubusercontent.com/open-webui/open-webui/main/backend/open_webui/routers/audio/realtime.py \
+            -o /tmp/owui-src/backend/open_webui/routers/audio/realtime.py
+          python server/patch_openwebui_realtime_api_key.py --source-root /tmp/owui-src --check
+          python server/patch_openwebui_realtime_api_key.py --source-root /tmp/owui-src --apply
+          python -m py_compile /tmp/owui-src/backend/open_webui/routers/audio/realtime.py
+          # Reapplying on an already-auth-patched server must preserve the
+          # exact authenticated endpoint, and must not duplicate the tool.
+          python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          import sys
+          path=Path("server/patch_openwebui_realtime_api_key.py")
+          spec=importlib.util.spec_from_file_location("kitty_patch",path)
+          mod=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          installed=Path("/tmp/owui-src/backend/open_webui/routers/audio/realtime.py").read_text()
+          assert installed.count(mod.MARKER)==1
+          assert installed.count(mod.EXPRESSION_MARKER)==1
+          assert mod.patch(installed)==installed
+          pristine=Path("/tmp/owui-src/backend/open_webui/routers/audio/realtime.py.cutedisplay-original").read_text()
+          already_authenticated=mod.patch_authentication(pristine)
+          assert mod.patch(already_authenticated)==installed
+          print("PASS: pristine and already-auth-patched server both produce identical expression extension")
+          PY
+          CUTEDISPLAY_PATCHED_REALTIME=/tmp/owui-src/backend/open_webui/routers/audio/realtime.py python -m unittest server.test_realtime_expression_contract -v

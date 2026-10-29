@@ -17,6 +17,7 @@ static uint32_t recoveryAt=0;
 static bool recoveryAttempted=false;
 static uint32_t currentVersion=0;
 static uint32_t slotCapacity=0;
+static uint16_t negotiatedBlockBytes=40;
 inline bool updating(){
  return stage==BEGIN||stage==DATA||stage==END||stage==WAIT_BOOT;
 }
@@ -72,11 +73,11 @@ inline void block(Stream &uart){
  if(position>=targetSize){
   stage=END;send(uart,"OTA_END","");return;
  }
- size_t count=min((size_t)40,(size_t)(targetSize-position));
+ size_t count=min((size_t)negotiatedBlockBytes,(size_t)(targetSize-position));
  char off[9];snprintf(off,sizeof(off),"%08lX",(unsigned long)position);
  const char *hex="0123456789ABCDEF";
  String payload=String(off)+",";
- payload.reserve(89);
+ payload.reserve(9+count*2);
  for(size_t i=0;i<count;++i){
   uint8_t byte=C5Image::bytes[position+i];
   payload+=hex[byte>>4];payload+=hex[byte&15];
@@ -96,10 +97,19 @@ inline void onFrame(Stream &uart,const CuteLink::Frame &f){
  if(f.type=="OTA_INFO"&&(stage==QUERY||stage==WAIT_BOOT)){
   pending=0;
   int comma=f.payload.indexOf(',');
+  int second=f.payload.indexOf(',',comma+1);
+  String slotText=second<0?f.payload.substring(comma+1):f.payload.substring(comma+1,second);
+  String blockText=second<0?"":f.payload.substring(second+1);
   if(comma<1||!decimal(f.payload.substring(0,comma))||
-    !decimal(f.payload.substring(comma+1))){fail("INFO_FORMAT");return;}
+    !decimal(slotText)||(second>=0&&!decimal(blockText))){fail("INFO_FORMAT");return;}
   currentVersion=strtoul(f.payload.substring(0,comma).c_str(),nullptr,10);
-  slotCapacity=strtoul(f.payload.substring(comma+1).c_str(),nullptr,10);
+  slotCapacity=strtoul(slotText.c_str(),nullptr,10);
+  negotiatedBlockBytes=40;
+  if(second>=0){
+    uint32_t advertised=strtoul(blockText.c_str(),nullptr,10);
+    if(advertised>=40 && advertised<=160)negotiatedBlockBytes=(uint16_t)advertised;
+  }
+  Serial.printf("[S3 OTA] C5 agreed OTA block=%u bytes\\n",(unsigned)negotiatedBlockBytes);
   Serial.printf("[S3 OTA] C5 reports v%lu, OTA slot=%lu bytes\n",
       (unsigned long)currentVersion,(unsigned long)slotCapacity);
   if(stage==WAIT_BOOT){

@@ -48,7 +48,7 @@ inline void clear(){
 inline void onFrame(Stream &uart,const CuteLink::Frame &f){
  if(f.type=="OTA_QUERY"){
   const esp_partition_t *slot=esp_ota_get_next_update_partition(nullptr);
-  String info=String(C5_FIRMWARE_VERSION)+","+String(slot?slot->size:0);
+  String info=String(C5_FIRMWARE_VERSION)+","+String(slot?slot->size:0)+",160";
   CuteLink::send(uart,f.seq,"OTA_INFO",info);
   return;
  }
@@ -99,7 +99,7 @@ inline void onFrame(Stream &uart,const CuteLink::Frame &f){
  }
  if(f.type=="OTA_DATA"){
   if(phase!=RECEIVING){respond(uart,f.seq,false,"NOT_STARTED");return;}
-  if(f.payload.length()<11||f.payload.length()>89||f.payload[8]!=','||
+  if(f.payload.length()<11||f.payload.length()>329||f.payload[8]!=','||
      ((f.payload.length()-9)%2)!=0){
    respond(uart,f.seq,false,"FORMAT");return;
   }
@@ -110,14 +110,14 @@ inline void onFrame(Stream &uart,const CuteLink::Frame &f){
    offset=(offset<<4)|(uint32_t)d;
   }
   size_t n=(f.payload.length()-9)/2;
-  if(n<1||n>40){respond(uart,f.seq,false,"SIZE");return;}
+  if(n<1||n>160){respond(uart,f.seq,false,"SIZE");return;}
   if(offset==previousOffset && n==previousLength && offset+n==received){
    respond(uart,f.seq,true,"DATA");return;
   }
   if(offset!=received||received+n>imageBytes){
    respond(uart,f.seq,false,"OFFSET");return;
   }
-  uint8_t buffer[40];
+  uint8_t buffer[160];
   for(size_t j=0;j<n;++j){
    int hi=unhex(f.payload[9+j*2]),lo=unhex(f.payload[10+j*2]);
    if(hi<0||lo<0){respond(uart,f.seq,false,"HEX");return;}

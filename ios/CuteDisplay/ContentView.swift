@@ -115,7 +115,7 @@ struct ContentView: View {
     private let clockZones = ["Japan (JST)", "UTC", "Central Europe (CET/CEST)",
                               "US Eastern", "US Pacific", "United Kingdom", "Australia Sydney"]
     @State private var aiServer = UserDefaults.standard.string(forKey: "cuteAIServer") ?? ""
-    @State private var aiModel = UserDefaults.standard.string(forKey: "cuteAIModel") ?? ""
+    @State private var aiModel = UserDefaults.standard.string(forKey: "cuteAIModel") ?? "cutedisplay-ai"
     @State private var aiAPIKey = CuteAISecret.load()
     @State private var aiQuestion = ""
     @State private var lastSubmittedAIQuestion = ""
@@ -818,17 +818,55 @@ struct ContentView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
-            SecureField("Open WebUI API key", text: $aiAPIKey)
+            SecureField("Open WebUI user API key (sk-)", text: $aiAPIKey)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
-            Button("Save AI connection") {
-                UserDefaults.standard.set(aiServer, forKey: "cuteAIServer")
-                UserDefaults.standard.set(aiModel, forKey: "cuteAIModel")
-                CuteAISecret.save(aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
-                aiStatus = "Connection settings saved on iPhone"
+            Text("Normal Kitty AI and realtime voice calls use the same Open WebUI user API key. The iPhone stores it in Keychain and sends it to S3 over encrypted Bluetooth; browser 2FA stays unchanged.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Button("Save Open WebUI connection") {
+                let server = aiServer.trimmingCharacters(in: .whitespacesAndNewlines)
+                let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+                let key = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard server.hasPrefix("https://"), !server.contains("@"),
+                      !model.isEmpty, key.hasPrefix("sk-"),
+                      key.utf8.count > 20, key.utf8.count <= 8192 else {
+                    aiStatus = "Enter HTTPS URL, model ID and complete Open WebUI sk- user API key"
+                    return
+                }
+                UserDefaults.standard.set(server, forKey: "cuteAIServer")
+                UserDefaults.standard.set(model, forKey: "cuteAIModel")
+                CuteAISecret.save(key)
+                if bluetooth.bluetoothBrainConnected {
+                    bluetooth.saveBrainAIConnection(url: server, model: model, key: key)
+                    aiStatus = "Provisioning URL, model and shared realtime API key over encrypted BLE; check command status for errors"
+                } else {
+                    aiStatus = "Saved on iPhone. Connect S3 over Bluetooth and tap Save again to transfer."
+                }
             }
             .buttonStyle(.bordered)
+            Button {
+                let key = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard key.hasPrefix("sk-"), key.utf8.count > 20,
+                      key.utf8.count <= 8192 else {
+                    aiStatus = "Enter a complete Open WebUI sk- user API key before syncing"
+                    return
+                }
+                CuteAISecret.save(key)
+                bluetooth.saveBrainAIKey(key)
+                aiStatus = "Syncing the shared AI/realtime key to S3 over encrypted BLE. Existing URL and model are unchanged."
+            } label: {
+                Label("Update API Key on S3", systemImage: "key.fill")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!bluetooth.bluetoothBrainConnected)
+            Text("Changed the key? Connect S3 Bluetooth and tap Update API Key on S3. End any active call first; the new key applies to the next call.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("S3 API key: " + bluetooth.brainAIKeyStatus)
+                .font(.caption2)
+                .foregroundStyle(bluetooth.brainAIKeyStatus.hasPrefix("Confirmed:") ? Color.green : Color.secondary)
             HStack(spacing: 10) {
                 Label("Conversation", systemImage: "bubble.left.and.bubble.right")
                     .font(.subheadline.bold())
@@ -930,7 +968,7 @@ struct ContentView: View {
             Text("Bluetooth transport: " + bluetooth.status)
                 .font(.caption2).foregroundStyle(.secondary)
             Text(aiStatus).font(.caption2).foregroundStyle(.secondary)
-            Text("Phase 1: text via Open WebUI on AI-SERVER. Ollama and voice services stay on your MacBook. Use HTTPS to protect the API key; voice streaming is not enabled yet.")
+            Text("Realtime voice (experimental): S3 uses the same HTTPS Open WebUI server and saved sk- key. Server authentication passed; physical mic and speaker operation still needs testing.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding()

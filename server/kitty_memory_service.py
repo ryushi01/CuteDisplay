@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""Kitty Memory v1 storage API. Standard library only; bind localhost by default."""
+import argparse, json, os, queue, re, sqlite3, threading, time
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+MAX_BODY = 16384
+DB = os.environ.get("KITTY_MEMORY_DB", os.path.expanduser("~/.local/share/cutedisplay/memory.sqlite3"))
+TOKEN = os.environ.get("KITTY_MEMORY_TOKEN", "")
+WRITE_Q = queue.Queue(maxsize=256)
+LOCK = threading.Lock()
+
+def connect():
+    db = sqlite3.connect(DB, timeout=3)
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA busy_timeout=3000")
+    return db
+
+def init():
+    os.makedirs(os.path.dirname(DB), exist_ok=True)
+    with connect() as db:
+        db.executescript("""
+        CREATE TABLE IF NOT EXISTS memories (
+          id INTEGER PRIMARY KEY, topic TEXT NOT NULL, detail TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'user', updated_at TEXT NOT NULL,
+          deleted INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(topic,detail,content='memories',content_rowid='id');
+        CREATE TRIGGER IF NOT EXISTS mem_insert AFTER INSERT ON memories BEGIN
+          INSERT INTO memories_fts(rowid,topic,detail) VALUES(new.id,new.topic,new.detail);
+        END;
+        CREATE TRIGGER IF NOT EXISTS mem_delete AFTER DELETE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts,rowid,topic,detail) VALUES('delete',old.id,old.topic,old.detail);
+        END;
+        CREATE TRIGGER IF NOT EXISTS mem_update AFTER UPDATE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts,rowid,topic,detail) VALUES('delete',old.id,old.topic,old.detail);
+          INSERT INTO memories_fts(rowid,topic,detail) VALUES(new.id,new.topic,new.detail);
+        END;
+        CREATE TABLE IF NOT EXISTS conversation_archive (
+          id INTEGER PRIMARY KEY, ts TEXT NOT NULL, speaker TEXT NOT NULL, text TEXT NOT NULL
+        );
+        """)
+
+def store(kind, payload):
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        if kind == "turn":
+            text = str(payload.get("text",""))[:4096]
+            speaker = str(payload.get("speaker",""))[:24]
+            if text and speaker in ("user","assistant"):
+                db.execute("INSERT INTO conversation_archive(ts,speaker,text) VALUES(?,?,?)",(now,speaker,text))
+        elif kind == "remember":
+            topic = str(payload.get("topic","")).strip()[:120]
+            detail = str(payload.get("detail","")).strip()[:1000]
+            if topic and detail:
+                # Same topic updates the previous fact; prevents accumulating contradictions.
+                old = db.execute("SELECT id FROM memories WHERE topic=? AND deleted=0 ORDER BY id DESC LIMIT 1",(topic,)).fetchone()
+                if old:
+                    db.execute("UPDATE memories SET detail=?,updated_at=?,source=? WHERE id=?",
+                               (detail,now,"user",old[0]))
+                else:
+                    db.execute("INSERT INTO memories(topic,detail,source,updated_at) VALUES(?,?,?,?)",
+                               (topic,detail,"user",now))
+        elif kind == "forget":
+            mid = payload.get("id")
+            if isinstance(mid,int) and mid>0:
+                db.execute("UPDATE memories SET deleted=1,updated_at=? WHERE id=?",(now,mid))
+
+def writer():
+    while True:
+        kind, data = WRITE_Q.get()
+        try:
+            store(kind,data)
+        except Exception as exc:
+            print("memory write failed:",repr(exc),flush=True)
+        finally:
+            WRITE_Q.task_done()
+
+def recall(query, limit=4):
+    terms = re.findall(r"[\w]+",query,flags=re.UNICODE)[:12]
+    if not terms:return []
+    expr = " OR ".join('"'+t.replace('"','')+'"' for t in terms if t)
+    if not expr:return []
+    with connect() as db:
+        rows = db.execute("""SELECT m.id,m.topic,m.detail,m.updated_at FROM memories_fts f
+             JOIN memories m ON m.id=f.rowid WHERE memories_fts MATCH ? AND m.deleted=0
+             ORDER BY bm25(memories_fts) LIMIT ?""",(expr,min(6,max(1,int(limit))))).fetchall()
+    return [dict(zip(("id","topic","detail","updated_at"),row)) for row in rows]
+
+class Handler(BaseHTTPRequestHandler):
+    def _reply(self,status,obj):
+        blob=json.dumps(obj,ensure_ascii=False).encode()
+        self.send_response(status);self.send_header("Content-Type","application/json; charset=utf-8")
+        self.send_header("Content-Length",str(len(blob)))
+        self.end_headers();self.wfile.write(blob)
+    def do_GET(self):
+        if self.path=="/health":return self._reply(200,{"ok":True,"pending":WRITE_Q.qsize()})
+        self._reply(404,{"error":"not_found"})
+    def do_POST(self):
+        if not TOKEN or self.headers.get("Authorization")!="Bearer "+TOKEN:
+            return self._reply(401,{"error":"unauthorized"})
+        try:
+            length=int(self.headers.get("Content-Length","0"))
+            if length<2 or length>MAX_BODY:return self._reply(413,{"error":"invalid_length"})
+            data=json.loads(self.rfile.read(length))
+            if not isinstance(data,dict):raise ValueError("Expected object")
+            if self.path=="/recall":
+                return self._reply(200,{"memories":recall(str(data.get("query",""))[:500])})
+            if self.path in ("/turn","/remember","/forget"):
+                try: WRITE_Q.put_nowait((self.path[1:],data))
+                except queue.Full:return self._reply(503,{"error":"queue_full"})
+                return self._reply(202,{"queued":True})
+            return self._reply(404,{"error":"not_found"})
+        except (ValueError,TypeError,json.JSONDecodeError,sqlite3.Error) as exc:
+            return self._reply(400,{"error":str(exc)[:120]})
+    def log_message(self,*args):pass
+
+def main():
+    ap=argparse.ArgumentParser()
+    ap.add_argument("--host",default="127.0.0.1")
+    ap.add_argument("--port",type=int,default=8766)
+    args=ap.parse_args()
+    if not TOKEN:raise SystemExit("Set KITTY_MEMORY_TOKEN first")
+    init()
+    threading.Thread(target=writer,daemon=True).start()
+    print("Kitty Memory storage ready",args.host,args.port,flush=True)
+    ThreadingHTTPServer((args.host,args.port),Handler).serve_forever()
+if __name__=="__main__":main()

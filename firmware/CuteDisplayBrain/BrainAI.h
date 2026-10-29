@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <esp_http_client.h>
+#include <esp_heap_caps.h>
 #include <esp_crt_bundle.h>
 #include <cJSON.h>
 #include <time.h>
@@ -11,11 +12,19 @@
 #include <freertos/queue.h>
 #include "CuteLink.h"
 #include "BrainTTS.h"
+#include "KittyMemory.h"
 
 namespace BrainAI {
 struct Packet { char kind[12]; char text[81]; };
 static QueueHandle_t out=nullptr;
 static QueueHandle_t statusOut=nullptr;
+struct LiveText { char text[97]; };
+static QueueHandle_t liveTextQueue=nullptr;
+inline bool takeCallStream(String &text){
+ LiveText item={};
+ if(!liveTextQueue || xQueueReceive(liveTextQueue,&item,0)!=pdTRUE)return false;
+ text=String(item.text);return true;
+}
 inline void report(const char *state){if(statusOut){char entry[36]={};strlcpy(entry,state,sizeof(entry));xQueueSend(statusOut,entry,0);}}
 inline bool takeStatus(String &value){char entry[36]={};if(!statusOut||xQueueReceive(statusOut,entry,0)!=pdTRUE)return false;value=String("AI:STATUS:")+entry;return true;}
 
@@ -35,6 +44,11 @@ static size_t historyCount=0;
 static String currentAnswer;
 static String voicePrompt;
 static bool voicePromptPending=false;
+// Single bounded result from a voice call's chat-model delegation (no extra TTS).
+static volatile bool callResultReady=false;
+static volatile bool callDelegated=false;
+static bool callResultOK=false;
+static String callResultText;
 static constexpr uint64_t CONVERSATION_LIFETIME_SECONDS=86400ULL;
 static uint64_t conversationStarted=0;
 static bool historyLoaded=false;
@@ -118,7 +132,11 @@ static String provisioningField,provisioningBuffer;
 static size_t provisioningExpected=0;
 static uint32_t provisioningAt=0;
 
-inline void init(){if(!out)out=xQueueCreate(16,sizeof(Packet));if(!statusOut)statusOut=xQueueCreate(12,36);}
+inline void init(){
+ if(!out)out=xQueueCreate(16,sizeof(Packet));
+ if(!statusOut)statusOut=xQueueCreate(12,36);
+ if(!liveTextQueue)liveTextQueue=xQueueCreate(16,sizeof(LiveText));
+}
 inline bool sendPacket(const char *kind,const String &payload) {
  if(!out || payload.length()>80)return false;
  Packet row={};
@@ -157,6 +175,25 @@ inline void processSSELine(String line){
  if(cJSON_IsString(txt) && txt->valuestring){
   // Single stream delta; never split a multi-byte Unicode scalar on the UART.
   String chunk(txt->valuestring);
+  // An independent bounded queue lets Call Mode display each LLM delta
+  // before delegation completes, without reading cross-core Strings.
+  if(callDelegated && liveTextQueue && chunk.length()){
+   size_t at=0;
+   while(at<chunk.length()){
+    size_t len=min((size_t)92,chunk.length()-at);
+    if(at+len<chunk.length())
+     while(len>0 && ((uint8_t)chunk[at+len]&0xC0)==0x80)len--;
+    if(!len)break;
+    LiveText item={};
+    chunk.substring(at,at+len).toCharArray(item.text,sizeof(item.text));
+    if(xQueueSend(liveTextQueue,&item,0)!=pdTRUE){
+     LiveText old={};
+     (void)xQueueReceive(liveTextQueue,&old,0);
+     (void)xQueueSend(liveTextQueue,&item,0);
+    }
+    at+=len;
+   }
+  }
   if(currentAnswer.length()<HISTORY_RESPONSE_LIMIT){
    size_t available=HISTORY_RESPONSE_LIMIT-currentAnswer.length();
    size_t n=min(available,chunk.length());
@@ -211,6 +248,7 @@ static esp_err_t event(esp_http_client_event_t *e){
  return ESP_OK;
 }
 inline void run(void*){
+ const bool delegated=callDelegated;
  Preferences prefs;String url,model,key,prompt;
  if(prefs.begin("brain-ai",true)){
   url=prefs.getString("url","");
@@ -226,6 +264,8 @@ inline void run(void*){
     prompt.isEmpty()){
   Serial.println("[AI] HTTPS, WiFi or saved configuration missing");
   report(WiFi.status()!=WL_CONNECTED?"WIFI_ERROR":"CONFIG_ERROR");
+  if(delegated){callResultText="";callResultOK=false;callResultReady=true;callDelegated=false;}
+  if(delegated){callResultText="";callResultOK=false;callResultReady=true;callDelegated=false;}
   sendPacket("AI_END","");
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
@@ -262,6 +302,28 @@ inline void run(void*){
   cJSON_AddStringToObject(a,"content",history[i].assistant.c_str());
   cJSON_AddItemToArray(msgs,a);
  }
+ // Search the entire SD index asynchronously; wait at most 40ms.
+ // A slow or busy card never blocks the model beyond this fixed deadline.
+ uint32_t searchId=KittyMemory::requestSearch(prompt);
+ String remembered=KittyMemory::factSummary()+KittyMemory::recall(prompt);
+ if(searchId){
+  uint32_t began=millis();
+  while((uint32_t)(millis()-began)<40UL){
+   String old=KittyMemory::takeSearch(searchId);
+   if(!old.isEmpty()){
+    remembered=old;break;
+   }
+   vTaskDelay(pdMS_TO_TICKS(5));
+  }
+ }
+ remembered=KittyMemory::clipUTF8(remembered,850);
+ if(!remembered.isEmpty()){
+  cJSON *memory=cJSON_CreateObject();
+  cJSON_AddStringToObject(memory,"role","system");
+  String note="Relevant local SD memory excerpts (may be outdated; prefer the user's newest corrections):\n"+remembered;
+  cJSON_AddStringToObject(memory,"content",note.c_str());
+  cJSON_AddItemToArray(msgs,memory);
+ }
  cJSON *m=cJSON_CreateObject();
  cJSON_AddStringToObject(m,"role","user");
  cJSON_AddStringToObject(m,"content",prompt.c_str());
@@ -274,7 +336,8 @@ inline void run(void*){
   cfg.crt_bundle_attach=esp_crt_bundle_attach;
   cfg.event_handler=event;
   cfg.timeout_ms=60000;
-  cfg.buffer_size=4096;
+  cfg.buffer_size=2048;
+  cfg.buffer_size_tx=1024;
   esp_http_client_handle_t http=esp_http_client_init(&cfg);
   if(http){
    String auth="Bearer "+key;
@@ -283,8 +346,35 @@ inline void run(void*){
    esp_http_client_set_header(http,"Content-Type","application/json");
    esp_http_client_set_header(http,"Accept","text/event-stream");
    esp_http_client_set_post_field(http,json,strlen(json));
+   // TLS -0x7F00 means allocation failure; log INTERNAL capacity,
+   // not combined PSRAM heap, to separate fragmentation from network errors.
+   Serial.printf("[AI TLS] before: internal_free=%lu largest_internal=%lu psram_free=%lu\\n",
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
    esp_err_t rc=esp_http_client_perform(http);
    int code=esp_http_client_get_status_code(http);
+   // If TLS setup exhausted the internal heap before any HTTP response,
+   // retry only once after the first transport has fully cleaned up.
+   // Never retry a response that delivered output: that repeats AI speech.
+   if(rc!=ESP_OK && code==0 && emittedBytes==0 && !cancelRequested){
+    esp_http_client_cleanup(http);
+    http=nullptr;
+    vTaskDelay(pdMS_TO_TICKS(750));
+    Serial.printf("[AI TLS] retry: internal_free=%lu largest_internal=%lu\\n",
+     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+     (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    http=esp_http_client_init(&cfg);
+    if(http){
+     esp_http_client_set_method(http,HTTP_METHOD_POST);
+     esp_http_client_set_header(http,"Authorization",auth.c_str());
+     esp_http_client_set_header(http,"Content-Type","application/json");
+     esp_http_client_set_header(http,"Accept","text/event-stream");
+     esp_http_client_set_post_field(http,json,strlen(json));
+     rc=esp_http_client_perform(http);
+     code=esp_http_client_get_status_code(http);
+    }
+   }
    Serial.printf("[AI] Request finished: HTTP=%d transport=%d\n",code,(int)rc);
    if(cancelRequested){} // Intentional abort; CANCELLED reported during cleanup.
    else if(rc!=ESP_OK)report("NETWORK_ERROR");
@@ -294,7 +384,7 @@ inline void run(void*){
    else if(code!=200)report("SERVER_ERROR");
    else if(!doneSeen)report("STREAM_INCOMPLETE");
    if(rc!=ESP_OK || code!=200 || !doneSeen)failed=true;
-   esp_http_client_cleanup(http);
+   if(http)esp_http_client_cleanup(http);
   }else failed=true;
   free(json);
  }else failed=true;
@@ -307,7 +397,15 @@ inline void run(void*){
  }else releaseText(true);
  if(!failed && doneSeen && !cancelRequested){
   rememberTurn(prompt,currentAnswer);
-  if(!BrainTTS::enqueue(currentAnswer))Serial.println("[TTS] Queue unavailable; text delivered");
+  KittyMemory::queue(prompt,currentAnswer);
+  if(!delegated && !BrainTTS::enqueue(currentAnswer))
+   Serial.println("[TTS] Queue unavailable; text delivered");
+ }
+ if(delegated){
+  callResultText=(!failed && doneSeen && !cancelRequested)?currentAnswer:String("");
+  callResultOK=!callResultText.isEmpty();
+  callResultReady=true;
+  callDelegated=false;
  }
  currentAnswer="";
  sendPacket("AI_END","");
@@ -329,6 +427,28 @@ inline bool start(){
   busy=false;worker=nullptr;return false;
  }
  return true;
+}
+// Only the Arduino websocket loop calls this. Never called from I2S.
+inline bool startCallDelegation(const String &prompt){
+ if(busy || callResultReady || prompt.isEmpty() || prompt.length()>1024)return false;
+ voicePrompt=prompt;voicePromptPending=true;
+ callResultText="";callResultOK=false;
+ callDelegated=true;
+ if(!start()){
+  voicePrompt="";voicePromptPending=false;callDelegated=false;
+  return false;
+ }
+ return true;
+}
+inline bool takeCallDelegation(String &answer,bool &success){
+ if(!callResultReady || busy)return false;
+ answer=callResultText;success=callResultOK;
+ callResultText="";callResultOK=false;callResultReady=false;
+ return true;
+}
+inline void cancelCallDelegation(){
+ if(callDelegated && busy)cancelRequested=true;
+ if(!busy){callResultReady=false;callResultText="";callDelegated=false;}
 }
 inline bool startWithPrompt(const String &prompt){
  if(busy || prompt.isEmpty() || prompt.length()>1024)return false;

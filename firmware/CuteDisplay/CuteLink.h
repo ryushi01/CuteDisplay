@@ -3,7 +3,7 @@
 // Frame: @CD1|sequence|type|payload|CRC8<LF>, CRC-8 0x07 over body.
 #include <Arduino.h>
 namespace CuteLink {
-constexpr size_t LIMIT=160, PAYLOAD=96;
+constexpr size_t LIMIT=512, PAYLOAD=400;
 struct Frame { uint16_t seq=0; String type,payload; };
 inline uint8_t crc(const String &s) {
  uint8_t v=0;
@@ -64,7 +64,7 @@ class Reader {
 public:
  uint32_t invalid=0;
  bool poll(Stream &s,Frame &out) {
-  for(int n=0;n<192&&s.available()>0;++n){
+  for(int n=0;n<768&&s.available()>0;++n){
    int c=s.read();if(c<0)break;
    if(c=='\r')continue;
    if(c=='\n'){
