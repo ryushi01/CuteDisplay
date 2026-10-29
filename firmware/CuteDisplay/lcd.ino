@@ -493,7 +493,10 @@ bool callModeActive=false;
 // Transient full-screen call artwork state; normal user settings are untouched.
 static String callCaption;
 static String callCaptionPrevious;
-static uint8_t callFaceMood=1; // neutral 0, happy 1, sad 2, angry 3 ...
+static uint8_t callFaceMood=1; // target mood; 0..7
+static uint8_t callFacePreviousMood=1;
+static uint32_t callFaceTransitionStart=0;
+static constexpr uint32_t CALL_FACE_TRANSITION_MS=200UL;
 static uint8_t callLipLevel=0; // S3 speaker PCM intensity 0..9
 static uint32_t callFaceMoodSince=0,callLipAt=0;
 static constexpr uint32_t CALL_MOOD_HOLD_MS=10000UL;
@@ -2885,7 +2888,7 @@ static void serviceBrain() {
    bool wasActive=callModeActive;
    if(next.startsWith("CALL_"))callModeActive=next!="CALL_OFF" && next!="CALL_ERROR";
    else if(next.isEmpty())callModeActive=false;
-   if(!callModeActive){callFaceMood=1;callLipLevel=0;callCaption="";callCaptionPrevious="";}
+   if(!callModeActive){callFaceMood=1;callFacePreviousMood=1;callFaceTransitionStart=0;callLipLevel=0;callCaption="";callCaptionPrevious="";}
    if(next!=kittyActivity || wasActive!=callModeActive){
     kittyActivity=next;if(lcdReady)redrawCurrent();
    }
@@ -2896,7 +2899,12 @@ static void serviceBrain() {
       f.payload[0]>='0'&&f.payload[0]<='7'){
     uint8_t next=(uint8_t)(f.payload[0]-'0');
     callFaceMoodSince=millis();
-    if(callFaceMood!=next){callFaceMood=next;if(lcdReady)redrawCurrent();}
+    if(callFaceMood!=next){
+     callFacePreviousMood=callFaceMood;
+     callFaceMood=next;
+     callFaceTransitionStart=millis();
+     if(lcdReady)redrawCurrent();
+    }
    }
   }
   else if(f.type=="CALL_TEXT"){
