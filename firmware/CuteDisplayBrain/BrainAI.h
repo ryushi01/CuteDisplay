@@ -292,6 +292,15 @@ inline void run(void*){
  cJSON_AddStringToObject(root,"model",model.c_str());
  cJSON_AddBoolToObject(root,"stream",true);
  cJSON *msgs=cJSON_AddArrayToObject(root,"messages");
+ // Clock is already SNTP-synchronized. Refresh temporal context on every
+ // request; no HTTP lookup, new server dependency, or request-path delay.
+ String dateContext=BrainClock::calendarContext();
+ if(!dateContext.isEmpty()){
+  cJSON *clock=cJSON_CreateObject();
+  cJSON_AddStringToObject(clock,"role","system");
+  cJSON_AddStringToObject(clock,"content",dateContext.c_str());
+  cJSON_AddItemToArray(msgs,clock);
+ }
  for(size_t i=0;i<historyCount;i++){
   cJSON *u=cJSON_CreateObject();
   cJSON_AddStringToObject(u,"role","user");
