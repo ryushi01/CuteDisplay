@@ -165,7 +165,7 @@ inline bool extractFact(String utterance,String &key,String &value){
  utterance.trim();if(utterance.length()<5)return false;
  String lower=utterance;lower.toLowerCase();
  int pos=-1,skip=0;
- for(const char* marker:{"my name is ","my name's ","i am called ","i'm called ","you can call me ","please call me ","call me ","i go by ","everyone calls me ","people call me ","je m’appelle ","je m'appelle ","私の名前は","名前は"}){
+ for(const char* marker:{"my name is ","my name's ","my name’s ","i am called ","i'm called ","i’m called ","you can call me ","please call me ","call me ","i go by ","everyone calls me ","people call me ","je m’appelle ","je m'appelle ","mon prénom est ","mon prenom est ","je suis appelé ","je suis appelée ","私の名前は","名前は","私の名前は、","僕の名前は","わたしの名前は","と呼んでください"}){
   pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
  }
  // Plain English "I'm Shana"/"I am Shana" is an introduction only when
@@ -320,10 +320,12 @@ inline bool extractFact(String utterance,String &key,String &value){
  value.trim();
  if(key=="name"){
   // Trim multilingual self-introduction endings.
-  for(const char* suffix:{"と申します","といいます","と言います","です","だよ","だ","って呼んで","と呼んで"}){
+  for(const char* suffix:{"と申します","といいます","と言います","です","だよ","だ","って呼んで","と呼んで","と呼んでください"}){
    if(value.endsWith(suffix)){value.remove(value.length()-strlen(suffix));break;}
   }
   if(value.startsWith("シャナ") || value.startsWith("しゃな"))value="Shana";
+  if(value.startsWith("、") || value.startsWith(" "))value.remove(0,value.startsWith("、")?strlen("、"):1);
+  for(const char* suffix:{"よろしくお願いします","よろしくね"})if(value.endsWith(suffix))value.remove(value.length()-strlen(suffix));
   for(const char* suffix:{" please"," okay"," ok"})if(value.endsWith(suffix))value.remove(value.length()-strlen(suffix));
   value.trim();
  }
