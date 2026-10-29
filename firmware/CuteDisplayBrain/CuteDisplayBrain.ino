@@ -1224,6 +1224,13 @@ void loop(){
                String((unsigned long)KittyMemory::capacityKB());
   CuteLink::send(Serial1,++brainActivitySeq,"SD_USAGE",usage);
  }
+ // Notify C5 once per successfully persisted, changed structured memory.
+ static uint32_t lastMemoryNotice=0;
+ uint32_t newNotice=KittyMemory::memorizedNoticeSeq;
+ if(newNotice!=lastMemoryNotice && faceOnline && !BrainC5OTA::updating()){
+  lastMemoryNotice=newNotice;
+  CuteLink::send(Serial1,++brainActivitySeq,"FACT_SAVED","1");
+ }
  BrainRealtimeDirect::tick(BrainVoiceSTT::running || BrainTTS::running ||
                            BrainAudioTest::running || BrainC5OTA::updating());
  // Face Control is a lightweight S3->C5 UART side channel; the 24kHz I2S
