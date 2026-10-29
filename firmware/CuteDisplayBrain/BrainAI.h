@@ -291,6 +291,12 @@ inline void run(void*){
    esp_http_client_set_header(http,"Content-Type","application/json");
    esp_http_client_set_header(http,"Accept","text/event-stream");
    esp_http_client_set_post_field(http,json,strlen(json));
+   // TLS -0x7F00 means allocation failure; log INTERNAL capacity,
+   // not combined PSRAM heap, to separate fragmentation from network errors.
+   Serial.printf("[AI TLS] before: internal_free=%lu largest_internal=%lu psram_free=%lu\\n",
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
    esp_err_t rc=esp_http_client_perform(http);
    int code=esp_http_client_get_status_code(http);
    Serial.printf("[AI] Request finished: HTTP=%d transport=%d\n",code,(int)rc);
