@@ -355,6 +355,9 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   // ordinary browser/mobile voice clients.
   cJSON_AddBoolToObject(auth,"kitty_expressions",true);
   cJSON_AddBoolToObject(auth,"kitty_memory_refresh",true);
+  // Opt in to gateway voice recognition when running the V6 experimental build.
+  // Older gateways ignore this field and preserve existing realtime behavior.
+  cJSON_AddBoolToObject(auth,"kitty_voice_v6",true);
   memoryRefreshSupported=false;memoryRefreshSeq=0;
   memoryDaySeen=BrainClock::localDayKey();
   memoryMinuteSeen=BrainClock::valid()?(uint32_t)(time(nullptr)/60):0;
