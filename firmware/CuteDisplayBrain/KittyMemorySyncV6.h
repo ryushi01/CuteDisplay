@@ -9,6 +9,10 @@
 #include <mbedtls/sha256.h>
 #include <mbedtls/base64.h>
 #include "KittyMemory.h"
+// Local-only config: never commit or attach to public build artifacts.
+#if __has_include("KittySyncPrivateConfig.h")
+#include "KittySyncPrivateConfig.h"
+#endif
 
 #ifndef KITTY_SYNC_V6_URL
 #define KITTY_SYNC_V6_URL ""
