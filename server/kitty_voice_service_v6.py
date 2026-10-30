@@ -28,8 +28,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             from kitty_voice_id_v6 import pcm16_from_wav,embedding,identify
             samples=pcm16_from_wav(self.rfile.read(int(length)))
+            # Prefer the canonical microSD export format; accept legacy
+            # private JSON vector dictionaries for staged compatibility.
             with open(PROFILES,encoding="utf-8") as f:
-                profiles=json.load(f)
+                profile_data=json.load(f)
+            if isinstance(profile_data,dict) and profile_data.get("version")==1:
+                from kitty_voice_profiles_sd_v6 import validate_profiles
+                profiles=validate_profiles(profile_data)
+            else:
+                profiles=profile_data
             if not isinstance(profiles,dict) or len(profiles)>32:
                 raise ValueError("invalid profiles")
             match=identify(embedding(samples),profiles)
