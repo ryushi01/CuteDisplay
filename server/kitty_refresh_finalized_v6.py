@@ -62,10 +62,14 @@ def prune_expired_staging(root, *, max_age_seconds=7 * 24 * 3600, now=None):
         if (not candidate.name.startswith("staging-") or candidate.is_symlink()
                 or not candidate.is_dir()):
             continue
-        if now - candidate.stat().st_mtime < max_age_seconds:
+        # A resumable upload changes the file mtime but not necessarily its
+        # parent directory mtime. Use the newest descendant as the activity time.
+        entries = list(candidate.rglob("*"))
+        if any(p.is_symlink() for p in entries):
             continue
-        # Do not follow symlinked files or directories; skip that upload.
-        if any(p.is_symlink() for p in candidate.rglob("*")):
+        latest = max([candidate.stat().st_mtime] +
+                     [p.stat().st_mtime for p in entries])
+        if now - latest < max_age_seconds:
             continue
         shutil.rmtree(candidate)
         removed += 1
