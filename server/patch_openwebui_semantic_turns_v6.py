@@ -22,8 +22,7 @@ def patch(source):
     source=source.replace(AUTH,AUTH+"\n        "+MARKER+"""
         kitty_semantic_turns_v6 = (
             auth.get('kitty_semantic_turns_v6') is True and kitty_expressions)
-        kitty_semantic_turn_task = None
-        kitty_semantic_turn_sequence = 0
+        kitty_semantic_turn_state = {'task':None,'sequence':0}
         async def kitty_semantic_turn_recall(transcript, serial):
             from kitty_semantic_bridge_v6 import bounded_semantic_context
             historical, source_label = await bounded_semantic_context(
@@ -31,7 +30,7 @@ def patch(source):
             if source_label != 'hybrid' or not historical:
                 return
             # Out-of-order completions must never overwrite more recent recall.
-            if serial != kitty_semantic_turn_sequence:
+            if serial != kitty_semantic_turn_state['sequence']:
                 return
             # Quoted source data must not become system instructions.
             await upstream.send_json({
@@ -55,11 +54,11 @@ def patch(source):
         "    transcript=event.get('transcript','')",
         "    if isinstance(transcript,str) and 2<=len(transcript.encode('utf-8'))<=900:",
         "        import asyncio",
-        "        kitty_semantic_turn_sequence += 1",
-        "        if kitty_semantic_turn_task is not None and not kitty_semantic_turn_task.done():",
-        "            kitty_semantic_turn_task.cancel()",
-        "        kitty_semantic_turn_task=asyncio.create_task(",
-        "            kitty_semantic_turn_recall(transcript,kitty_semantic_turn_sequence))",
+        "        kitty_semantic_turn_state['sequence'] += 1",
+        "        if kitty_semantic_turn_state['task'] is not None and not kitty_semantic_turn_state['task'].done():",
+        "            kitty_semantic_turn_state['task'].cancel()",
+        "        kitty_semantic_turn_state['task']=asyncio.create_task(",
+        "            kitty_semantic_turn_recall(transcript,kitty_semantic_turn_state['sequence']))",
         "await ws.send_json(event)",
     ]
     source=source[:match.start()]+"\n".join(indent+line for line in lines)+source[match.end():]
