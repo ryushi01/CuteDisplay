@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Kitty Memory v1 storage API. Standard library only; bind localhost by default."""
-import argparse, json, os, queue, re, sqlite3, threading, time
+import argparse, base64, binascii, json, os, queue, re, sqlite3, threading, time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -104,6 +104,33 @@ class Handler(BaseHTTPRequestHandler):
             if length<2 or length>MAX_BODY:return self._reply(413,{"error":"invalid_length"})
             data=json.loads(self.rfile.read(length))
             if not isinstance(data,dict):raise ValueError("Expected object")
+            if self.path in ("/snapshot/chunk","/snapshot/finalize"):
+                # Optional endpoint; only enabled when an isolated staging
+                # directory is configured. Auth checked before this branch.
+                base=os.environ.get("KITTY_SD_SNAPSHOT_ROOT","")
+                if not base:
+                    return self._reply(503,{"error":"snapshot_sync_disabled"})
+                from kitty_sd_snapshot_v6 import SnapshotReceiver
+                receiver=SnapshotReceiver(base)
+                snapshot=data.get("snapshot")
+                if self.path=="/snapshot/chunk":
+                    encoded=data.get("data","")
+                    if not isinstance(encoded,str) or len(encoded)>11000:
+                        return self._reply(413,{"error":"chunk_too_large"})
+                    try:
+                        payload=base64.b64decode(encoded,validate=True)
+                        offset=receiver.chunk(snapshot,data.get("name"),
+                                              data.get("offset"),payload)
+                    except (ValueError,binascii.Error,OSError) as exc:
+                        return self._reply(400,{"error":"invalid_snapshot_chunk"})
+                    return self._reply(200,{"next_offset":offset})
+                try:
+                    path=receiver.finalize(snapshot,data.get("manifest"))
+                except (ValueError,OSError):
+                    return self._reply(400,{"error":"invalid_snapshot_manifest"})
+                # No background auto-index; finalization is a verified,
+                # immutable on-disk export waiting for controlled indexing.
+                return self._reply(200,{"finalized":True,"snapshot":snapshot})
             if self.path=="/calendar":
                 # Parsing is CPU-only and bounded by the HTTP body. The clock
                 # and timezone are explicit inputs; completion is never inferred.
