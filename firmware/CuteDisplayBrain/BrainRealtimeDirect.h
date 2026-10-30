@@ -442,9 +442,14 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
      !pendingSpeakerTranscript.isEmpty()){
    String speaker="unknown",source="unverified";
    if(cJSON_IsString(sid) && cJSON_IsString(conf) &&
-      strcmp(conf->valuestring,"probable")==0 &&
       strlen(sid->valuestring)<60){
-    speaker=String(sid->valuestring);source="voice_probable";
+    if(strcmp(conf->valuestring,"probable")==0){
+     speaker=String(sid->valuestring);source="voice_probable";
+    }else if(strcmp(conf->valuestring,"claimed")==0 &&
+              strcmp(sid->valuestring,"person:shana")==0){
+     // A spoken name is a conversational hint, never owner auth.
+     speaker="person:shana";source="explicit_introduction";
+    }
    }
    (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
                                      speaker,source);
