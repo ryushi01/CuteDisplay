@@ -55,6 +55,11 @@ def _connect(path):
       vector BLOB NOT NULL, model TEXT NOT NULL, generation INTEGER NOT NULL
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS semantic_v6_generation ON semantic_v6(generation)")
+    db.execute("""CREATE TABLE IF NOT EXISTS semantic_speakers (
+       id TEXT NOT NULL, generation INTEGER NOT NULL,
+       speaker_id TEXT NOT NULL, speaker_role TEXT NOT NULL,
+       provenance TEXT NOT NULL, PRIMARY KEY(id,generation)
+    )""")
     return db
 
 def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
@@ -74,7 +79,10 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
         # Interrupted build rows are discarded, not offered to live searches.
         db.execute("DELETE FROM semantic_v6 WHERE generation NOT IN (?,?)", (active, next_gen))
         db.execute("DELETE FROM semantic_v6 WHERE generation=?", (next_gen,))
+        db.execute("DELETE FROM semantic_speakers WHERE generation=?", (next_gen,))
         db.commit()
+        from kitty_semantic_attribution_v6 import iter_archive_with_speakers
+        speakers = {r["id"]:r for r in iter_archive_with_speakers(sd)}
         current = {row[0]: row[1:] for row in db.execute(
             "SELECT id,digest,vector,model FROM semantic_v6 WHERE generation=?", (active,))}
         count, reused, changed = 0, 0, 0
@@ -94,6 +102,10 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
             db.commit()
         for id, value in load_rows(sd):
             count += 1
+            source=speakers.get(id)
+            if source:
+                db.execute("INSERT OR REPLACE INTO semantic_speakers VALUES (?,?,?,?,?)",
+                           (id,next_gen,source["speaker_id"],source["speaker_role"],source["provenance"]))
             digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
             old = current.get(id)
             if old and old[0] == digest and old[2] == model_name:
@@ -108,10 +120,11 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
         db.execute("INSERT OR REPLACE INTO semantic_meta VALUES ('active', ?)", (str(next_gen),))
         db.commit()
         db.execute("DELETE FROM semantic_v6 WHERE generation!=?", (next_gen,))
+        db.execute("DELETE FROM semantic_speakers WHERE generation!=?", (next_gen,))
         db.commit()
     return {"indexed":count, "embedded":changed, "reused":reused, "model":model_name}
 
-def search(db_path, query, k=5, model_name=DEFAULT_MODEL):
+def search(db_path, query, k=5, model_name=DEFAULT_MODEL, speaker_id=None):
     """Return bounded semantic results. Never modify source memories."""
     import numpy as np
     if not query or not query.strip() or len(query)>1000:
@@ -126,16 +139,23 @@ def search(db_path, query, k=5, model_name=DEFAULT_MODEL):
         active_row = db.execute("SELECT value FROM semantic_meta WHERE key='active'").fetchone() if _has_meta(db) else None
         if not active_row:
             return []
+        gen=int(active_row[0])
+        speaker_rows={r[0]:{"speaker_id":r[1],"speaker_role":r[2],"provenance":r[3]}
+            for r in db.execute("SELECT id,speaker_id,speaker_role,provenance FROM semantic_speakers WHERE generation=?", (gen,))}
         for id, text, raw, model_used in db.execute(
-            "SELECT id,text,vector,model FROM semantic_v6 WHERE generation=?", (int(active_row[0]),)):
+            "SELECT id,text,vector,model FROM semantic_v6 WHERE generation=?", (gen,)):
             if model_used != model_name:
+                continue
+            attribution=speaker_rows.get(id,{"speaker_id":"unknown","speaker_role":"unknown","provenance":"unverified"})
+            if speaker_id is not None and attribution["speaker_id"] != speaker_id:
                 continue
             vec = np.frombuffer(raw, dtype="<f4")
             if vec.shape != q.shape:
                 continue
             results.append((float(np.dot(q, vec)), id, text))
     results.sort(reverse=True)
-    return [{"score": round(score,4), "id":id, "text":text}
+    return [{"score": round(score,4), "id":id, "text":text,
+             **speaker_rows.get(id,{"speaker_id":"unknown","speaker_role":"unknown","provenance":"unverified"})}
             for score,id,text in results[:max(1,min(int(k),10))]]
 
 def _has_meta(db):
