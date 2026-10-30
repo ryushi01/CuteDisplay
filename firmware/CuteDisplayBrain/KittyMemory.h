@@ -1132,7 +1132,21 @@ inline void task(void*){
   uint32_t offset=(uint32_t)f.size();
   bool ok=f.printf("%lu\t%s\t%s\n",(unsigned long)ts,e.question,e.answer)>0;
   f.close();
-  if(ok){saved++;appendIndex(e,offset,ts);
+  if(ok){
+   // V6: backward-compatible attribution sidecar. Archive rows preserve
+   // their existing ts/question/answer format and index offsets. Do NOT
+   // infer that a caller is Shana merely because Kitty has one owner.
+   // Unverified microphone transcripts remain unknown until a trusted
+   // identity source is wired into a later protocol revision.
+   File sources=SD_MMC.open("/kitty/turn_sources.tsv",FILE_APPEND);
+   if(sources){
+    sources.printf("%lu\\t%lu\\tunknown\\tunknown\\tunverified\\n",
+      (unsigned long)ts,(unsigned long)offset);
+    sources.close();
+   }else{
+    Serial.println("[MEMORY V6] attribution sidecar unavailable; source remains unknown");
+   }
+   saved++;appendIndex(e,offset,ts);
    // Batch user statements for an idle-only model summary. No model call or SD
    // summary write occurs on the websocket or I2S execution path.
    String snippet=sanitize(String(e.question),115);
