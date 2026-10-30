@@ -9,6 +9,7 @@ DB = os.environ.get("KITTY_MEMORY_DB", os.path.expanduser("~/.local/share/cutedi
 TOKEN = os.environ.get("KITTY_MEMORY_TOKEN", "")
 WRITE_Q = queue.Queue(maxsize=256)
 LOCK = threading.Lock()
+OWNER_PROOF = None
 
 def connect():
     db = sqlite3.connect(DB, timeout=3)
@@ -104,6 +105,18 @@ class Handler(BaseHTTPRequestHandler):
             if length<2 or length>MAX_BODY:return self._reply(413,{"error":"invalid_length"})
             data=json.loads(self.rfile.read(length))
             if not isinstance(data,dict):raise ValueError("Expected object")
+            if self.path in ("/owner/challenge","/owner/verify"):
+                if OWNER_PROOF is None:
+                    return self._reply(503,{"error":"owner_proof_disabled"})
+                sid=data.get("session_id")
+                if not isinstance(sid,str) or not 8<=len(sid)<=100:
+                    return self._reply(400,{"error":"invalid_session"})
+                if self.path=="/owner/challenge":
+                    return self._reply(200,OWNER_PROOF.challenge(sid))
+                result=OWNER_PROOF.verify(sid,data.get("challenge"),data.get("signature"))
+                if not result:
+                    return self._reply(403,{"error":"invalid_owner_proof"})
+                return self._reply(200,{"grant":result,"expires_in":120})
             if self.path in ("/snapshot/chunk","/snapshot/finalize"):
                 # Optional endpoint; only enabled when an isolated staging
                 # directory is configured. Auth checked before this branch.
@@ -172,6 +185,17 @@ def main():
     ap.add_argument("--port",type=int,default=8766)
     args=ap.parse_args()
     if not TOKEN:raise SystemExit("Set KITTY_MEMORY_TOKEN first")
+    key_path=os.environ.get("KITTY_OWNER_PUBLIC_KEY_PEM","")
+    signing_secret=os.environ.get("KITTY_OWNER_GRANT_SECRET_HEX","")
+    if key_path and signing_secret:
+        from kitty_owner_proof_v6 import OwnerProof
+        try:
+            secret=bytes.fromhex(signing_secret)
+            with open(key_path,"rb") as fh: enrolled_key=fh.read()
+            global OWNER_PROOF
+            OWNER_PROOF=OwnerProof(secret,enrolled_key)
+        except (ValueError,OSError) as exc:
+            raise SystemExit("Invalid owner verification configuration") from exc
     init()
     threading.Thread(target=writer,daemon=True).start()
     print("Kitty Memory storage ready",args.host,args.port,flush=True)
