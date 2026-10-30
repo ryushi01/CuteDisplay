@@ -55,7 +55,8 @@ def patch(source):
         "        if isinstance(event.get('item_id'),str):",
         "            import asyncio",
         "            asyncio.create_task(recognize_turn(",
-        "                kitty_voice_v6,event['item_id'],ws.send_json))",
+        "                kitty_voice_v6,event['item_id'],ws.send_json,",
+        "                transcript=event.get('transcript','')))",
         "await ws.send_json(event)",
     ]
     replacement="\\n".join((indent + line if i==0 else indent+line) for i,line in enumerate(body))
