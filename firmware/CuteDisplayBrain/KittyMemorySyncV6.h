@@ -30,7 +30,7 @@ static bool (*idleCheck)()=nullptr;
 static volatile uint32_t completed=0,failures=0;
 static volatile uint32_t bytesSent=0;
 inline bool configured(){
- return String(KITTY_SYNC_V6_URL).startsWith("https://") &&
+ return String(KITTY_SYNC_V6_URL)=="https://ragnarok-project.com/kitty-v6/sync" &&
         strlen(KITTY_SYNC_V6_DEVICE_TOKEN)>=32 &&
         strstr(KITTY_SYNC_V6_CA_PEM,"BEGIN CERTIFICATE")!=nullptr;
 }
