@@ -106,6 +106,11 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
         for id, value in load_rows(sd):
             count += 1
             source=speakers.get(id)
+            if id.startswith("speaker_claims_v6.tsv:") and ":speaker_claim:" in id:
+                candidate=id.split(":speaker_claim:",1)[1]
+                if 1<=len(candidate)<=64 and "\\t" not in candidate:
+                    source={"speaker_id":candidate,"speaker_role":"guest",
+                            "provenance":"voice_probable"}
             if source:
                 db.execute("INSERT OR REPLACE INTO semantic_speakers VALUES (?,?,?,?,?)",
                            (id,next_gen,source["speaker_id"],source["speaker_role"],source["provenance"]))
