@@ -82,7 +82,7 @@ inline bool exportAndSend(const String &snapshot){
    }
    if(offset==0)total=block.total;
    if(block.total!=total || offset+block.length>total){ok=false;break;}
-   if(block.length){
+   if(block.length || (total==0 && offset==0)){
     String payload=encode(block.data,block.length);
     if(payload.isEmpty()){ok=false;break;}
     String req=String("{\"snapshot\":\"")+snapshot+
@@ -109,9 +109,9 @@ inline bool exportAndSend(const String &snapshot){
  manifest+="}";
  String reply;
  String body=String("{\"snapshot\":\"")+snapshot+"\",\"manifest\":"+manifest+"}";
- return send("/snapshot/finalize",body,reply)==200 &&
-        reply.indexOf("\"finalized\": true")>=0 ||
-        (reply.indexOf("\"finalized\":true")>=0);
+ const int status=send("/snapshot/finalize",body,reply);
+ return status==200 && (reply.indexOf("\"finalized\": true")>=0 ||
+                         reply.indexOf("\"finalized\":true")>=0);
 }
 inline void task(void*){
  vTaskDelay(pdMS_TO_TICKS(45000));
