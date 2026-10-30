@@ -319,6 +319,17 @@ inline void fail(const char *why){
  ws.disconnect();
  status("CALL_ERROR");
 }
+// V6 speaker recognition is probabilistic and turn-scoped; never owner auth.
+static String pendingSpeakerItem, pendingSpeakerTranscript;
+static uint32_t pendingSpeakerAt=0;
+inline void flushPendingSpeaker(bool timedOut=false){
+ if(pendingSpeakerItem.isEmpty())return;
+ if(!timedOut && (uint32_t)(millis()-pendingSpeakerAt)<1100UL)return;
+ (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
+   "unknown","unverified");
+ pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
+}
+
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
@@ -609,17 +620,6 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  cJSON_Delete(json);
  if(failure)fail(failure);
 }
-// V6 speaker recognition is probabilistic and turn-scoped; never owner auth.
-static String pendingSpeakerItem, pendingSpeakerTranscript;
-static uint32_t pendingSpeakerAt=0;
-inline void flushPendingSpeaker(bool timedOut=false){
- if(pendingSpeakerItem.isEmpty())return;
- if(!timedOut && (uint32_t)(millis()-pendingSpeakerAt)<1100UL)return;
- (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
-   "unknown","unverified");
- pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
-}
-
 inline bool connect(){
  reload();
  if(!valid()){
