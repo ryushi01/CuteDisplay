@@ -793,6 +793,14 @@ static void consoleCommand(String cmd){
   Serial.printf("[MEMORY] probe queued=%d; check 'memory status' after a moment\n",accepted?1:0);
   return;
  }
+ if(cmd=="memory sync status"){
+  Serial.printf("[MEMSYNC] configured=%d running=%d completed=%lu failures=%lu sd_ready=%d wifi=%d\n",
+    KittyMemorySyncV6::configured()?1:0,KittyMemorySyncV6::worker?1:0,
+    (unsigned long)KittyMemorySyncV6::completed,
+    (unsigned long)KittyMemorySyncV6::failures,
+    KittyMemory::ready()?1:0,WiFi.status()==WL_CONNECTED?1:0);
+  return;
+ }
  if(cmd=="memory status"){
   Serial.printf("[MEMORY] mounted=%d indexed=%u/%u saved=%lu failed=%lu free_psram=%lu\n",
     KittyMemory::ready()?1:0,(unsigned)KittyMemory::indexCount,
