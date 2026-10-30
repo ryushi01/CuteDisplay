@@ -10,6 +10,11 @@ class IdentityAttributionV6Tests(unittest.TestCase):
         a=resolve_speaker()
         self.assertEqual(a.speaker_id,UNKNOWN)
         self.assertFalse(should_write_owner_fact(a))
+    def test_spoken_kitty_role_is_not_authenticated(self):
+        a=resolve_speaker(explicit_role="kitty")
+        self.assertEqual(a.speaker_id,UNKNOWN)
+        self.assertEqual(a.confidence,"unknown")
+
     def test_verified_owner_only(self):
         a=resolve_speaker(session_owner_verified=True)
         self.assertEqual(a.speaker_id,OWNER)
