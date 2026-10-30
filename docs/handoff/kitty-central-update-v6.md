@@ -57,3 +57,23 @@ verification before releasing combined images.
 7. Add a local authenticated UI that invokes tested update transactions.
 8. Test interrupted transfers, failed boots, offline Mac, token rotation,
    storage integrity, and downgrade/rollback paths before rollout.
+
+
+## Locked ESP32-S3 N16R8 Arduino build profile (validated baseline)
+
+- Arduino CLI 1.5.1; ESP32 Arduino platform esp32:esp32 3.3.7.
+- Board FQBN esp32:esp32:esp32s3.
+- FlashSize=16M, PSRAM=opi, PartitionScheme=app3M_fat9M_16MB.
+- USB CDC on boot: CDCOnBoot=cdc.
+- Arduino task core: LoopCore=1.
+- Event task core: EventsCore=0.
+- CPUFreq=240.
+- Pin the entire FQBN in the release build script, not interactive IDE settings.
+- The partition has TWO OTA app slots, each 0x300000 bytes, app0 at
+  0x10000 and app1 at 0x310000. This was confirmed from the installed
+  Espressif 3.3.7 partition CSV on ai-server on 2026-10-30.
+- Baseline binary 1,781,120 bytes; 56 percent of available app slot,
+  compiled before adding device sync. Preserve microSD as canonical memory.
+- Verify actual USB CDC and CPU menu IDs in the installed board definition;
+  if the FQBN flags differ, correct the build profile instead of quietly
+  omitting flags. OTA image is app .bin, NEVER the 16 MB merged factory image.
