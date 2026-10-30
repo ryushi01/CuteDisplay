@@ -23,7 +23,11 @@ def pcm16_from_wav(blob):
     """Accept bounded mono 16kHz signed PCM WAV only. Caller must cap bytes."""
     if not isinstance(blob,bytes) or len(blob)>SAMPLE_RATE*2*MAX_SECONDS+4096:
         raise ValueError("invalid audio size")
-    with wave.open(io.BytesIO(blob),"rb") as w:
+    try:
+        w = wave.open(io.BytesIO(blob),"rb")
+    except (wave.Error, EOFError) as exc:
+        raise ValueError("invalid WAV") from exc
+    with w:
         if w.getnchannels()!=1 or w.getframerate()!=SAMPLE_RATE or w.getsampwidth()!=2 or w.getcomptype()!="NONE":
             raise ValueError("expected mono 16kHz PCM16 WAV")
         frames=w.readframes(w.getnframes())
