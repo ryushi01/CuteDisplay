@@ -31,7 +31,7 @@ class SnapshotReceiver:
         if not isinstance(data,bytes) or len(data)>MAX_CHUNK or not isinstance(offset,int) or offset<0 or offset+len(data)>MAX_FILE:
             raise ValueError("invalid chunk")
         path=self._file(snapshot,name)
-        flags=os.O_CREAT|os.O_WRONLY
+        flags=os.O_CREAT|os.O_RDWR
         fd=os.open(path,flags,0o600)
         try:
             with os.fdopen(fd,"r+b",closefd=False) as f:
