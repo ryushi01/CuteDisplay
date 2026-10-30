@@ -46,6 +46,8 @@ class OwnerProof:
 
     def verify(self, session_id, nonce, signature_b64, now=None):
         now=int(time.time() if now is None else now)
+        if not isinstance(nonce,str) or not isinstance(session_id,str) or not isinstance(signature_b64,str):
+            return None
         with self.lock:
             entry=self.pending.pop(nonce,None)
         # Single-use even if verification failed: no replay or online guessing
