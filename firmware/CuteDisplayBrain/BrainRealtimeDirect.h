@@ -423,14 +423,38 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   if(!remoteResponse)status("CALL_LISTENING");
  }else if(strcmp(type,"input_audio_buffer.speech_stopped")==0){
   status("CALL_THINKING");
+ }else if(strcmp(type,"kitty.speaker.result")==0){
+  cJSON *id=cJSON_GetObjectItem(json,"item_id");
+  cJSON *sid=cJSON_GetObjectItem(json,"speaker_id");
+  cJSON *conf=cJSON_GetObjectItem(json,"confidence");
+  if(cJSON_IsString(id) && pendingSpeakerItem==id->valuestring &&
+     !pendingSpeakerTranscript.isEmpty()){
+   String speaker="unknown",source="unverified";
+   if(cJSON_IsString(sid) && cJSON_IsString(conf) &&
+      strcmp(conf->valuestring,"probable")==0 &&
+      strlen(sid->valuestring)<60){
+    speaker=String(sid->valuestring);source="voice_probable";
+   }
+   (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
+                                     speaker,source);
+   pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
+  }
  }else if(strcmp(type,"conversation.item.input_audio_transcription.completed")==0){
   cJSON *id=cJSON_GetObjectItem(json,"item_id");
   cJSON *transcript=cJSON_GetObjectItem(json,"transcript");
   if(cJSON_IsString(transcript) &&
      transcript->valuestring && transcript->valuestring[0]){
    Serial.println("[MEMORY] Realtime user transcript received");
-   bool archived=KittyMemory::queue(String(transcript->valuestring),String("[voice transcript]"));
-   Serial.printf("[MEMORY] transcript queued=%d\n",archived?1:0);
+   // Await the bounded turn-linked speaker result briefly, but never delay
+   // replying or block audio. Unknown is persisted on timeout.
+   flushPendingSpeaker(true);
+   if(cJSON_IsString(id) && id->valuestring && strlen(id->valuestring)<=160){
+    pendingSpeakerItem=String(id->valuestring);
+    pendingSpeakerTranscript=KittyMemory::clipUTF8(String(transcript->valuestring),254);
+    pendingSpeakerAt=millis();
+   }else{
+    (void)KittyMemory::queue(String(transcript->valuestring),"[voice transcript]");
+   }
    queueCaption("YOU: ",transcript->valuestring);
    // Realtime voice often responds without delegated BrainAI chat;
    // archive the transcript independently of whether delegation occurs.
@@ -585,6 +609,17 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  cJSON_Delete(json);
  if(failure)fail(failure);
 }
+// V6 speaker recognition is probabilistic and turn-scoped; never owner auth.
+static String pendingSpeakerItem, pendingSpeakerTranscript;
+static uint32_t pendingSpeakerAt=0;
+inline void flushPendingSpeaker(bool timedOut=false){
+ if(pendingSpeakerItem.isEmpty())return;
+ if(!timedOut && (uint32_t)(millis()-pendingSpeakerAt)<1100UL)return;
+ (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
+   "unknown","unverified");
+ pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
+}
+
 inline bool connect(){
  reload();
  if(!valid()){
@@ -656,6 +691,7 @@ inline bool toggle(bool audioBusy){
  return true;
 }
 inline void tick(bool audioBusy){
+ flushPendingSpeaker(false);
  if(!requested)return;
  if(WiFi.status()!=WL_CONNECTED){
   if(started){BrainRealtimeAudio::stop();ws.disconnect();started=false;connected=false;ready=false;}
