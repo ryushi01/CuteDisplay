@@ -46,6 +46,19 @@ inline bool proposeConsolidatedFact(const String &key,const String &value){
  return xQueueSend(consolidatedFacts,&item,0)==pdTRUE;
 }
 
+// Network-free one-slot SD export. Only kitty_sd opens SD_MMC.
+struct ExportRequest { uint8_t file; uint32_t offset; };
+struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint8_t ok; };
+static QueueHandle_t exportRequests=nullptr,exportBlocks=nullptr;
+static constexpr const char* EXPORT_NAMES[]={"facts.tsv","factsmeta.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv","turn_sources.tsv","voice_profiles_v6.json","speaker_claims_v6.tsv"};
+static constexpr uint8_t EXPORT_COUNT=sizeof(EXPORT_NAMES)/sizeof(EXPORT_NAMES[0]);
+inline bool requestExport(uint8_t file,uint32_t offset){
+ if(!exportRequests || !exportBlocks || !mounted || file>=EXPORT_COUNT)return false;
+ ExportRequest req={file,offset};return xQueueSend(exportRequests,&req,0)==pdTRUE;
+}
+inline bool takeExport(ExportBlock &block,uint32_t timeoutMs=150){
+ return exportBlocks && xQueueReceive(exportBlocks,&block,pdMS_TO_TICKS(timeoutMs))==pdTRUE;
+}
 static TaskHandle_t worker=nullptr;
 static volatile bool mounted=false;
 static volatile uint8_t cardState=0; // 0=starting,1=ready,2=needs format/check,3=formatting,4=error
