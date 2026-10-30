@@ -1140,7 +1140,7 @@ inline void task(void*){
    // identity source is wired into a later protocol revision.
    File sources=SD_MMC.open("/kitty/turn_sources.tsv",FILE_APPEND);
    if(sources){
-    sources.printf("%lu\\t%lu\\tunknown\\tunknown\\tunverified\\n",
+    sources.printf("%lu\t%lu\tunknown\tunknown\tunverified\n",
       (unsigned long)ts,(unsigned long)offset);
     sources.close();
    }else{
