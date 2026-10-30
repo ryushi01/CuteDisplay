@@ -51,3 +51,46 @@ enum KittyOwnerProofV6 {
             .replacingOccurrences(of: "=", with: "")
     }
 }
+
+@available(iOS 16.0, *)
+extension KittyOwnerProofV6 {
+    private struct Challenge: Decodable {
+        let challenge: String
+        let expires_at: Int
+    }
+    private struct GrantResponse: Decodable {
+        let grant: String
+        let expires_in: Int
+    }
+
+    /// Explicit owner action only. Must use a pinned/trusted HTTPS endpoint,
+    /// a separately authenticated control credential, and a realtime session
+    /// ID created by the gateway. Never use the S3/device key as owner proof.
+    static func requestGrant(endpoint: URL, controlBearer: String,
+                             sessionID: String) async throws -> String {
+        guard endpoint.scheme == "https", !controlBearer.isEmpty,
+              (8...100).contains(sessionID.count) else {
+            throw NSError(domain: "KittyV6", code: 2)
+        }
+        func post(_ path: String, _ object: [String:String]) async throws -> Data {
+            var req = URLRequest(url: endpoint.appendingPathComponent(path))
+            req.httpMethod = "POST"
+            req.timeoutInterval = 8
+            req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.addValue("Bearer " + controlBearer, forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: object)
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  data.count < 4096 else { throw NSError(domain:"KittyV6",code:3) }
+            return data
+        }
+        let challengeData = try await post("owner/challenge", ["session_id":sessionID])
+        let challenge = try JSONDecoder().decode(Challenge.self,from:challengeData)
+        let signature = try signChallenge(sessionID:sessionID,challenge:challenge.challenge)
+        let grantData = try await post("owner/verify", [
+            "session_id":sessionID, "challenge":challenge.challenge,
+            "signature":signature
+        ])
+        return try JSONDecoder().decode(GrantResponse.self,from:grantData).grant
+    }
+}
