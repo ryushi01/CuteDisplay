@@ -42,7 +42,7 @@ class UtteranceCollector:
         self.parts.clear();self.size=0;self.pending_audio=None
         self.closed=True
 
-async def recognize_turn(collector,item_id,emit,timeout=0.8):
+async def recognize_turn(collector,item_id,emit,timeout=0.8,transcript=""):
     """Emit only a turn-scoped probable claim or unknown. Never verify owner."""
     pcm=collector.pop_for_transcript()
     if not pcm or not isinstance(item_id,str) or not 1<=len(item_id)<=160:
@@ -51,6 +51,9 @@ async def recognize_turn(collector,item_id,emit,timeout=0.8):
         result=await asyncio.wait_for(recognize_completed_utterance(pcm,timeout=timeout),timeout=timeout+0.1)
     except (Exception,asyncio.CancelledError):
         result={"speaker_id":"unknown","confidence":"unknown"}
+    from kitty_voice_claims_v6 import reconcile_voice_and_claim
+    attributed=reconcile_voice_and_claim(result,transcript)
     await emit({"type":"kitty.speaker.result","item_id":item_id,
-        "speaker_id":result.get("speaker_id","unknown"),
-        "confidence":result.get("confidence","unknown")})
+        "speaker_id":attributed["speaker_id"],
+        "confidence":attributed["confidence"],
+        "claim_conflicts":attributed["claim_conflicts"]})
