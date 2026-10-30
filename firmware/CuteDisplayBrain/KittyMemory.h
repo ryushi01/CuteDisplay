@@ -718,7 +718,8 @@ inline bool queueAttributed(const String &question,const String &answer,
  // Voice matching is probabilistic: NEVER set ownerVerified from a match.
  String safeSpeaker=(!speaker.isEmpty() && speaker.length()<sizeof(e.speaker) &&
    speaker.indexOf('\t')<0 && speaker.indexOf('\n')<0)?speaker:String("unknown");
- String safeSource=(source=="voice_probable")?source:String("unverified");
+ String safeSource=(source=="voice_probable" || source=="explicit_introduction")
+   ?source:String("unverified");
  safeSpeaker.toCharArray(e.speaker,sizeof(e.speaker));
  safeSource.toCharArray(e.source,sizeof(e.source));
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
