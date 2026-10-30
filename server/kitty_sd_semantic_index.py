@@ -51,8 +51,9 @@ def _connect(path):
     db = sqlite3.connect(str(path), timeout=10)
     db.execute("PRAGMA busy_timeout=10000")
     db.execute("""CREATE TABLE IF NOT EXISTS semantic_v6 (
-      id TEXT PRIMARY KEY, text TEXT NOT NULL, digest TEXT NOT NULL,
-      vector BLOB NOT NULL, model TEXT NOT NULL, generation INTEGER NOT NULL
+      id TEXT NOT NULL, text TEXT NOT NULL, digest TEXT NOT NULL,
+      vector BLOB NOT NULL, model TEXT NOT NULL, generation INTEGER NOT NULL,
+      PRIMARY KEY(id,generation)
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS semantic_v6_generation ON semantic_v6(generation)")
     db.execute("""CREATE TABLE IF NOT EXISTS semantic_speakers (
