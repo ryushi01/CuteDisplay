@@ -43,7 +43,9 @@ def resolve_speaker(session_owner_verified=False, explicit_identity: Optional[st
     or the fact that the current caller uses the same microphone.
     """
     if explicit_role == "kitty":
-        return Attribution(ASSISTANT, "kitty", "session_verified", "verified")
+        # A role label supplied by a microphone transcript is untrusted.
+        # Only a trusted internal assistant-output channel may mark Kitty verified.
+        return Attribution()
     if explicit_identity and explicit_role in {"guest", "remote_ai"}:
         key = explicit_identity.strip().casefold()
         if not key or len(key) > 80:
