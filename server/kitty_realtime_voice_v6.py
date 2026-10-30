@@ -21,7 +21,7 @@ class UtteranceCollector:
         self.size=0
         self.closed=False
         self.in_speech=False
-        self.pending_audio=None
+        self.pending_audio=deque(maxlen=3)
     def add(self,audio_b64):
         if self.closed or not isinstance(audio_b64,str) or len(audio_b64)>MAX_ENCODED:return
         try: audio=base64.b64decode(audio_b64,validate=True)
@@ -37,13 +37,11 @@ class UtteranceCollector:
         self.in_speech=False
         data=b"".join(self.parts)
         self.parts.clear();self.size=0
-        self.pending_audio=data if len(data)>=24_000*2*1.5 else None
+        self.pending_audio.append(data if len(data)>=24_000*2*1.5 else None)
     def pop_for_transcript(self):
-        result=self.pending_audio
-        self.pending_audio=None
-        return result
+        return self.pending_audio.popleft() if self.pending_audio else None
     def clear(self):
-        self.parts.clear();self.size=0;self.pending_audio=None
+        self.parts.clear();self.size=0;self.pending_audio.clear()
         self.closed=True
 
 async def recognize_turn(collector,item_id,emit,timeout=0.8,transcript=""):
