@@ -1,0 +1,37 @@
+name: Kitty semantic V6 offline tests
+
+on:
+  push:
+    branches:
+      - feature/kitty-semantic-v6-cpu
+    paths:
+      - "server/kitty_*v6.py"
+      - "server/kitty_sd_semantic_index.py"
+      - "server/test_kitty_*v6.py"
+      - ".github/workflows/kitty-semantic-v6-tests.yml"
+  pull_request:
+    paths:
+      - "server/kitty_*v6.py"
+      - "server/kitty_sd_semantic_index.py"
+      - "server/test_kitty_*v6.py"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: .github/workflows/kitty-semantic-v6-tests.yml
+      - name: Install minimal test dependency
+        run: python -m pip install 'numpy>=1.26,<3'
+      - name: Compile Python modules
+        run: python -m compileall -q server/kitty_identity_attribution_v6.py server/kitty_semantic_attribution_v6.py server/kitty_sd_semantic_index.py server/kitty_memory_service.py
+      - name: Run identity and semantic regression tests (no model download)
+        run: python -m unittest discover -s server -p 'test_kitty_*v6.py' -v
