@@ -47,7 +47,7 @@ def register(app):
     if not (1024 <= size <= MAX_IMAGE) or metadata.get("size") != size:
         raise RuntimeError("OTA image size incompatible")
     digest = hashlib.file_digest(image_file.open("rb"), "sha256").hexdigest()
-    if image_file.open("rb").read(1) != b"\\xe9" or not hmac.compare_digest(digest, str(metadata.get("sha256", ""))):
+    if image_file.open("rb").read(1) != bytes([0xE9]) or not hmac.compare_digest(digest, str(metadata.get("sha256", ""))):
         raise RuntimeError("OTA image checksum or header invalid")
     manifest = {"release_id":approved, "size":size, "sha256":digest,
                 "image_path":PREFIX+"/image", "application_only":True,
