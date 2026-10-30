@@ -30,6 +30,7 @@
 #include "CuteLink.h"
 #include "BrainC5OTA.h"
 #include "KittyOTASafety.h"
+#include "KittyOTAWriter.h"
 #include "BrainAudioTest.h"
 #include "BrainVoiceSTT.h"
 #include "BrainClock.h"
