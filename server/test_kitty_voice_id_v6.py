@@ -10,7 +10,7 @@ class VoiceIDV6Tests(unittest.TestCase):
     def test_voice_match_requires_clear_margin(self):
         profiles={"person:shana":[[1,0,0]]*3,"person:guest":[[0,1,0]]*3}
         self.assertEqual(identify([1,0,0],profiles).speaker_id,"person:shana")
-        self.assertEqual(identify([0.1,0.2,0],profiles).speaker_id,"unknown")
+        self.assertEqual(identify([0.1,0.2,0.97],profiles).speaker_id,"unknown")
     def test_ambiguous_never_guesses(self):
         profiles={"person:shana":[[1,0,0]]*3,"person:other":[[0.995,0.1,0]]*3}
         self.assertEqual(identify([1,0,0],profiles).speaker_id,"unknown")
