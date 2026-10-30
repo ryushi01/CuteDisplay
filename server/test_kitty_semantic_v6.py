@@ -2,10 +2,12 @@
 """Offline V6 tests: no model download or Open WebUI needed."""
 import importlib.util
 import tempfile
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("kitty_sd_semantic_index", ROOT / "kitty_sd_semantic_index.py")
 v6 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(v6)
@@ -42,6 +44,23 @@ class SemanticV6Tests(unittest.TestCase):
         self.assertEqual((third["indexed"],third["embedded"],third["reused"]),(2,1,1))
         hits=v6.search(self.db,"cat",5,"fake-test")
         self.assertTrue(all("plan" not in h["id"] for h in hits))
+    def test_speaker_sidecar_and_legacy_are_distinct(self):
+        archive=self.root/"sd"/"kitty"/"conversations.tsv"
+        a="1761790000\\tI am ChatGPT\\tNice to meet you.\\n".encode()
+        b="1761790001\\tMy owner Shana is not here\\tUnderstood.\\n".encode()
+        archive.write_bytes(a+b)
+        sidecar=self.root/"sd"/"kitty"/"turn_sources.tsv"
+        sidecar.write_text(f"1761790000\\t0\\tremote_ai:chatgpt\\tremote_ai\\texplicit_introduction\\n")
+        v6.build(self.root/"sd",self.db,"fake-test")
+        ai=v6.search(self.db,"cat",10,"fake-test",speaker_id="remote_ai:chatgpt")
+        self.assertEqual(len(ai),1)
+        self.assertEqual(ai[0]["speaker_role"],"remote_ai")
+        # No sidecar record => unknown, never inherited owner's identity.
+        others=v6.search(self.db,"cat",10,"fake-test",speaker_id="unknown")
+        self.assertGreaterEqual(len(others),1)
+        self.assertTrue(all(h["speaker_id"]=="unknown" for h in others))
+        self.assertEqual(v6.search(self.db,"cat",10,"fake-test",speaker_id="person:owner"),[])
+
     def test_missing_and_empty_query(self):
         self.assertEqual(v6.search(self.db,"",5,"fake-test"),[])
         with self.assertRaises(FileNotFoundError):
