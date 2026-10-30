@@ -24,6 +24,7 @@ namespace KittyMemorySyncV6 {
 static TaskHandle_t worker=nullptr;
 static bool (*idleCheck)()=nullptr;
 static volatile uint32_t completed=0,failures=0;
+static volatile uint32_t bytesSent=0;
 inline bool configured(){
  return String(KITTY_SYNC_V6_URL).startsWith("https://") &&
         strlen(KITTY_SYNC_V6_DEVICE_TOKEN)>=32 &&
@@ -93,6 +94,7 @@ inline bool exportAndSend(const String &snapshot){
     if(send("/snapshot/chunk",req,reply)!=200 || !ackOffset(reply,next)){ok=false;break;}
     if(mbedtls_sha256_update(&sha,block.data,block.length)!=0){ok=false;break;}
     offset=next;
+    bytesSent+=block.length;
    }
    if(offset==total)break;
    if(block.length==0){ok=false;break;}
