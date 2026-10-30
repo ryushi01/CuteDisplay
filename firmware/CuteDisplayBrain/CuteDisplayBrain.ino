@@ -31,6 +31,7 @@
 #include "BrainC5OTA.h"
 #include "KittyOTASafety.h"
 #include "KittyOTAWriter.h"
+#include "KittyOTAFrames.h"
 #include "BrainAudioTest.h"
 #include "BrainVoiceSTT.h"
 #include "BrainClock.h"
@@ -1066,6 +1067,14 @@ static void handleBrainLANLine(const String &line){
   lanClient.printf("OTA:RUNNING_SUBTYPE:%u\n",(unsigned)ota.runningSubtype);
   lanClient.printf("OTA:BUSY:%u\n",busy?1:0);
   lanClient.println("OTA:DEPLOY_SUPPORTED:0");
+  return;
+ }
+ if(line=="OTA_STATUS"){
+  const KittyOTASafety::Status ota=KittyOTASafety::inspect();
+  lanClient.printf("OTA:IMAGE_STATE:%u\n",(unsigned)ota.imageState);
+  lanClient.printf("OTA:ROLLBACK_PENDING:%u\n",ota.rollbackPending?1:0);
+  lanClient.printf("OTA:ROLLBACK_SUPPORTED:%u\n",ota.rollbackSupported?1:0);
+  lanClient.println("OTA:TRANSFER_ENABLED:0");
   return;
  }
  if(line=="STATUS"){
