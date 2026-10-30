@@ -105,6 +105,20 @@ class Handler(BaseHTTPRequestHandler):
             if length<2 or length>MAX_BODY:return self._reply(413,{"error":"invalid_length"})
             data=json.loads(self.rfile.read(length))
             if not isinstance(data,dict):raise ValueError("Expected object")
+            if self.path=="/speaker/identify":
+                # Optional CPU service: never invoke on I2S or WebSocket
+                # callback threads. Requires explicit local voice-profile
+                # export; no automatic voice recording retention.
+                profile_path=os.environ.get("KITTY_VOICE_PROFILES_V6","")
+                if not profile_path or not os.path.isfile(profile_path):
+                    return self._reply(503,{"error":"speaker_id_disabled"})
+                encoded=data.get("audio_wav_b64","")
+                if not isinstance(encoded,str) or len(encoded)>11000:
+                    # This legacy HTTP server has MAX_BODY=16384. Full
+                    # voice samples need a dedicated bounded binary channel;
+                    # refuse rather than accidentally truncating audio.
+                    return self._reply(413,{"error":"use_dedicated_audio_transport"})
+                return self._reply(503,{"error":"speaker_transport_not_enabled"})
             if self.path in ("/owner/challenge","/owner/verify"):
                 if OWNER_PROOF is None:
                     return self._reply(503,{"error":"owner_proof_disabled"})
