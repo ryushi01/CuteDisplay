@@ -39,6 +39,7 @@
 #include "BrainAI.h"
 #include "BrainRealtimeDirect.h"
 #include "BrainMemoryAI.h"
+#include "KittyMemorySyncV6.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr char S3_FW_VERSION[]="CallFace-v23-dev";
@@ -1239,6 +1240,11 @@ void setup(){
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
  BrainAI::init();
  KittyMemory::init();
+ KittyMemorySyncV6::init([]()->bool {
+  return !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active() &&
+         !BrainAI::busy && !BrainVoiceSTT::running && !BrainTTS::running &&
+         !BrainC5OTA::updating();
+ });
  BrainRealtimeDirect::init();
  BrainTTS::init();
  BrainVoiceSTT::init();
