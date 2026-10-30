@@ -1053,6 +1053,31 @@ inline void task(void*){
  String summaryBatch;
  uint8_t summaryTurnCount=0;
  while(true){
+  // Serve at most one bounded export block per pass, on the SD-owning task.
+  ExportRequest exportReq={};
+  if(mounted && exportRequests && exportBlocks &&
+     xQueueReceive(exportRequests,&exportReq,0)==pdTRUE){
+   ExportBlock block={};
+   block.file=exportReq.file;block.offset=exportReq.offset;
+   if(exportReq.file<EXPORT_COUNT){
+    String filename=String("/kitty/")+EXPORT_NAMES[exportReq.file];
+    File f=SD_MMC.open(filename,FILE_READ);
+    if(f){
+     block.total=(uint32_t)f.size();
+     if(exportReq.offset<=block.total && f.seek(exportReq.offset)){
+      block.length=(uint16_t)f.read(block.data,
+        min((size_t)sizeof(block.data),(size_t)(block.total-exportReq.offset)));
+      block.ok=1;
+     }
+     f.close();
+    }else if(!SD_MMC.exists(filename)){
+     // A freshly formatted card has no files yet. Export as empty.
+     block.ok=exportReq.offset==0?1:0;
+     block.total=0;
+    }
+   }
+   (void)xQueueSend(exportBlocks,&block,0);
+  }
   // Apply completed summaries entirely on the SD task, never the network callback.
   SummaryResult summary={};
   if(mounted && summaryResults && xQueueReceive(summaryResults,&summary,0)==pdTRUE){
@@ -1283,6 +1308,16 @@ inline void init(){
  }
  if(!summaryResults)summaryResults=xQueueCreate(2,sizeof(SummaryResult));
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
+ if(!exportRequests)exportRequests=xQueueCreate(1,sizeof(ExportRequest));
+ if(!exportBlocks){
+  // One 780-byte block; PSRAM-backed queue avoids internal heap pressure.
+  static StaticQueue_t exportQueueCtrl;
+  static uint8_t *exportStorage=nullptr;
+  exportStorage=(uint8_t*)heap_caps_malloc(sizeof(ExportBlock),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(exportStorage)exportBlocks=xQueueCreateStatic(1,sizeof(ExportBlock),exportStorage,&exportQueueCtrl);
+ }
+ if(!exportRequests || !exportBlocks)Serial.println("[MEMORY] Export queues unavailable");
+
  if(writes && !worker){
   // Memory parsing and SD index scanning exceed the old 6144-byte stack
   // budget in some realtime sessions. Keep the FreeRTOS task stack in
