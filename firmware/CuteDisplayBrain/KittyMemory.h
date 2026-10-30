@@ -10,7 +10,8 @@
 
 namespace KittyMemory {
 static constexpr size_t SLOT_BYTES=768;
-struct Entry { char question[256]; char answer[512]; uint8_t ownerVerified=0; };
+struct Entry { char question[256]; char answer[512]; uint8_t ownerVerified=0;
+ char speaker[64]="unknown"; char source[24]="unverified"; };
 static QueueHandle_t writes=nullptr;
 // Bounded RAM handoff to the optional idle-only AI consolidator.
 // Never waits on inference, and never touches SD in a network task.
@@ -708,17 +709,28 @@ inline void consolidatePreferences(const String &utterance){
  }
 }
 
-inline bool queue(const String &question,const String &answer){
+inline bool queueAttributed(const String &question,const String &answer,
+                            const String &speaker,const String &source){
  if(!writes || !mounted || question.isEmpty() || answer.isEmpty()){Serial.printf("[MEMORY] enqueue refused mounted=%d queue=%d\n",mounted?1:0,writes?1:0);return false;}
  Entry e={};
  sanitize(question,sizeof(e.question)-1).toCharArray(e.question,sizeof(e.question));
  sanitize(answer,sizeof(e.answer)-1).toCharArray(e.answer,sizeof(e.answer));
+ // Voice matching is probabilistic: NEVER set ownerVerified from a match.
+ String safeSpeaker=(!speaker.isEmpty() && speaker.length()<sizeof(e.speaker) &&
+   speaker.indexOf('\\t')<0 && speaker.indexOf('\\n')<0)?speaker:String("unknown");
+ String safeSource=(source=="voice_probable")?source:String("unverified");
+ safeSpeaker.toCharArray(e.speaker,sizeof(e.speaker));
+ safeSource.toCharArray(e.source,sizeof(e.source));
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
  // Facts are merged exclusively in the SD worker, so revision detection
  // and snapshot persistence cannot miss an early RAM-only mutation.
  // The active recall cache updates immediately; SD persistence is deferred.
  addCache(question,answer);
  return true;
+}
+
+inline bool queue(const String &question,const String &answer){
+ return queueAttributed(question,answer,"unknown","unverified");
 }
 
 #include <esp_heap_caps.h>
@@ -1140,8 +1152,9 @@ inline void task(void*){
    // identity source is wired into a later protocol revision.
    File sources=SD_MMC.open("/kitty/turn_sources.tsv",FILE_APPEND);
    if(sources){
-    sources.printf("%lu\t%lu\tunknown\tunknown\tunverified\n",
-      (unsigned long)ts,(unsigned long)offset);
+    sources.printf("%lu\t%lu\t%s\t%s\t%s\n",
+      (unsigned long)ts,(unsigned long)offset,
+      e.speaker,strcmp(e.speaker,"unknown")==0?"unknown":"guest",e.source);
     sources.close();
    }else{
     Serial.println("[MEMORY V6] attribution sidecar unavailable; source remains unknown");
