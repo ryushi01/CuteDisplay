@@ -42,7 +42,6 @@ def patch(source):
         raise ValueError("incompatible event forward indentation")
     match=matches[0]
     indent=match.group("indent")
-    child=indent+"    "
     body=[
         "if kitty_voice_v6 is not None and isinstance(event,dict):",
         "    kind = event.get('type')",
@@ -59,7 +58,7 @@ def patch(source):
         "                transcript=event.get('transcript','')))",
         "await ws.send_json(event)",
     ]
-    replacement="\\n".join((indent + line if i==0 else indent+line) for i,line in enumerate(body))
+    replacement="\\n".join(indent+line for line in body)
     source=source[:match.start()]+replacement+source[match.end():]
     compile(source,"realtime.py","exec")
     return source
