@@ -68,7 +68,10 @@ public:
   return true;
  }
  bool armBoot(bool explicitAuthorization){
-  if(state!=State::Ready || !explicitAuthorization || !target)return false;
+  // Never switch boot slots without an enabled rollback-capable bootloader.
+  // A successful application compile does not prove bootloader rollback support.
+  if(state!=State::Ready || !explicitAuthorization || !target ||
+     !KittyOTASafety::inspect().rollbackSupported)return false;
   if(esp_ota_set_boot_partition(target)!=ESP_OK){state=State::Failed;return false;}
   state=State::Idle;
   return true;
