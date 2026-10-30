@@ -17,7 +17,9 @@ MAX_FILE = 256 * 1024 * 1024
 class SnapshotReceiver:
     def __init__(self, root):
         self.root=Path(root).resolve()
-        self.root.mkdir(parents=True,exist_ok=True)
+        self.root.mkdir(parents=True,exist_ok=True,mode=0o700)
+        if self.root.is_symlink():
+            raise ValueError('snapshot root cannot be a symlink')
     @staticmethod
     def valid_id(snapshot):
         return isinstance(snapshot,str) and 8<=len(snapshot)<=64 and all(c.isascii() and (c.isalnum() or c in "_-") for c in snapshot)
@@ -26,18 +28,22 @@ class SnapshotReceiver:
             raise ValueError("invalid snapshot or filename")
         path=self.root/("staging-"+snapshot)/"kitty"
         path.mkdir(mode=0o700,parents=True,exist_ok=True)
+        if path.is_symlink():
+            raise ValueError("symlinked snapshot path")
         return path/name
     def chunk(self,snapshot,name,offset,data):
         if not isinstance(data,bytes) or len(data)>MAX_CHUNK or not isinstance(offset,int) or offset<0 or offset+len(data)>MAX_FILE:
             raise ValueError("invalid chunk")
         path=self._file(snapshot,name)
-        flags=os.O_CREAT|os.O_RDWR
+        flags=os.O_CREAT|os.O_RDWR|getattr(os,"O_NOFOLLOW",0)
         fd=os.open(path,flags,0o600)
         try:
             with os.fdopen(fd,"r+b",closefd=False) as f:
                 f.seek(0,2)
                 current=f.tell()
                 if offset<current:
+                    if offset+len(data)>current:
+                        raise ValueError("partial chunk replay")
                     f.seek(offset)
                     if f.read(len(data))!=data:
                         raise ValueError("replayed chunk differs")
