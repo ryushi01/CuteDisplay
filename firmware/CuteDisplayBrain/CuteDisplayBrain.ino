@@ -794,6 +794,16 @@ static void consoleCommand(String cmd){
   Serial.printf("[MEMORY] probe queued=%d; check 'memory status' after a moment\n",accepted?1:0);
   return;
  }
+ if(cmd=="ota https stage CONFIRM"){
+  if(otaBusy() || otaReceiver.active()){
+   Serial.println("[OTA HTTPS] refused: call/audio/OTA active");
+  }else{
+   KittyHTTPSOTA::stageToInactiveSlot([]()->bool {
+    return !otaBusy() && !otaReceiver.active();
+   });
+  }
+  return;
+ }
  if(cmd=="ota https check"){
   if(otaBusy())Serial.println("[OTA HTTPS] refused: call/audio/OTA active");
   else KittyHTTPSOTA::preflight();
