@@ -27,7 +27,7 @@ def get_model(name=DEFAULT_MODEL):
 
 def load_rows(sd):
     root = Path(sd) / "kitty"
-    for filename in ("facts.tsv", "dated_plans.tsv", "summaries.tsv", "conversations.tsv"):
+    for filename in ("facts.tsv", "dated_plans.tsv", "summaries.tsv", "conversations.tsv", "speaker_claims_v6.tsv"):
         path = root / filename
         if not path.is_file():
             continue
@@ -42,6 +42,8 @@ def load_rows(sd):
                     key, value = "summary:" + parts[0], parts[1]
                 elif filename == "conversations.tsv" and len(parts) >= 3:
                     key, value = "conversation:" + parts[0], parts[1] + " " + parts[2]
+                elif filename == "speaker_claims_v6.tsv" and len(parts) >= 5:
+                    key, value = "speaker_claim:" + parts[1], parts[2] + ": " + parts[3]
                 else:
                     continue
                 if key and value:
