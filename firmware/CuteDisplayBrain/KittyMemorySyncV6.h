@@ -68,6 +68,11 @@ inline bool ackOffset(const String &response,uint32_t wanted){
  return (uint32_t)response.substring(pos+1).toInt()==wanted;
 }
 inline bool exportAndSend(const String &snapshot){
+ // Reject snapshots assembled across a concurrent conversation/fact change.
+ // Never block SD writes to force consistency.
+ const uint32_t savedBefore=KittyMemory::saved;
+ const uint32_t factsBefore=KittyMemory::factRevision;
+ const uint32_t summariesBefore=KittyMemory::summaryRevision;
  String manifest="{";
  for(uint8_t i=0;i<KittyMemory::EXPORT_COUNT;i++){
   if(!allowed())return false;
@@ -109,6 +114,8 @@ inline bool exportAndSend(const String &snapshot){
     String(total)+",\"sha256\":\""+digestHex(hash)+"\"}";
  }
  manifest+="}";
+ if(savedBefore!=KittyMemory::saved || factsBefore!=KittyMemory::factRevision ||
+    summariesBefore!=KittyMemory::summaryRevision)return false;
  String reply;
  String body=String("{\"snapshot\":\"")+snapshot+"\",\"manifest\":"+manifest+"}";
  const int status=send("/snapshot/finalize",body,reply);
