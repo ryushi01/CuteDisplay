@@ -9,6 +9,7 @@
 #include <ESPmDNS.h>
 #include <mbedtls/md.h>
 #include <esp_system.h>
+#include <esp_ota_ops.h>
 #include <Preferences.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -1049,6 +1050,21 @@ static void handleBrainLANLine(const String &line){
   }else{
    lanClient.println("DENIED");lanClient.stop();
   }
+  return;
+ }
+ if(line=="OTA_CAPS"){
+  // Read-only inventory after HMAC authentication; never writes flash.
+  const esp_partition_t *running=esp_ota_get_running_partition();
+  const esp_partition_t *next=esp_ota_get_next_update_partition(nullptr);
+  const bool busy=BrainC5OTA::updating() || BrainRealtimeDirect::active() ||
+     BrainRealtimeAudio::active() || BrainAI::busy || BrainVoiceSTT::running ||
+     BrainTTS::running || BrainAudioTest::running;
+  lanClient.printf("OTA:FW:%s\\n",S3_FW_VERSION);
+  lanClient.printf("OTA:RUNNING_SIZE:%lu\\n",(unsigned long)(running?running->size:0));
+  lanClient.printf("OTA:NEXT_SIZE:%lu\\n",(unsigned long)(next?next->size:0));
+  lanClient.printf("OTA:RUNNING_SUBTYPE:%u\\n",(unsigned)(running?running->subtype:255));
+  lanClient.printf("OTA:BUSY:%u\\n",busy?1:0);
+  lanClient.println("OTA:DEPLOY_SUPPORTED:0");
   return;
  }
  if(line=="STATUS"){
