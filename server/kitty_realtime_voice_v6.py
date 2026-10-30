@@ -9,6 +9,10 @@ import asyncio, base64, binascii
 from collections import deque
 from kitty_voice_gateway_adapter_v6 import recognize_completed_utterance
 
+# One inference request per gateway process. Drop load instead of queuing
+# speech identification behind CPU saturation.
+_VOICE_SLOTS=asyncio.Semaphore(1)
+
 MAX_PCM=24_000*2*12
 MAX_ENCODED=48_000
 class UtteranceCollector:
@@ -48,9 +52,12 @@ async def recognize_turn(collector,item_id,emit,timeout=0.8,transcript=""):
     if not isinstance(item_id,str) or not 1<=len(item_id)<=160:
         return
     result={"speaker_id":"unknown","confidence":"unknown"}
-    if pcm:
+    if pcm and not _VOICE_SLOTS.locked():
         try:
-            result=await asyncio.wait_for(recognize_completed_utterance(pcm,timeout=timeout),timeout=timeout+0.1)
+            async with _VOICE_SLOTS:
+                result=await asyncio.wait_for(
+                    recognize_completed_utterance(pcm,timeout=timeout),
+                    timeout=timeout+0.1)
         except (Exception,asyncio.CancelledError):
             pass
     # Even if the utterance was too short for a biometric match,
