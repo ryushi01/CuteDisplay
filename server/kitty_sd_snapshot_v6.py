@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 FILES = {"facts.tsv", "factsmeta.tsv", "dated_plans.tsv", "summaries.tsv",
-         "conversations.tsv", "turn_sources.tsv", "voice_profiles_v6.json"}
+         "conversations.tsv", "turn_sources.tsv", "voice_profiles_v6.json", "speaker_claims_v6.tsv"}
 MAX_CHUNK = 8192
 MAX_FILE = 256 * 1024 * 1024
 
