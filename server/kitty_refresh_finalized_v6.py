@@ -7,6 +7,7 @@ Use from an external timer only after verifying receiver and permissions.
 import argparse
 import json
 import os
+import shutil
 from pathlib import Path
 from kitty_sd_semantic_index import build
 
@@ -25,6 +26,22 @@ def newest_finalized(root):
         raise ValueError("no finalized SD snapshots")
     return max(candidates, key=lambda p:(p.stat().st_mtime_ns,p.name))
 
+def prune_superseded(root, retain):
+    """Keep one finalized recovery snapshot, never touch active staging uploads."""
+    parent = Path(root).resolve(strict=True)
+    removed = 0
+    for candidate in parent.iterdir():
+        if (candidate == retain or not candidate.name.startswith("snapshot-")
+                or candidate.is_symlink() or not candidate.is_dir()
+                or not (candidate / "kitty").is_dir()):
+            continue
+        # Reject directory links inside finalized copies.
+        if any(p.is_symlink() for p in candidate.rglob("*")):
+            continue
+        shutil.rmtree(candidate)
+        removed += 1
+    return removed
+
 def refresh(root, db, *, dry_run=False):
     chosen = newest_finalized(root)
     db = Path(db)
@@ -33,7 +50,10 @@ def refresh(root, db, *, dry_run=False):
     if dry_run:
         return {"snapshot":chosen.name,"index":str(db),"mode":"dry-run"}
     result = build(str(chosen), str(db))
-    return {"snapshot":chosen.name, **result}
+    # Only prune after a complete successful semantic refresh. SD remains
+    # authoritative; keep the newest verified copy as a bounded recovery cache.
+    removed = prune_superseded(root, chosen)
+    return {"snapshot":chosen.name, "old_snapshots_removed":removed, **result}
 
 def main():
     p=argparse.ArgumentParser()
