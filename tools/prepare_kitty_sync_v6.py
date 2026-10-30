@@ -2,7 +2,7 @@
 """Prepare local-only S3 sync configuration; never print or commit the token.
 
 Provide a private bearer token file (same value as KITTY_SYNC_DEVICE_TOKEN)
-and gateway certificate. Use the generated header ONLY in trusted local builds.
+and public Ragnarok trust anchor. Use the generated header ONLY in trusted local builds.
 """
 import argparse
 import json
@@ -10,8 +10,8 @@ import os
 from pathlib import Path
 
 def prepare(cert, token, output, url):
-    if not url.startswith("https://") or not url.endswith(":8843"):
-        raise ValueError("expected private HTTPS gateway URL ending in :8843")
+    if url != "https://ragnarok-project.com/kitty-v6/sync":
+        raise ValueError("S3 sync must use ragnarok-project.com HTTPS port 443")
     certificate=Path(cert).read_text(encoding="ascii")
     secret=Path(token).read_text(encoding="ascii").strip()
     if "-----BEGIN CERTIFICATE-----" not in certificate or "-----END CERTIFICATE-----" not in certificate:
@@ -39,7 +39,7 @@ def main():
     parser.add_argument("--cert",required=True)
     parser.add_argument("--token-file",required=True)
     parser.add_argument("--output",required=True)
-    parser.add_argument("--url",default="https://10.5.5.245:8843")
+    parser.add_argument("--url",default="https://ragnarok-project.com/kitty-v6/sync")
     args=parser.parse_args()
     result=prepare(args.cert,args.token_file,args.output,args.url)
     print("Private S3 sync header created:",result)
