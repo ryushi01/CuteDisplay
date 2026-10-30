@@ -32,6 +32,6 @@ jobs:
       - name: Install minimal test dependency
         run: python -m pip install 'numpy>=1.26,<3' 'cryptography>=42,<47' 'scipy>=1.12,<2'
       - name: Compile Python modules
-        run: python -m compileall -q server/kitty_identity_attribution_v6.py server/kitty_semantic_attribution_v6.py server/kitty_sd_semantic_index.py server/kitty_memory_service.py server/kitty_owner_proof_v6.py server/kitty_owner_session_v6.py server/kitty_voice_id_v6.py server/kitty_voice_profiles_sd_v6.py server/kitty_voice_gateway_adapter_v6.py
+        run: python -m compileall -q server/kitty_identity_attribution_v6.py server/kitty_semantic_attribution_v6.py server/kitty_sd_semantic_index.py server/kitty_memory_service.py server/kitty_refresh_finalized_v6.py server/kitty_owner_proof_v6.py server/kitty_owner_session_v6.py server/kitty_voice_id_v6.py server/kitty_voice_profiles_sd_v6.py server/kitty_voice_gateway_adapter_v6.py
       - name: Run identity and semantic regression tests (no model download)
         run: python -m unittest discover -s server -p 'test_kitty_*v6.py' -v
