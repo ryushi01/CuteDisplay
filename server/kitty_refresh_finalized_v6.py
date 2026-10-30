@@ -8,6 +8,8 @@ import argparse
 import json
 import os
 import shutil
+import time
+import sqlite3
 from pathlib import Path
 from kitty_sd_semantic_index import build
 
@@ -42,6 +44,45 @@ def prune_superseded(root, retain):
         removed += 1
     return removed
 
+def prune_expired_staging(root, *, max_age_seconds=7 * 24 * 3600, now=None):
+    """Remove abandoned SD-upload staging copies, never live or symlinked ones.
+
+    Only call after a successful index refresh. Seven-day minimum grace period
+    protects resumable uploads and does not depend on Ubuntu holding memories.
+    """
+    if max_age_seconds < 7 * 24 * 3600:
+        raise ValueError("staging grace period must be at least seven days")
+    parent = Path(root)
+    if parent.is_symlink():
+        raise ValueError("snapshot root symlink refused")
+    parent = parent.resolve(strict=True)
+    now = time.time() if now is None else now
+    removed = 0
+    for candidate in parent.iterdir():
+        if (not candidate.name.startswith("staging-") or candidate.is_symlink()
+                or not candidate.is_dir()):
+            continue
+        if now - candidate.stat().st_mtime < max_age_seconds:
+            continue
+        # Do not follow symlinked files or directories; skip that upload.
+        if any(p.is_symlink() for p in candidate.rglob("*")):
+            continue
+        shutil.rmtree(candidate)
+        removed += 1
+    return removed
+
+
+def compact_derived_index(db_path):
+    """Compact disposable SQLite embeddings, not source personal memories."""
+    path = Path(db_path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("index must be a regular, non-symlink file")
+    with sqlite3.connect(str(path), timeout=10) as conn:
+        conn.execute("PRAGMA busy_timeout=10000")
+        conn.execute("PRAGMA optimize")
+        conn.execute("VACUUM")
+
+
 def refresh(root, db, *, dry_run=False):
     chosen = newest_finalized(root)
     db = Path(db)
@@ -53,7 +94,12 @@ def refresh(root, db, *, dry_run=False):
     # Only prune after a complete successful semantic refresh. SD remains
     # authoritative; keep the newest verified copy as a bounded recovery cache.
     removed = prune_superseded(root, chosen)
-    return {"snapshot":chosen.name, "old_snapshots_removed":removed, **result}
+    # Cleanup occurs only after build() commits a complete active generation.
+    # Never prune staging in dry-run mode or on an unsuccessful refresh.
+    expired = prune_expired_staging(root)
+    compact_derived_index(db)
+    return {"snapshot":chosen.name, "old_snapshots_removed":removed,
+            "expired_staging_removed":expired, **result}
 
 def main():
     p=argparse.ArgumentParser()
