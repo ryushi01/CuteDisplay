@@ -10,7 +10,7 @@
 
 namespace KittyMemory {
 static constexpr size_t SLOT_BYTES=768;
-struct Entry { char question[256]; char answer[512]; };
+struct Entry { char question[256]; char answer[512]; uint8_t ownerVerified=0; };
 static QueueHandle_t writes=nullptr;
 // Bounded RAM handoff to the optional idle-only AI consolidator.
 // Never waits on inference, and never touches SD in a network task.
@@ -1147,6 +1147,15 @@ inline void task(void*){
     Serial.println("[MEMORY V6] attribution sidecar unavailable; source remains unknown");
    }
    saved++;appendIndex(e,offset,ts);
+   // Security boundary: unverified microphone input may be archived but
+   // cannot become a verified owner profile/preference/correction. No
+   // trustworthy human identity issuer is connected yet, so ownerVerified
+   // stays false. The trusted-session integration must set it only at enqueue.
+   if(!e.ownerVerified){
+     Serial.println("[MEMORY V6] unverified turn archived; owner fact writes skipped");
+     updateStorage();
+     continue;
+   }
    // Batch user statements for an idle-only model summary. No model call or SD
    // summary write occurs on the websocket or I2S execution path.
    String snippet=sanitize(String(e.question),115);
