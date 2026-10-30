@@ -1252,6 +1252,14 @@ void setup(){
   (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
  Serial.printf("[S3] CuteDisplay Brain FW=%s\n",S3_FW_VERSION);
+ const esp_partition_t *runningApp=esp_ota_get_running_partition();
+ const esp_partition_t *bootApp=esp_ota_get_boot_partition();
+ Serial.printf("[S3 BOOT PARTITION] running=%s offset=0x%08lx selected=%s offset=0x%08lx build=kitty-v6-partition-diag-20261031\\n",
+  runningApp?runningApp->label:"unknown",
+  runningApp?(unsigned long)runningApp->address:0UL,
+  bootApp?bootApp->label:"unknown",
+  bootApp?(unsigned long)bootApp->address:0UL);
+
 #if defined(CONFIG_NIMBLE_ENABLED)
  Serial.println("[S3] BLE host=NimBLE");
 #elif defined(CONFIG_BLUEDROID_ENABLED)
