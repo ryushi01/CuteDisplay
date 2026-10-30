@@ -80,6 +80,18 @@ echo "PASS: automatic C5 OTA allowed only when version is newer and devices are 
 echo "[3/5] Embed C5 v$VERSION in S3 firmware"
 mkdir -p "$WORK/CuteDisplayBrain"
 cp -R "$ROOT/firmware/CuteDisplayBrain/." "$WORK/CuteDisplayBrain/"
+# Local private sync credentials must never appear in GitHub Actions artifacts.
+# This option is intended only for a trusted offline/local build machine.
+if [ -n "${KITTY_SYNC_PRIVATE_HEADER:-}" ]; then
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    echo "Refusing private credential injection in public CI" >&2; exit 1
+  fi
+  test -f "$KITTY_SYNC_PRIVATE_HEADER" || {
+    echo "Missing private sync configuration header" >&2; exit 1;
+  }
+  cp "$KITTY_SYNC_PRIVATE_HEADER" "$WORK/CuteDisplayBrain/KittySyncPrivateConfig.h"
+  chmod 600 "$WORK/CuteDisplayBrain/KittySyncPrivateConfig.h"
+fi
 cp "$PARTITIONS" "$WORK/CuteDisplayBrain/partitions.csv"
 python3 "$ROOT/tools/package_c5_firmware.py" \
   --bin "$WORK/build-c5/lcd.ino.bin" --version "$VERSION" \
@@ -97,6 +109,8 @@ arduino-cli compile --clean --fqbn "$S3_FQBN" \
 test -s "$WORK/build-s3/CuteDisplayBrain.ino.bin"
 mkdir -p "$OUT/CuteDisplayBrain"
 cp -R "$WORK/CuteDisplayBrain/." "$OUT/CuteDisplayBrain/"
+# Never distribute the plaintext header alongside the release sources.
+rm -f "$OUT/CuteDisplayBrain/KittySyncPrivateConfig.h"
 cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
   "$OUT/CuteDisplay-CombinedFirmware.bin"
 cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
