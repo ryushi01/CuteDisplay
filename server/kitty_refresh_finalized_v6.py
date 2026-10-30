@@ -11,9 +11,10 @@ from pathlib import Path
 from kitty_sd_semantic_index import build
 
 def newest_finalized(root):
-    root = Path(root).resolve(strict=True)
+    root = Path(root)
     if root.is_symlink():
         raise ValueError("snapshot root symlink refused")
+    root = root.resolve(strict=True)
     candidates = []
     for item in root.iterdir():
         if not item.name.startswith("snapshot-") or item.is_symlink() or not item.is_dir():
