@@ -43,7 +43,8 @@ class CollectorTests(unittest.IsolatedAsyncioTestCase):
         got=[]
         async def emit(v):got.append(v)
         await recognize_turn(c,"item-42",emit)
-        self.assertEqual(got,[])
+        self.assertEqual(got[0]["speaker_id"],"unknown")
+        self.assertEqual(got[0]["confidence"],"unknown")
     async def test_truncates_audio_ring(self):
         c=UtteranceCollector()
         c.add(base64.b64encode(b"\x01\x00"*20000).decode())
