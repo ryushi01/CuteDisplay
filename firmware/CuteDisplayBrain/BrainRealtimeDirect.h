@@ -269,8 +269,8 @@ inline const char *preflightError(){
  if(WiFi.status()!=WL_CONNECTED)return "S3_WIFI_OFFLINE";
  if(!BrainClock::valid())return "S3_CLOCK_UNSYNCED";
  if(url.isEmpty())return "OPENWEBUI_URL_MISSING";
- if(!url.startsWith("https://")||url.indexOf('@')>=0||
-    url.indexOf('#')>=0||url.indexOf('?')>=0||url.length()>256)
+ if(url!="https://ragnarok-project.com" &&
+    !url.startsWith("https://ragnarok-project.com/"))
   return "OPENWEBUI_URL_INVALID";
  if(model.isEmpty()||model.length()>128)return "OPENWEBUI_MODEL_MISSING_OR_INVALID";
  if(!key.startsWith("sk-")||key.length()<=20)return "S3_SAVED_KEY_NOT_VALID_SK_FORMAT";
