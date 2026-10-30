@@ -33,7 +33,7 @@ def decode_table(data):
             break
         if magic != MAGIC:
             raise ValueError(f"Unexpected partition entry magic at +0x{offset:x}: 0x{magic:04X}")
-        entries.append({"name": label.split(b"\\x00", 1)[0].decode("ascii", errors="replace"),
+        entries.append({"name": label.split(b"\x00", 1)[0].decode("ascii", errors="replace"),
                         "type": kind, "subtype": subtype, "offset": address,
                         "size": size, "flags": flags,
                         "ota_name": OTA_SUBTYPES.get(subtype) if kind == 0 else None})
