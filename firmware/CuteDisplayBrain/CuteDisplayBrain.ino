@@ -1102,7 +1102,7 @@ static void handleBrainLANLine(const String &line){
    if(otaBusy() || !otaReceiver.append(line,true)){
     otaReceiver.cancel();lanClient.println("OTA:DATA_REJECTED");return;
    }
-   lanClient.printf("OTA:ACK:%lu\\n",(unsigned long)otaReceiver.progress());
+   lanClient.printf("OTA:ACK:%lu\n",(unsigned long)otaReceiver.progress());
    return;
   }
   if(line=="OTA_FINISH"){
