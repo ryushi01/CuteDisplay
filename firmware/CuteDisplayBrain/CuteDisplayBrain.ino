@@ -68,6 +68,10 @@ static WiFiServer brainLAN(BRAIN_LAN_PORT);
 static WiFiClient lanClient;
 static bool lanListening=false,lanAuthenticated=false,lanAwaitingCommand=false,brainMDNS=false;
 static String lanSecret,lanNonce;
+static KittyOTASession::Receiver otaReceiver;
+static bool otaBusy(){return BrainC5OTA::updating() || BrainRealtimeDirect::active() ||
+ BrainRealtimeAudio::active() || BrainAI::busy || BrainVoiceSTT::running ||
+ BrainTTS::running || BrainAudioTest::running || lanAwaitingCommand;}
 static char lanLine[192]={0};
 static size_t lanLineLen=0;
 static uint32_t lanLastActivity=0;
@@ -1037,6 +1041,7 @@ static bool verifyBrainLANHMAC(const String &hmac){
  return differences==0;
 }
 static void stopBrainLAN(){
+ otaReceiver.cancel();
  if(lanAwaitingCommand)cancelCommand("LAN_LINK_LOST");
  if(lanClient)lanClient.stop();
  lanAuthenticated=false;lanAwaitingCommand=false;
@@ -1056,12 +1061,17 @@ static void handleBrainLANLine(const String &line){
   }
   return;
  }
+ if(line=="OTA_ABORT"){otaReceiver.cancel();lanClient.println("OTA:ABORTED");return;}
+ if(line=="OTA_BEGIN" || line.startsWith("OTA_BEGIN ") ||
+    line.startsWith("OTA_DATA ") || line=="OTA_FINISH" || line=="OTA_COMMIT"){
+  // Fail closed: command transport is not production-authorized until
+  // bootloader rollback is verified and the release activation protocol is audited.
+  lanClient.println("OTA:DISABLED");return;
+ }
  if(line=="OTA_CAPS"){
   // Read-only inventory after HMAC authentication; never writes flash.
   const KittyOTASafety::Status ota=KittyOTASafety::inspect();
-  const bool busy=BrainC5OTA::updating() || BrainRealtimeDirect::active() ||
-     BrainRealtimeAudio::active() || BrainAI::busy || BrainVoiceSTT::running ||
-     BrainTTS::running || BrainAudioTest::running;
+  const bool busy=otaBusy() || otaReceiver.active();
   lanClient.printf("OTA:FW:%s\n",S3_FW_VERSION);
   lanClient.printf("OTA:RUNNING_SIZE:%lu\n",(unsigned long)ota.runningBytes);
   lanClient.printf("OTA:NEXT_SIZE:%lu\n",(unsigned long)ota.nextBytes);
@@ -1105,6 +1115,7 @@ static void handleBrainLANLine(const String &line){
  acceptCommand(command);
 }
 static void pollBrainLAN(){
+ otaReceiver.tick();
  if(!brainWiFiOnline()||lanSecret.length()!=64){
   if(lanListening||lanClient||brainMDNS)stopBrainLAN();
   return;
