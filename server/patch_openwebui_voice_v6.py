@@ -35,20 +35,31 @@ def patch(source):
                     if event.get('type')=='input_audio_buffer.append':
                         kitty_voice_v6.add(event.get('audio'))
                 command = protocol.command(event)""",1)
-    # Provider event forwarding: copy only completed item identifiers. Never
-    # await speaker recognition in provider-response or microphone loops.
-    source=source.replace(FORWARD,"""if kitty_voice_v6 is not None and isinstance(event,dict):
-                            kind = event.get('type')
-                            if kind=='input_audio_buffer.speech_started':
-                                kitty_voice_v6.speech_started()
-                            elif kind=='input_audio_buffer.speech_stopped':
-                                kitty_voice_v6.speech_stopped()
-                            elif kind=='conversation.item.input_audio_transcription.completed':
-                                from kitty_realtime_voice_v6 import recognize_turn
-                                if isinstance(event.get('item_id'),str):
-                                    asyncio.create_task(recognize_turn(
-                                        kitty_voice_v6,event['item_id'],ws.send_json))
-                        await ws.send_json(event)""",1)
+    # Capture indentation from the *real installed* upstream relay line.
+    import re
+    matches=list(re.finditer(r"(?m)^(?P<indent>[ ]+)await ws\\.send_json\\(event\\)[ ]*$",source))
+    if len(matches)!=1:
+        raise ValueError("incompatible event forward indentation")
+    match=matches[0]
+    indent=match.group("indent")
+    child=indent+"    "
+    body=[
+        "if kitty_voice_v6 is not None and isinstance(event,dict):",
+        "    kind = event.get('type')",
+        "    if kind=='input_audio_buffer.speech_started':",
+        "        kitty_voice_v6.speech_started()",
+        "    elif kind=='input_audio_buffer.speech_stopped':",
+        "        kitty_voice_v6.speech_stopped()",
+        "    elif kind=='conversation.item.input_audio_transcription.completed':",
+        "        from kitty_realtime_voice_v6 import recognize_turn",
+        "        if isinstance(event.get('item_id'),str):",
+        "            import asyncio",
+        "            asyncio.create_task(recognize_turn(",
+        "                kitty_voice_v6,event['item_id'],ws.send_json))",
+        "await ws.send_json(event)",
+    ]
+    replacement="\\n".join((indent + line if i==0 else indent+line) for i,line in enumerate(body))
+    source=source[:match.start()]+replacement+source[match.end():]
     compile(source,"realtime.py","exec")
     return source
 
