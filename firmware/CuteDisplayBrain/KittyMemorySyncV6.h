@@ -84,7 +84,7 @@ inline bool exportAndSend(const String &snapshot){
    if(block.total!=total || offset+block.length>total){ok=false;break;}
    if(block.length || (total==0 && offset==0)){
     String payload=encode(block.data,block.length);
-    if(payload.isEmpty()){ok=false;break;}
+    if(block.length && payload.isEmpty()){ok=false;break;}
     String req=String("{\"snapshot\":\"")+snapshot+
       "\",\"name\":\""+KittyMemory::EXPORT_NAMES[i]+
       "\",\"offset\":"+String(offset)+",\"data\":\""+payload+"\"}";
