@@ -7,10 +7,22 @@ the already-available S3 local context on timeout, failure, or empty results.
 import asyncio
 import json
 import os
+import threading
 from urllib import request
 
 MAX_CONTEXT_BYTES=600
 DEFAULT_TIMEOUT_SEC=0.18
+# A timed-out asyncio.to_thread() keeps running. Permit one outstanding
+# request per process so repeated turns never create unbounded HTTP threads.
+_LOOKUP_SLOT = threading.BoundedSemaphore(1)
+
+def _bounded_lookup(url, token, query, speaker_id, timeout):
+    if not _LOOKUP_SLOT.acquire(blocking=False):
+        return []
+    try:
+        return _lookup(url, token, query, speaker_id, timeout)
+    finally:
+        _LOOKUP_SLOT.release()
 
 def _lookup(url, token, query, speaker_id, timeout):
     payload={"query":query[:300]}
@@ -46,7 +58,7 @@ async def bounded_semantic_context(query, local_context, *,
     timeout=max(0.025,min(float(timeout),0.5))
     try:
         results=await asyncio.wait_for(
-            asyncio.to_thread(_lookup,url,token,query,speaker_id,timeout),
+            asyncio.to_thread(_bounded_lookup,url,token,query,speaker_id,timeout),
             timeout=timeout)
     except (Exception,asyncio.CancelledError):
         return fallback,"local"
