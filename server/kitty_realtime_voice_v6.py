@@ -45,12 +45,16 @@ class UtteranceCollector:
 async def recognize_turn(collector,item_id,emit,timeout=0.8,transcript=""):
     """Emit only a turn-scoped probable claim or unknown. Never verify owner."""
     pcm=collector.pop_for_transcript()
-    if not pcm or not isinstance(item_id,str) or not 1<=len(item_id)<=160:
+    if not isinstance(item_id,str) or not 1<=len(item_id)<=160:
         return
-    try:
-        result=await asyncio.wait_for(recognize_completed_utterance(pcm,timeout=timeout),timeout=timeout+0.1)
-    except (Exception,asyncio.CancelledError):
-        result={"speaker_id":"unknown","confidence":"unknown"}
+    result={"speaker_id":"unknown","confidence":"unknown"}
+    if pcm:
+        try:
+            result=await asyncio.wait_for(recognize_completed_utterance(pcm,timeout=timeout),timeout=timeout+0.1)
+        except (Exception,asyncio.CancelledError):
+            pass
+    # Even if the utterance was too short for a biometric match,
+    # preserve an explicit self-introduction as an UNVERIFIED claim.
     from kitty_voice_claims_v6 import reconcile_voice_and_claim
     attributed=reconcile_voice_and_claim(result,transcript)
     await emit({"type":"kitty.speaker.result","item_id":item_id,
