@@ -10,6 +10,34 @@ TOKEN = os.environ.get("KITTY_MEMORY_TOKEN", "")
 WRITE_Q = queue.Queue(maxsize=256)
 LOCK = threading.Lock()
 OWNER_PROOF = None
+# Optional, isolated CPU index refresh. Snapshot upload acknowledgement never
+# waits for embedding; a single worker coalesces bursts of completed snapshots.
+SEMANTIC_REFRESH_Q = queue.Queue(maxsize=1)
+
+def semantic_refresh_worker():
+    while True:
+        snapshot = SEMANTIC_REFRESH_Q.get()
+        try:
+            root = os.environ.get("KITTY_SD_SNAPSHOT_ROOT", "")
+            db = os.environ.get("KITTY_SEMANTIC_DB", "")
+            if root and db:
+                from kitty_refresh_finalized_v6 import refresh
+                result = refresh(root, db, dry_run=False)
+                print("Kitty semantic index refreshed:", result.get("indexed", 0), flush=True)
+        except Exception as exc:
+            # Preserve the previous complete index generation on failure.
+            print("Kitty semantic refresh failed:", type(exc).__name__, flush=True)
+        finally:
+            SEMANTIC_REFRESH_Q.task_done()
+
+def queue_semantic_refresh(snapshot):
+    if os.environ.get("KITTY_SEMANTIC_AUTO_REFRESH", "") != "1":
+        return
+    try:
+        SEMANTIC_REFRESH_Q.put_nowait(snapshot)
+    except queue.Full:
+        # A later refresh reads the newest finalized snapshot.
+        pass
 
 def connect():
     db = sqlite3.connect(DB, timeout=3)
@@ -155,8 +183,8 @@ class Handler(BaseHTTPRequestHandler):
                     path=receiver.finalize(snapshot,data.get("manifest"))
                 except (ValueError,OSError):
                     return self._reply(400,{"error":"invalid_snapshot_manifest"})
-                # No background auto-index; finalization is a verified,
-                # immutable on-disk export waiting for controlled indexing.
+                # Indexing runs out-of-band; never delay the S3 uploader.
+                queue_semantic_refresh(snapshot)
                 return self._reply(200,{"finalized":True,"snapshot":snapshot})
             if self.path=="/calendar":
                 # Parsing is CPU-only and bounded by the HTTP body. The clock
@@ -212,6 +240,10 @@ def main():
             raise SystemExit("Invalid owner verification configuration") from exc
     init()
     threading.Thread(target=writer,daemon=True).start()
+    if os.environ.get("KITTY_SEMANTIC_AUTO_REFRESH", "") == "1":
+        if not os.environ.get("KITTY_SD_SNAPSHOT_ROOT") or not os.environ.get("KITTY_SEMANTIC_DB"):
+            raise SystemExit("Auto refresh requires KITTY_SD_SNAPSHOT_ROOT and KITTY_SEMANTIC_DB")
+        threading.Thread(target=semantic_refresh_worker,daemon=True).start()
     print("Kitty Memory storage ready",args.host,args.port,flush=True)
     ThreadingHTTPServer((args.host,args.port),Handler).serve_forever()
 if __name__=="__main__":main()
