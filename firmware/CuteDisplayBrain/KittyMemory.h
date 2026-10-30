@@ -1164,15 +1164,16 @@ inline void task(void*){
    // Voice-linked preferences belong to the matched voice identity, NOT
    // the verified owner facts.tsv catalog. Voice matching can be spoofed;
    // these are attributed, revocable *claims*, not authentication.
-   if(strcmp(e.source,"voice_probable")==0 &&
+   if((strcmp(e.source,"voice_probable")==0 ||
+       strcmp(e.source,"explicit_introduction")==0) &&
       strcmp(e.speaker,"unknown")!=0){
      String voiceKey,voiceValue;
      if(extractFact(String(e.question),voiceKey,voiceValue)){
       File scoped=SD_MMC.open("/kitty/speaker_claims_v6.tsv",FILE_APPEND);
       if(scoped){
-       scoped.printf("%lu\\t%s\\t%s\\t%s\\tvoice_probable\\n",
+       scoped.printf("%lu\\t%s\\t%s\\t%s\\t%s\\n",
          (unsigned long)ts,e.speaker,
-         sanitize(voiceKey,31).c_str(),sanitize(voiceValue,112).c_str());
+         sanitize(voiceKey,31).c_str(),sanitize(voiceValue,112).c_str(),e.source);
        scoped.close();
       }
      }
