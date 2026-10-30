@@ -120,7 +120,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not index or not os.path.isfile(index):
                     return self._reply(503,{"error":"semantic_index_unavailable"})
                 from kitty_sd_semantic_index import search
-                return self._reply(200,{"results":search(index,str(data.get("query",""))[:300])})
+                speaker_id = data.get("speaker_id")
+                if speaker_id is not None and (
+                    not isinstance(speaker_id,str) or not speaker_id
+                    or len(speaker_id)>128):
+                    return self._reply(400,{"error":"invalid_speaker_id"})
+                return self._reply(200,{"results":search(
+                    index,str(data.get("query",""))[:300],
+                    speaker_id=speaker_id)})
             if self.path=="/recall":
                 return self._reply(200,{"memories":recall(str(data.get("query",""))[:500])})
             if self.path in ("/turn","/remember","/forget"):
