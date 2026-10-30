@@ -1160,6 +1160,22 @@ inline void task(void*){
     Serial.println("[MEMORY V6] attribution sidecar unavailable; source remains unknown");
    }
    saved++;appendIndex(e,offset,ts);
+   // Voice-linked preferences belong to the matched voice identity, NOT
+   // the verified owner facts.tsv catalog. Voice matching can be spoofed;
+   // these are attributed, revocable *claims*, not authentication.
+   if(strcmp(e.source,"voice_probable")==0 &&
+      strcmp(e.speaker,"unknown")!=0){
+     String voiceKey,voiceValue;
+     if(extractFact(String(e.question),voiceKey,voiceValue)){
+      File scoped=SD_MMC.open("/kitty/speaker_claims_v6.tsv",FILE_APPEND);
+      if(scoped){
+       scoped.printf("%lu\\t%s\\t%s\\t%s\\tvoice_probable\\n",
+         (unsigned long)ts,e.speaker,
+         sanitize(voiceKey,31).c_str(),sanitize(voiceValue,112).c_str());
+       scoped.close();
+      }
+     }
+   }
    // Security boundary: unverified microphone input may be archived but
    // cannot become a verified owner profile/preference/correction. No
    // trustworthy human identity issuer is connected yet, so ownerVerified
