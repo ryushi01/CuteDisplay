@@ -7,6 +7,13 @@ Status: **candidate source branch, NOT production-ready**. Never flash or apply 
 - Ubuntu VM on MS-01: existing Open WebUI + new separate CPU-only voice-ID service (localhost :8772) + CPU semantic-memory index and private SD snapshot receiver. Prevent inference and HTTP upload from blocking voice event loops.
 - Mac M4: **no change** to existing Ollama/Qwen3.5 9B, Whisper STT or Qwen3-TTS.
 
+## Optimization pass (completed in source)
+- Realtime voice worker accepts only one CPU recognition job at a time; excess work falls back to UNKNOWN instead of creating CPU backlog.
+- Ubuntu voice HTTP service also refuses concurrent inference with HTTP 503, protecting realtime gateway latency during overload.
+- Gateway stores up to three completed utterance buffers for rapid speech, rather than overwriting one pending sample.
+- The guarded Open WebUI patch's event-relay newline construction and regular expression were corrected. **No production image has been patch-verified.**
+- A timeout is not a hard cancellation of the already-running thread; keep model CPU service isolated and benchmark under load.
+
 ## Gate A — secure backup and sizing
 1. Record current S3/C5 versions, the combined firmware artifact ID, branch and Open WebUI container image digest; take a full **read-only copy** of the S3 SD `/kitty` tree before any firmware change.
 2. Check Ubuntu `free -h`, `nproc`, `df -h /`; document baseline CPU, available RAM, iSCSI free capacity, current WebUI API and model response latency. Do not size based solely on the presence of Ubuntu.
