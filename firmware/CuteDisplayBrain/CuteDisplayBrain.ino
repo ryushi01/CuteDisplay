@@ -1062,12 +1062,60 @@ static void handleBrainLANLine(const String &line){
   return;
  }
  if(line=="OTA_ABORT"){otaReceiver.cancel();lanClient.println("OTA:ABORTED");return;}
- if(line=="OTA_BEGIN" || line.startsWith("OTA_BEGIN ") ||
-    line.startsWith("OTA_DATA ") || line=="OTA_FINISH" || line=="OTA_COMMIT"){
-  // Fail closed: command transport is not production-authorized until
-  // bootloader rollback is verified and the release activation protocol is audited.
+ if(line.startsWith("OTA_BEGIN ") || line.startsWith("OTA_DATA ") ||
+    line=="OTA_FINISH" || line=="OTA_COMMIT"){
+#if KITTY_V6_ENABLE_OTA_TRANSPORT
+  // Realtime audio takes priority: never begin or continue OTA when busy.
+  // No command here can set the boot partition or trigger a reboot.
+  if(line=="OTA_COMMIT"){lanClient.println("OTA:COMMIT_DISABLED");return;}
+  if(line.startsWith("OTA_BEGIN ")){
+   if(otaReceiver.active() || otaBusy() || !KittyOTASafety::inspect().rollbackSupported){
+    lanClient.println("OTA:BUSY_OR_ROLLBACK_UNAVAILABLE");return;
+   }
+   int split=line.indexOf(' ',10);
+   if(split<0 || split!=line.lastIndexOf(' ') || split>19){
+    lanClient.println("OTA:INVALID_BEGIN");return;
+   }
+   String lengthText=line.substring(10,split);
+   String shaText=line.substring(split+1);
+   if(lengthText.isEmpty() || lengthText.length()>8 || shaText.length()!=64){
+    lanClient.println("OTA:INVALID_BEGIN");return;
+   }
+   uint32_t length=0;
+   for(size_t i=0;i<lengthText.length();++i){
+    if(lengthText[i]<'0'||lengthText[i]>'9'){lanClient.println("OTA:INVALID_BEGIN");return;}
+    length=length*10+(lengthText[i]-'0');
+   }
+   uint8_t digest[32],secret[32],nonce[16];
+   if(!KittyOTAFrames::hexDecode(shaText,digest,sizeof(digest)) ||
+      !KittyOTAFrames::hexDecode(lanSecret,secret,sizeof(secret))){
+    lanClient.println("OTA:INVALID_DIGEST");return;
+   }
+   esp_fill_random(nonce,sizeof(nonce));
+   bool started=otaReceiver.begin(length,digest,secret,nonce,!otaBusy());
+   memset(secret,0,sizeof(secret));
+   if(!started){lanClient.println("OTA:BEGIN_REFUSED");return;}
+   lanClient.println("OTA:READY:"+lanEncode(nonce,sizeof(nonce)));
+   return;
+  }
+  if(line.startsWith("OTA_DATA ")){
+   if(otaBusy() || !otaReceiver.append(line,true)){
+    otaReceiver.cancel();lanClient.println("OTA:DATA_REJECTED");return;
+   }
+   lanClient.printf("OTA:ACK:%lu\\n",(unsigned long)otaReceiver.progress());
+   return;
+  }
+  if(line=="OTA_FINISH"){
+   if(otaBusy() || !otaReceiver.finish(true)){
+    otaReceiver.cancel();lanClient.println("OTA:VERIFY_FAILED");return;
+   }
+   lanClient.println("OTA:VERIFIED_NO_BOOT_SWITCH");return;
+  }
+#else
   lanClient.println("OTA:DISABLED");return;
+#endif
  }
+
  if(line=="OTA_CAPS"){
   // Read-only inventory after HMAC authentication; never writes flash.
   const KittyOTASafety::Status ota=KittyOTASafety::inspect();
@@ -1138,6 +1186,7 @@ static void pollBrainLAN(){
    if((theirIP[j]&mask[j])!=(ourIP[j]&mask[j]))sameSubnet=false;
   if(!sameSubnet||lanAwaitingCommand){incoming.stop();}
   else{
+   otaReceiver.cancel();
    if(lanClient)lanClient.stop();
    lanClient=incoming;lanAuthenticated=false;
    lanLineLen=0;lanLastActivity=millis();
@@ -1149,6 +1198,7 @@ static void pollBrainLAN(){
  if(!lanClient)return;
  if(!lanClient.connected()||(uint32_t)(millis()-lanLastActivity)>45000UL){
   if(lanAwaitingCommand)cancelCommand("LAN_CLIENT_LOST");
+  otaReceiver.cancel();
   lanClient.stop();lanAuthenticated=false;lanNonce="";
   lanAwaitingCommand=false;lanLineLen=0;return;
  }
