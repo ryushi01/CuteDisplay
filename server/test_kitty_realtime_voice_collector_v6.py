@@ -26,7 +26,8 @@ class CollectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_speech_audio_bounded_and_matched_turn(self):
         c=UtteranceCollector()
         audio=b"\x01\x00"*(24000*2)
-        c.add(base64.b64encode(audio).decode())
+        for pos in range(0,len(audio),24000):
+            c.add(base64.b64encode(audio[pos:pos+24000]).decode())
         c.speech_started()
         c.speech_stopped()
         got=[]
