@@ -717,7 +717,7 @@ inline bool queueAttributed(const String &question,const String &answer,
  sanitize(answer,sizeof(e.answer)-1).toCharArray(e.answer,sizeof(e.answer));
  // Voice matching is probabilistic: NEVER set ownerVerified from a match.
  String safeSpeaker=(!speaker.isEmpty() && speaker.length()<sizeof(e.speaker) &&
-   speaker.indexOf('\\t')<0 && speaker.indexOf('\\n')<0)?speaker:String("unknown");
+   speaker.indexOf('\t')<0 && speaker.indexOf('\n')<0)?speaker:String("unknown");
  String safeSource=(source=="voice_probable")?source:String("unverified");
  safeSpeaker.toCharArray(e.speaker,sizeof(e.speaker));
  safeSource.toCharArray(e.source,sizeof(e.source));
@@ -989,7 +989,7 @@ inline void task(void*){
     while(archive.available()){
      uint32_t offset=(uint32_t)archive.position();
      String line=archive.readStringUntil('\\n');
-     int a=line.indexOf('\\t'),b=line.indexOf('\\t',a+1);
+     int a=line.indexOf('\t'),b=line.indexOf('\\t',a+1);
      if(a>=0 && b>a){
       Entry item={};
       line.substring(a+1,b).toCharArray(item.question,sizeof(item.question));
@@ -1012,7 +1012,7 @@ inline void task(void*){
    if(summaryFile.size()>1024){summaryFile.seek(summaryFile.size()-1024);summaryFile.readStringUntil('\n');}
    while(summaryFile.available()){
     String line=summaryFile.readStringUntil('\n');
-    int tab=line.indexOf('\\t');
+    int tab=line.indexOf('\t');
     if(tab>=0 && tab+1<(int)line.length()){
      latestSummary=sanitize(line.substring(tab+1),220);
      latestSummaryAt=(uint32_t)line.substring(0,tab).toInt();
