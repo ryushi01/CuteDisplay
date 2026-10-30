@@ -50,17 +50,24 @@ def iter_archive_with_speakers(sd_root):
         return
     annotations=read_sidecar(sd_root)
     with archive.open("rb") as stream:
-        for line_number,raw in enumerate(stream):
-            # Raw-byte file offsets match FAT SD_MMC::File.position(), unlike
-            # Unicode character offsets of a text stream.
-            offset=stream.tell()-len(raw)
+        line_number=0
+        while True:
+            # Record the byte offset before readline; buffered iterator's
+            # tell() is not supported after implicit iteration on many Pythons.
+            offset=stream.tell()
+            raw=stream.readline()
+            if not raw:
+                break
+            # Raw-byte offsets match FAT SD_MMC::File.position().
+            current_line=line_number
+            line_number+=1
             parts=raw.rstrip(b"\r\n").decode("utf-8",errors="replace").split("\t")
             if len(parts)<3:
                 continue
             stamp, question, answer=parts[0],parts[1],parts[2]
             identity=annotations.get((int(stamp),offset),UNKNOWN) if stamp.isdecimal() else UNKNOWN
             yield {
-                "id":f"conversations.tsv:{line_number}:conversation:{stamp}",
+                "id":f"conversations.tsv:{current_line}:conversation:{stamp}",
                 "offset":offset, "timestamp":stamp,
                 "text":f"conversation:{stamp}: {question} {answer}",
                 **identity
