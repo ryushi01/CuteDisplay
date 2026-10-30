@@ -8,11 +8,13 @@ stored as JSON vectors; no automatic enrollment and no raw audio saved.
 import argparse
 import json
 import os
+import threading
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 
 MAX_WAV=16_000*2*12+4096
 TOKEN=os.environ.get("KITTY_VOICE_TOKEN","")
 PROFILES=os.environ.get("KITTY_VOICE_PROFILES_V6","")
+_INFERENCE_SLOT=threading.BoundedSemaphore(value=1)
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -25,6 +27,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(413);return
         if not PROFILES or not os.path.isfile(PROFILES):
             self.send_error(503);return
+        if not _INFERENCE_SLOT.acquire(blocking=False):
+            self.send_error(503,"voice service busy");return
         try:
             from kitty_voice_id_v6 import pcm16_from_wav,embedding,identify
             samples=pcm16_from_wav(self.rfile.read(int(length)))
@@ -51,6 +55,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(payload)
         except (ValueError,RuntimeError,OSError,KeyError,TypeError):
             self.send_error(422)
+        finally:
+            _INFERENCE_SLOT.release()
     def log_message(self,*args):
         pass
 
