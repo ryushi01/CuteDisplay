@@ -48,6 +48,21 @@ def store_release(kind, name, content):
     return metadata
 
 
+def release_health(item):
+    """Checksum and image-header checks only; never authorize deployment."""
+    try:
+        from kitty_release_preflight_v6 import inspect_release
+        report=inspect_release(ROOT/item["id"])
+        if not report["checksum_valid"]:
+            return "INVALID: checksum mismatch"
+        if report["image_header_valid"] is False:
+            return "INVALID: firmware header"
+        if report["release_slot_fit"] is False:
+            return "INVALID: exceeds reference slot"
+        return "Verified artifact; deployment blocked pending device preflight"
+    except (OSError,ValueError,KeyError,TypeError):
+        return "INVALID: preflight unavailable"
+
 def list_releases():
     if not ROOT.exists():
         return []
@@ -59,6 +74,7 @@ def list_releases():
             with open(path / "metadata.json", encoding="utf-8") as f:
                 item = json.load(f)
             if isinstance(item, dict) and item.get("state") == "quarantined":
+                item["health"]=release_health(item)
                 output.append(item)
         except (OSError, ValueError):
             continue
@@ -102,7 +118,7 @@ td,th{text-align:left;padding:8px;border-bottom:1px solid #425069}.warning{color
 <section><h2>Upload release artifact</h2><form action="/upload" method="POST" enctype="application/octet-stream" id="f">
 <label>Target <select id="kind"><option>s3</option><option>c5</option><option>ubuntu</option><option>mac</option><option>bundle</option></select></label>
 <input id="file" type="file" required><button type="submit">Upload to quarantine</button></form><p id="msg"></p></section>
-<section><h2>Staged artifacts</h2><table><thead><tr><th>ID</th><th>Target</th><th>Filename</th><th>Bytes</th><th>Status</th></tr></thead><tbody>""" + rows + """</tbody></table></section>
+<section><h2>Staged artifacts</h2><table><thead><tr><th>ID</th><th>Target</th><th>Filename</th><th>Bytes</th><th>Artifact verification (no deployment)</th></tr></thead><tbody>""" + rows + """</tbody></table></section>
 <script>document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const file=document.getElementById('file').files[0];if(!file)return;
 const m=document.getElementById('msg');m.textContent='Uploading...';try{const r=await fetch('/upload',{method:'POST',headers:{'X-Kitty-Kind':document.getElementById('kind').value,'X-Kitty-Filename':file.name,'Content-Type':'application/octet-stream'},body:file});
 m.textContent=await r.text();if(r.ok)location.reload();}catch(err){m.textContent=String(err)}};</script></html>"""
