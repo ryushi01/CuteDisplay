@@ -9,16 +9,17 @@ from patch_openwebui_voice_v6 import patch as patch_gateway
 
 SOURCE = """
 async def handler(auth, ws, protocol):
-    kitty_expressions = auth.get('kitty_expressions') is True
-    kitty_sd_memory = auth.get('kitty_sd_memory', '')
-    async def client_events():
-        while True:
+    if True:
+        kitty_expressions = auth.get('kitty_expressions') is True
+        kitty_sd_memory = auth.get('kitty_sd_memory', '')
+        async def client_events():
+            while True:
+                event = {}
+                command = protocol.command(event)
+                break
+        async def upstream_events():
             event = {}
-            command = protocol.command(event)
-            break
-    async def upstream_events():
-        event = {}
-        await ws.send_json(event)
+            await ws.send_json(event)
 """
 
 class CollectorTests(unittest.IsolatedAsyncioTestCase):
