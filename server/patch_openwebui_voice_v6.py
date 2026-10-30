@@ -37,7 +37,7 @@ def patch(source):
                 command = protocol.command(event)""",1)
     # Capture indentation from the *real installed* upstream relay line.
     import re
-    matches=list(re.finditer(r"(?m)^(?P<indent>[ ]+)await ws\\.send_json\\(event\\)[ ]*$",source))
+    matches=list(re.finditer(r"(?m)^(?P<indent>[ ]+)await ws\.send_json\(event\)[ ]*$",source))
     if len(matches)!=1:
         raise ValueError("incompatible event forward indentation")
     match=matches[0]
@@ -58,7 +58,7 @@ def patch(source):
         "                transcript=event.get('transcript','')))",
         "await ws.send_json(event)",
     ]
-    replacement="\\n".join(indent+line for line in body)
+    replacement="\n".join(indent+line for line in body)
     source=source[:match.start()]+replacement+source[match.end():]
     compile(source,"realtime.py","exec")
     return source
