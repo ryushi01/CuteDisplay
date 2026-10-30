@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from kitty_sd_snapshot_v6 import SnapshotReceiver
-from kitty_semantic_bridge_v6 import bounded_semantic_context
+from kitty_semantic_bridge_v6 import bounded_semantic_context, _bounded_lookup
 
 class SyncContractTests(unittest.TestCase):
     def test_resumable_snapshot_and_replay(self):
@@ -42,6 +42,19 @@ class BridgeContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(source,"hybrid")
         self.assertIn("remote_ai:chatgpt",context)
         self.assertTrue(context.startswith("original"))
+    async def test_busy_semantic_slot_falls_back_immediately(self):
+        from kitty_semantic_bridge_v6 import _LOOKUP_SLOT
+        import time
+        self.assertTrue(_LOOKUP_SLOT.acquire(blocking=False))
+        try:
+            start=time.monotonic()
+            with patch("kitty_semantic_bridge_v6._lookup",side_effect=AssertionError("must not run")):
+                context,source=await bounded_semantic_context("Where?","original",url="http://127.0.0.1:8766",token="test",timeout=0.05)
+            self.assertEqual((context,source),("original","local"))
+            self.assertLess(time.monotonic()-start,0.5)
+        finally:
+            _LOOKUP_SLOT.release()
+
     async def test_timeout_returns_local(self):
         def slow(*args):
             import time
