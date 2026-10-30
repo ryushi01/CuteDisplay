@@ -8,7 +8,7 @@ Kitty should remain friendly if Shana sounds tired, ill, hoarse, farther from th
 - `server/kitty_realtime_voice_v6.py`: reconciles a transcript self-claim with a probable voice result. A strong acoustic match takes precedence, and conflicting claims are flagged. An explicit introduction still yields `confidence=claimed` if the utterance is too short for voiceprint matching.
 - `server/patch_openwebui_voice_v6.py`: passes the completed transcript to the reconciliation helper, keyed to provider item ID.
 - `firmware/CuteDisplayBrain/BrainRealtimeDirect.h`: opt-in `kitty_voice_v6` during auth, and accepts `claimed` as source `explicit_introduction` separately from `voice_probable`.
-- `firmware/CuteDisplayBrain/KittyMemory.h`: archives claimed identity source on microSD without granting verified-owner permission. No update to protected owner facts from a voice claim.
+- `firmware/CuteDisplayBrain/KittyMemory.h`: archives claimed identity source on microSD and can retain associated personal statements as tentative `speaker_claims_v6.tsv` records, without granting verified-owner permission. No update to protected owner facts from a voice claim.
 - `server/test_kitty_voice_claims_v6.py`: multilingual claimed-identity, incidental mention, conflicting voice match and short-utterance test cases.
 
 ## Desired conversation
