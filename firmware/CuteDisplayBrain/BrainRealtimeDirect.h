@@ -332,6 +332,14 @@ inline void flushPendingSpeaker(bool timedOut=false){
 
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
+  Serial.printf("[CALL NET] ws_disconnected requested=%d connected=%d ready=%d state=%s wifi=%d rssi=%d free_internal=%lu largest_internal=%lu free_psram=%lu buffered_ms=%lu skipped_ms=%lu\\n",
+   requested?1:0,connected?1:0,ready?1:0,state.c_str(),
+   WiFi.status()==WL_CONNECTED?1:0,WiFi.RSSI(),
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+   (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT),
+   (unsigned long)BrainRealtimeAudio::bufferedMs(),
+   (unsigned long)BrainRealtimeAudio::droppedSpeakerMs());
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
   memoryRefreshSupported=false;memoryRefreshSeq=0;
@@ -662,7 +670,8 @@ inline bool connect(){
  ws.onEvent(onEvent);
  ws.beginSslWithBundle(host.c_str(),port,path.c_str(),ca_bundle_start,bytes);
  ws.setReconnectInterval(RECONNECT_DELAY);
- ws.enableHeartbeat(15000,3000,2);
+ // Allow brief CPU/TLS scheduling stalls without falsely disconnecting voice.
+ ws.enableHeartbeat(20000,8000,3);
  started=true;connected=false;ready=false;lastAttempt=millis();
  status("CALL_CONNECTING");
  return true;
