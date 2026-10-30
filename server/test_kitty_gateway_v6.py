@@ -7,9 +7,9 @@ SOURCE = """
 async def socket(auth):
     kitty_expressions = auth.get('kitty_expressions') is True
     kitty_sd_memory = auth.get('kitty_sd_memory', '')
-    if not isinstance(kitty_sd_memory, str) or len(kitty_sd_memory.encode('utf-8')) > 850:
-        kitty_sd_memory = ''
-    return kitty_sd_memory
+        if not isinstance(kitty_sd_memory, str) or len(kitty_sd_memory.encode('utf-8')) > 850:
+            kitty_sd_memory = ''
+        return kitty_sd_memory
 """
 
 class V6GatewayTests(unittest.TestCase):
