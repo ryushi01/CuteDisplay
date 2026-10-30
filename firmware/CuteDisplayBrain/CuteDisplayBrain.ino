@@ -40,6 +40,7 @@
 #include "BrainRealtimeDirect.h"
 #include "BrainMemoryAI.h"
 #include "KittyMemorySyncV6.h"
+#include "KittyHTTPSOTA.h"
 
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr char S3_FW_VERSION[]="CallFace-v23-dev";
@@ -791,6 +792,11 @@ static void consoleCommand(String cmd){
  if(cmd=="memory probe"){
   bool accepted=KittyMemory::queue("memory diagnostic probe","SD write test only");
   Serial.printf("[MEMORY] probe queued=%d; check 'memory status' after a moment\n",accepted?1:0);
+  return;
+ }
+ if(cmd=="ota https check"){
+  if(otaBusy())Serial.println("[OTA HTTPS] refused: call/audio/OTA active");
+  else KittyHTTPSOTA::preflight();
   return;
  }
  if(cmd=="memory sync status"){
