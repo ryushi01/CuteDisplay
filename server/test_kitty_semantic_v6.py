@@ -46,11 +46,11 @@ class SemanticV6Tests(unittest.TestCase):
         self.assertTrue(all("plan" not in h["id"] for h in hits))
     def test_speaker_sidecar_and_legacy_are_distinct(self):
         archive=self.root/"sd"/"kitty"/"conversations.tsv"
-        a="1761790000\\tI am ChatGPT\\tNice to meet you.\\n".encode()
-        b="1761790001\\tMy owner Shana is not here\\tUnderstood.\\n".encode()
+        a="1761790000\tI am ChatGPT\tNice to meet you.\n".encode()
+        b="1761790001\tMy owner Shana is not here\tUnderstood.\n".encode()
         archive.write_bytes(a+b)
         sidecar=self.root/"sd"/"kitty"/"turn_sources.tsv"
-        sidecar.write_text(f"1761790000\\t0\\tremote_ai:chatgpt\\tremote_ai\\texplicit_introduction\\n")
+        sidecar.write_text(f"1761790000\t0\tremote_ai:chatgpt\tremote_ai\texplicit_introduction\n")
         v6.build(self.root/"sd",self.db,"fake-test")
         ai=v6.search(self.db,"cat",10,"fake-test",speaker_id="remote_ai:chatgpt")
         self.assertEqual(len(ai),1)
