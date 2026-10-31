@@ -1,3 +1,5 @@
+> **HARDWARE-VALIDATED CHECKPOINT (2026-10-31):** [Working Kitty V6 baseline + next-chat plan](docs/KITTY_V6_WORKING_BASELINE_AND_NEXT_STEPS_2026-10-31.md). S3 combined firmware flashed successfully; C5 v36 confirmed after reboot; realtime call and SD archive working. **Cross-restart personal preference recall is not yet working.** Preserve this firmware while improving scoped memory, voice consistency and server storage hygiene in a later change.
+
 ## Kitty V6 semantic-memory checkpoint (2026-10-31)
 
 Current deployment status, verified functionality, unfinished speaker identification/per-turn recall, and fast continuation instructions: [Kitty V6 checkpoint](docs/KITTY_V6_CHECKPOINT_2026-10-31.md). Local private deployment files are documented but must be manually exported/sanitized before Git commit.
