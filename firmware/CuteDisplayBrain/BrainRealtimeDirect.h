@@ -41,7 +41,9 @@ inline void requestSemanticTurn(const String &turnId,const String &speaker,
  // Speaker-scoped optional recall; no wait for an HTTP lookup in the audio path.
  if(!memoryRefreshSupported || !ready || speaker=="unknown" ||
     speaker.isEmpty() || transcript.isEmpty() || semanticPending)return;
- if(speaker.length()>60 || transcript.length()>300 ||
+ if(!speaker.startsWith("person:") || speaker.length()<=7 ||
+    (provenance!="voice_probable" && provenance!="explicit_introduction") ||
+    speaker.length()>60 || transcript.length()>300 ||
     turnId.isEmpty() || turnId.length()>160)return;
  String id="s"+String(++semanticSequence);
  cJSON *m=cJSON_CreateObject();
@@ -470,6 +472,8 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    }
   }
  }else if(strcmp(type,"input_audio_buffer.speech_started")==0){
+  // A new utterance invalidates an earlier speaker-specific result immediately.
+  clearSemanticTurn();
   if(!remoteResponse)status("CALL_LISTENING");
  }else if(strcmp(type,"input_audio_buffer.speech_stopped")==0){
   status("CALL_THINKING");
@@ -497,7 +501,8 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    String speaker="unknown",source="unverified";
    if(cJSON_IsString(sid) && cJSON_IsString(conf) &&
       strlen(sid->valuestring)<60){
-    if(strcmp(conf->valuestring,"probable")==0){
+    if(strcmp(conf->valuestring,"probable")==0 &&
+       strncmp(sid->valuestring,"person:",7)==0 && strlen(sid->valuestring)>7){
      speaker=String(sid->valuestring);source="voice_probable";
     }else if(strcmp(conf->valuestring,"claimed")==0 &&
               strncmp(sid->valuestring,"person:",7)==0 &&
@@ -508,6 +513,13 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
      for(const char *p=sid->valuestring;*p;++p)
       if((unsigned char)*p<32 || *p==127){safe=false;break;}
      if(safe){speaker=String(sid->valuestring);source="explicit_introduction";}
+    }
+   }
+   // Enforce the same identifier safety for probabilistic recognition.
+   if(speaker!="unknown"){
+    for(size_t k=0;k<speaker.length();++k){
+     uint8_t c=(uint8_t)speaker[k];
+     if(c<=32 || c==127){speaker="unknown";source="unverified";break;}
     }
    }
    (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
