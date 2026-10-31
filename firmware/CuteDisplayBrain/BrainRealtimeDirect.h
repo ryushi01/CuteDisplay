@@ -547,6 +547,11 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    }
    (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
                                      speaker,source);
+   // A different recognized speaker invalidates any prior introduction.
+   if(source=="voice_probable" && !introducedSpeaker.isEmpty() &&
+      speaker!=introducedSpeaker){
+    introducedSpeaker="";introducedClaimContext="";
+   }
    // Self-claimed identity must not unlock semantic private-memory lookup.
    if(source=="voice_probable")
     requestSemanticTurn(pendingSpeakerItem,speaker,source,pendingSpeakerTranscript);
