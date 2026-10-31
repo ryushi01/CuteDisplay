@@ -38,7 +38,11 @@ def register(app):
     if metadata.get("id") != approved or metadata.get("kind") != "s3":
         raise RuntimeError("Wrong OTA release")
     image_name = metadata.get("filename")
-    if image_name != "CuteDisplay-CombinedFirmware.bin":
+    # Only these application-image names are eligible for OTA delivery.
+    # An S3-only release cannot trigger the C5 updater via embedded payload.
+    # Explicit approval, kind=s3, immutable checksum and image-size checks
+    # remain mandatory; no release is published or activated here.
+    if image_name not in ("CuteDisplay-CombinedFirmware.bin", "S3-Brain-application.bin"):
         raise RuntimeError("Unexpected OTA image name")
     image_file = release_dir / image_name
     if image_file.is_symlink() or not image_file.is_file():
