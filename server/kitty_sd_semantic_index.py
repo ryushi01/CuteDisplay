@@ -86,6 +86,23 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
         db.commit()
         from kitty_semantic_attribution_v6 import iter_archive_with_speakers
         speakers = {r["id"]:r for r in iter_archive_with_speakers(sd)}
+        claims = {}
+        claims_path = Path(sd) / "kitty" / "speaker_claims_v6.tsv"
+        if claims_path.is_file():
+            with claims_path.open(encoding="utf-8", errors="replace") as claim_file:
+                for row_index, raw in enumerate(claim_file):
+                    cols = raw.rstrip("\r\n").split("\t")
+                    if len(cols) != 5:
+                        continue
+                    stamp, sid, key, value, provenance = cols
+                    if (not stamp.isdecimal() or not sid or sid == "unknown"
+                            or len(sid) >= 64 or any(ord(c) < 32 for c in sid)
+                            or provenance not in ("voice_probable", "explicit_introduction")):
+                        continue
+                    claims[row_index] = {
+                        "speaker_id": sid, "speaker_role": "guest",
+                        "provenance": provenance
+                    }
         current = {row[0]: row[1:] for row in db.execute(
             "SELECT id,digest,vector,model FROM semantic_v6 WHERE generation=?", (active,))}
         count, reused, changed = 0, 0, 0
@@ -106,11 +123,12 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
         for id, value in load_rows(sd):
             count += 1
             source=speakers.get(id)
-            if id.startswith("speaker_claims_v6.tsv:") and ":speaker_claim:" in id:
-                candidate=id.split(":speaker_claim:",1)[1]
-                if 1<=len(candidate)<=64 and "\\t" not in candidate:
-                    source={"speaker_id":candidate,"speaker_role":"guest",
-                            "provenance":"voice_probable"}
+            if id.startswith("speaker_claims_v6.tsv:"):
+                try:
+                    row_index = int(id.split(":", 2)[1])
+                    source = claims.get(row_index)
+                except (ValueError, IndexError):
+                    source = None
             if source:
                 db.execute("INSERT OR REPLACE INTO semantic_speakers VALUES (?,?,?,?,?)",
                            (id,next_gen,source["speaker_id"],source["speaker_role"],source["provenance"]))
