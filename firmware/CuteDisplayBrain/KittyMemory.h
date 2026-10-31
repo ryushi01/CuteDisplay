@@ -51,6 +51,21 @@ static volatile bool mounted=false;
 struct ExportRequest { uint8_t file; uint32_t offset; };
 struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint8_t ok; };
 static QueueHandle_t exportRequests=nullptr,exportBlocks=nullptr;
+struct ClaimRequest {char speaker[48];};
+struct ClaimResult {char speaker[48];char context[512];};
+static QueueHandle_t claimRequests=nullptr,claimResults=nullptr;
+inline bool requestClaimContext(const String &speaker){
+ if(!mounted||!claimRequests||!claimResults||!speaker.startsWith("person:")||speaker.length()>47)return false;
+ ClaimRequest q={};speaker.toCharArray(q.speaker,sizeof(q.speaker));
+ xQueueReset(claimResults);
+ return xQueueSend(claimRequests,&q,0)==pdTRUE;
+}
+inline bool takeClaimContext(const String &speaker,String &out){
+ ClaimResult result={};
+ if(!claimResults||xQueueReceive(claimResults,&result,0)!=pdTRUE)return false;
+ if(speaker!=result.speaker)return false;
+ out=String(result.context);return true;
+}
 static constexpr const char* EXPORT_NAMES[]={"facts.tsv","factsmeta.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv","turn_sources.tsv","voice_profiles_v6.json","speaker_claims_v6.tsv"};
 static constexpr uint8_t EXPORT_COUNT=sizeof(EXPORT_NAMES)/sizeof(EXPORT_NAMES[0]);
 inline bool requestExport(uint8_t file,uint32_t offset){
@@ -1095,6 +1110,41 @@ inline void task(void*){
    }
    (void)xQueueSend(exportBlocks,&block,0);
   }
+  // Read only explicitly introduced, non-sensitive speaker claims.
+  ClaimRequest req={};
+  if(mounted&&claimRequests&&claimResults&&xQueueReceive(claimRequests,&req,0)==pdTRUE){
+   ClaimResult reply={};strlcpy(reply.speaker,req.speaker,sizeof(reply.speaker));
+   File f=SD_MMC.open("/kitty/speaker_claims_v6.tsv",FILE_READ);
+   if(f){
+    if(f.size()>8192){f.seek(f.size()-8192);f.readStringUntil('\n');}
+    String keys[6],values[6];size_t count=0;
+    while(f.available()){
+     String line=f.readStringUntil('\n');
+     int a=line.indexOf('\t'),b=a<0?-1:line.indexOf('\t',a+1);
+     int c=b<0?-1:line.indexOf('\t',b+1);
+     int d=c<0?-1:line.indexOf('\t',c+1);
+     if(a<0||b<0||c<0||d<0)continue;
+     if(line.substring(a+1,b)!=req.speaker ||
+        line.substring(d+1)!="explicit_introduction")continue;
+     String key=line.substring(b+1,c),value=line.substring(c+1,d);
+     if(key!="name"&&key!="likes"&&key!="dislikes"&&!key.startsWith("attr_"))continue;
+     if(value.isEmpty())continue;
+     size_t slot=count<6?count++:5;
+     for(size_t j=0;j<count;j++)if(keys[j]==key){slot=j;break;}
+     keys[slot]=key;values[slot]=value;
+    }
+    f.close();
+    String context;
+    for(size_t j=0;j<count;j++){
+     String entry=keys[j]+": "+values[j];
+     if(values[j].isEmpty()||context.length()+entry.length()+2>511)continue;
+     if(!context.isEmpty())context+='\n';
+     context+=entry;
+    }
+    context.toCharArray(reply.context,sizeof(reply.context));
+   }
+   (void)xQueueSend(claimResults,&reply,0);
+  }
   // Apply completed summaries entirely on the SD task, never the network callback.
   SummaryResult summary={};
   if(mounted && summaryResults && xQueueReceive(summaryResults,&summary,0)==pdTRUE){
@@ -1326,6 +1376,13 @@ inline void init(){
  if(!summaryResults)summaryResults=xQueueCreate(2,sizeof(SummaryResult));
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
  if(!exportRequests)exportRequests=xQueueCreate(1,sizeof(ExportRequest));
+ if(!claimRequests)claimRequests=xQueueCreate(1,sizeof(ClaimRequest));
+ if(!claimResults){
+  static StaticQueue_t claimQueueCtrl;
+  static uint8_t *claimStorage=nullptr;
+  claimStorage=(uint8_t*)heap_caps_malloc(sizeof(ClaimResult),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(claimStorage)claimResults=xQueueCreateStatic(1,sizeof(ClaimResult),claimStorage,&claimQueueCtrl);
+ }
  if(!exportBlocks){
   // One 780-byte block; PSRAM-backed queue avoids internal heap pressure.
   static StaticQueue_t exportQueueCtrl;
