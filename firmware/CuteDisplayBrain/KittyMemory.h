@@ -1226,7 +1226,7 @@ inline void task(void*){
      if(extractFact(String(e.question),voiceKey,voiceValue)){
       File scoped=SD_MMC.open("/kitty/speaker_claims_v6.tsv",FILE_APPEND);
       if(scoped){
-       scoped.printf("%lu\\t%s\\t%s\\t%s\\t%s\\n",
+       scoped.printf("%lu\t%s\t%s\t%s\t%s\n",
          (unsigned long)ts,e.speaker,
          sanitize(voiceKey,31).c_str(),sanitize(voiceValue,112).c_str(),e.source);
        scoped.close();
