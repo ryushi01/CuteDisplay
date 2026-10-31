@@ -15,10 +15,12 @@ class KittySpeakerObserver:
         self.url = url if url is not None else os.environ.get("KITTY_SEMANTIC_SERVICE_URL", "")
         self.token = token if token is not None else os.environ.get("KITTY_MEMORY_TOKEN", "")
         self.session = session or SpeakerSession()
+        self._session_factory = (lambda: SpeakerSession(identify=self.session._identify))
         self.gate = MemoryTurnGate(ttl=2.0)
         self.send_to_s3 = send_to_s3
         self.pending_stopped_item = None
         self.epoch = None
+        self._active_item = None
 
     def observe_client(self, event):
         if not self.enabled or not isinstance(event, dict):
@@ -28,7 +30,7 @@ class KittySpeakerObserver:
         elif event.get("type") in ("response.cancel", "input_audio_buffer.clear"):
             self.gate.invalidate()
             self.session.close()
-            self.session = SpeakerSession()
+            self.session = self._session_factory()
             self.pending_stopped_item = None
 
     def observe_upstream(self, event):
@@ -39,6 +41,7 @@ class KittySpeakerObserver:
             self.session.speech_started()
             self.gate.invalidate()
             self.pending_stopped_item = None
+            self._active_item = None
         elif kind == "input_audio_buffer.speech_stopped":
             item = event.get("item_id")
             self.session.speech_stopped(item_id=item if isinstance(item, str) else None)
@@ -53,6 +56,7 @@ class KittySpeakerObserver:
             if epoch is None:
                 return
             self.epoch = epoch
+            self._active_item = item
             self.session.schedule(item, self.url, self.token,
                                   self._send_recognition, timeout=0.9)
         elif kind == "error":
@@ -60,7 +64,8 @@ class KittySpeakerObserver:
 
     async def _send_recognition(self, event):
         if (not isinstance(event, dict) or self.epoch is None or
-                event.get("type") != "kitty.speaker.result"):
+                event.get("type") != "kitty.speaker.result" or
+                event.get("item_id") != self._active_item):
             return
         sid = event.get("speaker_id", "unknown")
         item = event.get("item_id")
