@@ -19,6 +19,7 @@
 #include "BrainAudioTest.h"
 #include "BrainRealtimeAudio.h"
 #include "BrainAI.h"
+#include "KittyMemoryContextV6.h"
 
 namespace BrainRealtimeDirect {
 extern const uint8_t ca_bundle_start[] asm("_binary_x509_crt_bundle_start");
@@ -372,12 +373,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   memoryFactSeen=KittyMemory::factRevision;
   memorySummarySeen=KittyMemory::summaryRevision;
   // Only ephemeral facts travel with this authenticated session. No server storage.
-  String facts=KittyMemory::factSummary(580);
-  String summary=KittyMemory::latestSummaryContext(170);
-  if(!summary.isEmpty()){if(!facts.isEmpty())facts+='\n';facts+="recent_summary: "+summary;}
-  String calendar=BrainClock::calendarContext();
-  if(!calendar.isEmpty())facts=calendar+(facts.isEmpty()?String(""):String("\n")+facts);
-  facts=KittyMemory::clipUTF8(facts,820);
+  String facts=KittyMemoryContextV6::snapshot(580,170,820);
   if(!facts.isEmpty())cJSON_AddStringToObject(auth,"kitty_sd_memory",facts.c_str());
   char* json=cJSON_PrintUnformatted(auth);
   cJSON_Delete(auth);
@@ -770,12 +766,7 @@ inline void tick(bool audioBusy){
   uint32_t summaryVersion=KittyMemory::summaryRevision;
   uint32_t calendarDay=BrainClock::localDayKey();
   uint32_t calendarMinute=BrainClock::valid()?(uint32_t)(time(nullptr)/60):0;
-  String context=KittyMemory::factSummary(550);
-  String brief=KittyMemory::latestSummaryContext(160);
-  if(!brief.isEmpty()){if(!context.isEmpty())context+='\n';context+="recent_summary: "+brief;}
-  String calendar=BrainClock::calendarContext();
-  if(!calendar.isEmpty())context=calendar+(context.isEmpty()?String(""):String("\n")+context);
-  context=KittyMemory::clipUTF8(context,820);
+  String context=KittyMemoryContextV6::snapshot(550,160,820);
   cJSON *message=cJSON_CreateObject();
   if(message){
    cJSON_AddStringToObject(message,"type","kitty.memory.refresh");
