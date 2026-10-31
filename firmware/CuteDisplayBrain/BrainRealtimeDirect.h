@@ -29,6 +29,34 @@ static bool requested=false, started=false, connected=false, ready=false;
 // Provider memory updates are opt-in and disabled unless the authenticated
 // gateway explicitly advertises support. Never require them for a voice call.
 static bool memoryRefreshSupported=false;
+static bool semanticPending=false;
+static String semanticRequestId,semanticSpeaker,semanticContext;
+static uint32_t semanticRequestedAt=0,semanticSequence=0;
+inline void clearSemanticTurn(){
+ semanticPending=false;semanticRequestId="";semanticSpeaker="";
+ semanticContext="";semanticRequestedAt=0;
+}
+inline void requestSemanticTurn(const String &speaker,const String &provenance,
+                                const String &transcript){
+ // Speaker-scoped optional recall; no wait for an HTTP lookup in the audio path.
+ if(!memoryRefreshSupported || !ready || speaker=="unknown" ||
+    speaker.isEmpty() || transcript.isEmpty() || semanticPending)return;
+ if(speaker.length()>60 || transcript.length()>300)return;
+ String id="s"+String(++semanticSequence);
+ cJSON *m=cJSON_CreateObject();
+ if(!m)return;
+ cJSON_AddStringToObject(m,"type","kitty.memory.semantic");
+ cJSON_AddStringToObject(m,"request_id",id.c_str());
+ cJSON_AddStringToObject(m,"speaker_id",speaker.c_str());
+ cJSON_AddStringToObject(m,"provenance",provenance.c_str());
+ cJSON_AddStringToObject(m,"query",transcript.c_str());
+ char *wire=cJSON_PrintUnformatted(m);cJSON_Delete(m);
+ if(!wire)return;
+ bool sent=ws.sendTXT(wire);free(wire);
+ if(sent){semanticRequestId=id;semanticSpeaker=speaker;
+          semanticPending=true;semanticRequestedAt=millis();semanticContext="";}
+}
+
 static uint32_t memoryFactSeen=0,memorySummarySeen=0,memoryRefreshSeq=0,memoryLastAttempt=0,memoryDaySeen=0,memoryMinuteSeen=0;
 static bool remoteResponse=false, streamedSpeech=false;
 static bool bargeCancelling=false;
@@ -343,7 +371,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    (unsigned long)BrainRealtimeAudio::droppedSpeakerMs());
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
-  memoryRefreshSupported=false;memoryRefreshSeq=0;
+  memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();
  deferredVoiceItem="";playbackSpeechDetected=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
   failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
@@ -441,6 +469,17 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   if(!remoteResponse)status("CALL_LISTENING");
  }else if(strcmp(type,"input_audio_buffer.speech_stopped")==0){
   status("CALL_THINKING");
+ }else if(strcmp(type,"kitty.memory.semantic.result")==0){
+  cJSON *id=cJSON_GetObjectItem(json,"request_id");
+  cJSON *sid=cJSON_GetObjectItem(json,"speaker_id");
+  cJSON *ctx=cJSON_GetObjectItem(json,"context");
+  if(semanticPending && cJSON_IsString(id) && cJSON_IsString(sid) &&
+     cJSON_IsString(ctx) && semanticRequestId==id->valuestring &&
+     semanticSpeaker==sid->valuestring &&
+     (uint32_t)(millis()-semanticRequestedAt)<1500UL){
+   semanticContext=KittyMemory::clipUTF8(String(ctx->valuestring),640);
+   semanticPending=false;
+  }
  }else if(strcmp(type,"kitty.speaker.result")==0){
   cJSON *id=cJSON_GetObjectItem(json,"item_id");
   cJSON *sid=cJSON_GetObjectItem(json,"speaker_id");
@@ -465,6 +504,8 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    }
    (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
                                      speaker,source);
+   if(speaker!="unknown")
+    requestSemanticTurn(speaker,source,pendingSpeakerTranscript);
    pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
   }
  }else if(strcmp(type,"conversation.item.input_audio_transcription.completed")==0){
@@ -710,6 +751,8 @@ inline bool toggle(bool audioBusy){
 }
 inline void tick(bool audioBusy){
  flushPendingSpeaker(false);
+ if(semanticPending && (uint32_t)(millis()-semanticRequestedAt)>1500UL)
+  clearSemanticTurn();
  if(!requested)return;
  if(WiFi.status()!=WL_CONNECTED){
   if(started){BrainRealtimeAudio::stop();ws.disconnect();started=false;connected=false;ready=false;}
@@ -760,13 +803,21 @@ inline void tick(bool audioBusy){
     (KittyMemory::factRevision!=memoryFactSeen ||
      KittyMemory::summaryRevision!=memorySummarySeen ||
      (BrainClock::localDayKey() && BrainClock::localDayKey()!=memoryDaySeen) ||
-     (BrainClock::valid() && (uint32_t)(time(nullptr)/60)!=memoryMinuteSeen))){
+     (BrainClock::valid() && (uint32_t)(time(nullptr)/60)!=memoryMinuteSeen) ||
+     !semanticContext.isEmpty())){
   memoryLastAttempt=millis();
   uint32_t factVersion=KittyMemory::factRevision;
   uint32_t summaryVersion=KittyMemory::summaryRevision;
   uint32_t calendarDay=BrainClock::localDayKey();
   uint32_t calendarMinute=BrainClock::valid()?(uint32_t)(time(nullptr)/60):0;
   String context=KittyMemoryContextV6::snapshot(550,160,820);
+  // Semantic excerpts are attributed claims, not owner identity proof.
+  if(!semanticContext.isEmpty()){
+   String excerpt=KittyMemory::clipUTF8(semanticContext,360);
+   context=KittyMemory::clipUTF8(context,450);
+   if(!context.isEmpty())context+='\n';
+   context+="attributed_recall: "+excerpt;
+  }
   cJSON *message=cJSON_CreateObject();
   if(message){
    cJSON_AddStringToObject(message,"type","kitty.memory.refresh");
@@ -774,7 +825,7 @@ inline void tick(bool audioBusy){
    cJSON_AddStringToObject(message,"memory",context.c_str());
    char *wire=cJSON_PrintUnformatted(message);
    if(wire){
-    if(ws.sendTXT(wire)){memoryFactSeen=factVersion;memorySummarySeen=summaryVersion;memoryDaySeen=calendarDay;memoryMinuteSeen=calendarMinute;}
+    if(ws.sendTXT(wire)){semanticContext="";memoryFactSeen=factVersion;memorySummarySeen=summaryVersion;memoryDaySeen=calendarDay;memoryMinuteSeen=calendarMinute;}
     free(wire);
    }
    cJSON_Delete(message);
