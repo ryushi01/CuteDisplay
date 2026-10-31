@@ -45,7 +45,46 @@ def patch(source: str) -> str:
         "\n            while True:",
         1,
     )
-    replacement = """                if isinstance(event, dict) and event.get('type') == 'kitty.memory.refresh':
+    replacement = """                if isinstance(event, dict) and event.get('type') == 'kitty.memory.semantic':
+                    # Optional authenticated request, not part of audio streaming.
+                    # A speaker's introduction is only a claim, never owner proof.
+                    if not kitty_memory_refresh_enabled:
+                        continue
+                    if set(event) != {'type', 'request_id', 'query', 'speaker_id', 'provenance'}:
+                        continue
+                    request_id = event.get('request_id')
+                    query = event.get('query')
+                    speaker_id = event.get('speaker_id')
+                    provenance = event.get('provenance')
+                    if (not isinstance(request_id, str) or not 1 <= len(request_id) <= 64
+                            or not request_id.isascii() or not request_id.replace('-', '').replace('_', '').isalnum()
+                            or not isinstance(query, str) or not 1 <= len(query) <= 300
+                            or not isinstance(speaker_id, str) or not 1 <= len(speaker_id) <= 64
+                            or any(ord(c) < 33 or ord(c) == 127 for c in speaker_id)
+                            or speaker_id == 'unknown'
+                            or provenance not in ('voice_probable', 'explicit_introduction',
+                                                  'explicit_correction')):
+                        continue
+                    # No network request from the audio loop; only the async
+                    # WebSocket consumer, using an isolated loopback service.
+                    # Deliberately fail closed when the optional helper is absent.
+                    import os
+                    try:
+                        from kitty_semantic_async_client_v6 import semantic_context
+                        derived = await semantic_context(
+                            os.environ.get('KITTY_SEMANTIC_SERVICE_URL', ''),
+                            os.environ.get('KITTY_MEMORY_TOKEN', ''),
+                            query, speaker_id)
+                    except (ImportError, RuntimeError, ValueError, OSError):
+                        derived = ''
+                    await ws.send_json({
+                        'type': 'kitty.memory.semantic.result',
+                        'request_id': request_id,
+                        'speaker_id': speaker_id,
+                        'context': derived[:1800],
+                    })
+                    continue
+                if isinstance(event, dict) and event.get('type') == 'kitty.memory.refresh':
                     # Only an authenticated Kitty client which opted in during auth
                     # may change its own session memory. No server data is persisted.
                     if not kitty_memory_refresh_enabled:
