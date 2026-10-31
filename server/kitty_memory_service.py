@@ -255,8 +255,9 @@ def main():
             OWNER_PROOF=OwnerProof(secret,enrolled_key)
         except (ValueError,OSError) as exc:
             raise SystemExit("Invalid owner verification configuration") from exc
-    init()
-    threading.Thread(target=writer,daemon=True).start()
+    if legacy_memory_enabled():
+        init()
+        threading.Thread(target=writer,daemon=True).start()
     if os.environ.get("KITTY_SEMANTIC_AUTO_REFRESH", "") == "1":
         if not os.environ.get("KITTY_SD_SNAPSHOT_ROOT") or not os.environ.get("KITTY_SEMANTIC_DB"):
             raise SystemExit("Auto refresh requires KITTY_SD_SNAPSHOT_ROOT and KITTY_SEMANTIC_DB")
