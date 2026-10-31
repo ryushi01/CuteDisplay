@@ -14,6 +14,7 @@
 #include "BrainTTS.h"
 #include "KittyMemory.h"
 #include "BrainClock.h"
+#include "KittyMemoryContextV6.h"
 
 namespace BrainAI {
 struct Packet { char kind[12]; char text[81]; };
@@ -328,9 +329,7 @@ inline void run(void*){
  // Keep identity facts first, and cap archive contributions before appending.
  // Only the low-priority AI task performs this bounded retrieval.
  uint32_t searchId=KittyMemory::requestSearch(prompt);
- String remembered=KittyMemory::factSummary(340);
- String brief=KittyMemory::latestSummaryContext(160);
- if(!brief.isEmpty()){if(!remembered.isEmpty())remembered+='\n';remembered+="recent_summary: "+brief;}
+ String remembered=KittyMemoryContextV6::snapshot(340,160,500,false);
  String related=KittyMemory::semanticFactRecall(prompt,240);
  if(!related.isEmpty()){
   if(!remembered.isEmpty())remembered+='\n';
