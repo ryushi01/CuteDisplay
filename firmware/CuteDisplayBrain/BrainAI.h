@@ -45,7 +45,6 @@ static ConversationTurn history[HISTORY_TURNS];
 static size_t historyCount=0;
 static String currentAnswer;
 static String voicePrompt;
-static String voiceTurnContext;
 static String delegatedTurnContext;
 static bool voicePromptPending=false;
 // Single bounded result from a voice call's chat-model delegation (no extra TTS).
@@ -284,8 +283,7 @@ inline void run(void*){
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
  init();
- loadHistory();
- expireHistory();
+ if(!delegated){loadHistory();expireHistory();}
  sendPacket("AI_BEGIN","");
  failed=false;doneSeen=false;sseBuffer="";staged="";currentAnswer="";
  requestStarted=millis();firstTokenAt=0;lastTextFlush=millis();
@@ -320,7 +318,7 @@ inline void run(void*){
   cJSON_AddStringToObject(temporal,"content",calendar.c_str());
   cJSON_AddItemToArray(msgs,temporal);
  }
- for(size_t i=0;i<historyCount;i++){
+ for(size_t i=0;i<(delegated?0:historyCount);i++){
   cJSON *u=cJSON_CreateObject();
   cJSON_AddStringToObject(u,"role","user");
   cJSON_AddStringToObject(u,"content",history[i].user.c_str());
@@ -332,14 +330,14 @@ inline void run(void*){
  }
  // Keep identity facts first, and cap archive contributions before appending.
  // Only the low-priority AI task performs this bounded retrieval.
- uint32_t searchId=KittyMemory::requestSearch(prompt);
- String remembered=KittyMemoryContextV6::snapshot(340,160,500,false);
- String related=KittyMemory::semanticFactRecall(prompt,240);
+ uint32_t searchId=delegated?0:KittyMemory::requestSearch(prompt);
+ String remembered=delegated?String(""):KittyMemoryContextV6::snapshot(340,160,500,false);
+ String related=delegated?String(""):KittyMemory::semanticFactRecall(prompt,240);
  if(!related.isEmpty()){
   if(!remembered.isEmpty())remembered+='\n';
   remembered+=related;
  }
- String recent=KittyMemory::recall(prompt);
+ String recent=delegated?String(""):KittyMemory::recall(prompt);
  if(!recent.isEmpty()){
   if(!remembered.isEmpty())remembered+='\n';
   remembered+=KittyMemory::clipUTF8(recent,200);
@@ -464,8 +462,10 @@ inline void run(void*){
   report("CANCELLED");
  }else releaseText(true);
  if(!failed && doneSeen && !cancelRequested){
-  rememberTurn(prompt,currentAnswer);
-  KittyMemory::queue(prompt,currentAnswer);
+  if(!delegated){
+   rememberTurn(prompt,currentAnswer);
+   KittyMemory::queue(prompt,currentAnswer);
+  }
   if(!delegated && !BrainTTS::enqueue(currentAnswer))
    Serial.println("[TTS] Queue unavailable; text delivered");
  }
