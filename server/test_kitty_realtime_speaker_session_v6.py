@@ -24,6 +24,18 @@ class SpeakerSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0]["item_id"], "item-1")
 
+    async def test_preroll_is_retained_and_bounded(self):
+        session = SpeakerSession()
+        # Feed 400ms microphone audio before upstream VAD speech_started.
+        pre = base64.b64encode(b"\\x01\\x00" * 9600).decode()
+        session.microphone_chunk(pre)
+        session.speech_started()
+        session.speech_stopped(item_id="item-1")
+        captured = session.transcription("item-1")
+        self.assertIsNotNone(captured)
+        self.assertEqual(len(captured[2]), 19200)
+        session.close()
+
     async def test_mismatch_rejected(self):
         session = SpeakerSession()
         session.speech_started()
