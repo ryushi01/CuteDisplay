@@ -101,7 +101,7 @@ inline void stageStatus(){
 }
 // Explicit serial-only stage; never arms boot or reboots. Requires user confirmation.
 // This function is intentionally not connected to a background task or remote control.
-inline bool stageToInactiveSlot(bool (*stillIdle)()){
+inline bool stageToInactiveSlot(bool (*stillIdle)(),void (*display)(const String &)=nullptr){
  if(stagedReady()){Serial.println("[OTA HTTPS] stage refused: verified image already pending");return false;}
  clearStage();
  Manifest m;
@@ -129,10 +129,12 @@ inline bool stageToInactiveSlot(bool (*stillIdle)()){
  if(!stillIdle()||!stagedWriter.begin(m.size,digest,true)){
   http.end();return false;
  }
+ if(display)display("S3 UPDATE: DOWNLOADING 0%");
  WiFiClient *stream=http.getStreamPtr();
  uint8_t buffer[2048];
  uint32_t received=0;
  uint32_t lastProgress=millis();
+ uint8_t lastDisplayedPercent=0;
  bool ok=true;
  while(received<m.size){
   if(!stillIdle() || WiFi.status()!=WL_CONNECTED){ok=false;break;}
@@ -149,20 +151,27 @@ inline bool stageToInactiveSlot(bool (*stillIdle)()){
   int n=stream->readBytes(buffer,take);
   if(n<=0 || !stagedWriter.append(buffer,(size_t)n)){ok=false;break;}
   received+=(uint32_t)n;lastProgress=millis();
+  uint8_t percent=(uint8_t)((uint64_t)received*100ULL/m.size);
+  if(display && (percent>=lastDisplayedPercent+10 || percent==100)){
+   lastDisplayedPercent=percent;
+   display(String("S3 UPDATE: ")+String(percent)+"%");
+  }
   if((received%131072UL)<(uint32_t)n)
    Serial.printf("[OTA HTTPS] staged %lu/%lu\\n",(unsigned long)received,(unsigned long)m.size);
  }
+ if(ok && display)display("S3 UPDATE: VERIFYING");
  if(ok)ok=stillIdle() && stagedWriter.complete(true);
  if(ok){stagedRelease=m.release;stagedSHA=m.sha;stagedSize=m.size;}
  else clearStage();
  http.end();
+ if(display)display(ok?"S3 UPDATE: READY":"S3 UPDATE: FAILED");
  Serial.printf("[OTA HTTPS] %s bytes=%lu boot_switched=0 reboot=0\\n",
   ok?"INACTIVE_SLOT_VERIFIED":"STAGE_ABORTED",(unsigned long)received);
  return ok;
 }
 // Arm only the EXACT verified release after a second, explicit serial command.
 // Does not reboot: a separate controlled restart remains necessary.
-inline bool activateStaged(const String &release,bool (*stillIdle)()){
+inline bool activateStaged(const String &release,bool (*stillIdle)(),void (*display)(const String &)=nullptr){
  if(!stillIdle || !stillIdle() || !stagedReady() ||
     release!=stagedRelease || !KittyOTASafety::inspect().rollbackSupported ||
     KittyOTASafety::inspect().rollbackPending){
@@ -173,6 +182,7 @@ inline bool activateStaged(const String &release,bool (*stillIdle)()){
   Serial.println("[OTA HTTPS] activation refused: boot partition unchanged");
   return false;
  }
+ if(display)display("S3 UPDATE: RESTART REQUIRED");
  Serial.println("[OTA HTTPS] boot slot armed; NO REBOOT. Explicit restart required.");
  stagedRelease="";stagedSHA="";stagedSize=0;
  return true;
