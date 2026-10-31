@@ -69,9 +69,24 @@ def patch(source: str) -> str:
                 raise ValueError("Unexpected command anchor in existing gateway")
             source = source.replace(COMMAND, SEMANTIC_EVENT + COMMAND, 1)
         if "async def kitty_semantic_reply(" not in source:
-            if source.count(EVENTS) != 1:
+            # Existing v2 patch has inserted a nonlocal statement between
+            # the function header and while loop, so EVENTS no longer matches.
+            old_events = (
+                "        async def client_events():\n"
+                "            nonlocal kitty_memory_last_revision, kitty_memory_context_item\n"
+                "            while True:"
+            )
+            new_events = (
+                "        async def client_events():\n"
+                "            nonlocal kitty_memory_last_revision, kitty_memory_context_item, kitty_semantic_task\n"
+                "            while True:"
+            )
+            if source.count(old_events) == 1:
+                source = source.replace(old_events, SEMANTIC_TASK + new_events, 1)
+            elif source.count(new_events) == 1:
+                source = source.replace(new_events, SEMANTIC_TASK + new_events, 1)
+            else:
                 raise ValueError("Unexpected async event-loop anchor")
-            source = source.replace(EVENTS, SEMANTIC_TASK + EVENTS, 1)
         if "kitty_semantic_task = None" not in source:
             source = source.replace(
                 "        kitty_memory_context_item = None",
