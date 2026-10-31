@@ -24,7 +24,9 @@ class VoiceIntegrationSafety(unittest.TestCase):
 
     def test_exact_transcript_and_one_shot(self):
         self.assertIn("prompt==semanticTranscript", self.voice)
-        self.assertIn("clearSemanticTurn(); // No later or different call", self.voice)
+        # Both immediate and delayed delegation must consume the context once.
+        self.assertIn("clearSemanticTurn();\n      if(!delegatedCallId.isEmpty()", self.voice)
+        self.assertIn("clearSemanticTurn();\n  if(!delegatedCallId.isEmpty()", self.voice)
         self.assertIn('cJSON_AddStringToObject(m,"turn_id",turnId.c_str())', self.voice)
 
     def test_delegated_chat_excludes_unscoped_memory(self):
@@ -32,6 +34,15 @@ class VoiceIntegrationSafety(unittest.TestCase):
         self.assertIn('delegated?String(""):KittyMemory::semanticFactRecall', self.chat)
         self.assertIn("if(delegated && !scopedContext.isEmpty())", self.chat)
         self.assertIn("if(!delegated){\n   rememberTurn(prompt,currentAnswer);", self.chat)
+
+    def test_disconnect_and_failure_clear_pending_delegation(self):
+        failure = self.voice.split("inline void fail(const char *why){", 1)[1].split(
+            "// V6 speaker recognition", 1)[0]
+        disconnect = self.voice.split("if(event==WStype_DISCONNECTED){", 1)[1].split(
+            "if(event==WStype_CONNECTED)", 1)[0]
+        for block in (failure, disconnect):
+            self.assertIn('clearSemanticTurn();', block)
+            self.assertIn('waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;', block)
 
     def test_new_speech_invalidates_prior_context(self):
         self.assertIn("A new utterance invalidates an earlier speaker-specific result", self.voice)
