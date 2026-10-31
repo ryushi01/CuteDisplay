@@ -13,39 +13,7 @@ READY = "await ws.send_json({'type': 'bridge.ready', 'model': voice_model, 'voic
 EVENTS = "        async def client_events():\n            while True:"
 COMMAND = "                command = protocol.command(event)"
 
-def patch(source: str) -> str:
-    if MARKER in source:
-        compile(source, "realtime.py", "exec")
-        return source
-    if "kitty_expressions" not in source or AUTH not in source:
-        raise ValueError("Kitty auth/SD memory extension must be installed first")
-    for label, anchor in (("auth", AUTH), ("ready", READY),
-                          ("client_events", EVENTS), ("command", COMMAND)):
-        if source.count(anchor) != 1:
-            raise ValueError(f"Unexpected {label} anchor count: {source.count(anchor)}")
-    source = source.replace(
-        AUTH,
-        AUTH + "\n        " + MARKER
-        + "\n        kitty_memory_refresh_enabled = auth.get('kitty_memory_refresh') is True and kitty_expressions"
-        + "\n        kitty_memory_last_revision = -1"
-        + "\n        kitty_memory_context_item = None",
-        1,
-    )
-    source = source.replace(
-        READY,
-        READY
-        + "\n        if kitty_memory_refresh_enabled:"
-        + "\n            await ws.send_json({'type': 'kitty.memory.capabilities', 'refresh': True})",
-        1,
-    )
-    source = source.replace(
-        EVENTS,
-        "        async def client_events():"
-        "\n            nonlocal kitty_memory_last_revision, kitty_memory_context_item"
-        "\n            while True:",
-        1,
-    )
-    replacement = """                if isinstance(event, dict) and event.get('type') == 'kitty.memory.semantic':
+SEMANTIC_EVENT = """                if isinstance(event, dict) and event.get('type') == 'kitty.memory.semantic':
                     # Optional authenticated request, not part of audio streaming.
                     # A speaker's introduction is only a claim, never owner proof.
                     if not kitty_memory_refresh_enabled:
@@ -84,7 +52,45 @@ def patch(source: str) -> str:
                         'context': derived[:1800],
                     })
                     continue
-                if isinstance(event, dict) and event.get('type') == 'kitty.memory.refresh':
+"""
+
+def patch(source: str) -> str:
+    if MARKER in source:
+        if "kitty.memory.semantic.result" not in source:
+            if source.count(COMMAND) != 1:
+                raise ValueError("Unexpected command anchor in existing gateway")
+            source = source.replace(COMMAND, SEMANTIC_EVENT + COMMAND, 1)
+        compile(source, "realtime.py", "exec")
+        return source
+    if "kitty_expressions" not in source or AUTH not in source:
+        raise ValueError("Kitty auth/SD memory extension must be installed first")
+    for label, anchor in (("auth", AUTH), ("ready", READY),
+                          ("client_events", EVENTS), ("command", COMMAND)):
+        if source.count(anchor) != 1:
+            raise ValueError(f"Unexpected {label} anchor count: {source.count(anchor)}")
+    source = source.replace(
+        AUTH,
+        AUTH + "\n        " + MARKER
+        + "\n        kitty_memory_refresh_enabled = auth.get('kitty_memory_refresh') is True and kitty_expressions"
+        + "\n        kitty_memory_last_revision = -1"
+        + "\n        kitty_memory_context_item = None",
+        1,
+    )
+    source = source.replace(
+        READY,
+        READY
+        + "\n        if kitty_memory_refresh_enabled:"
+        + "\n            await ws.send_json({'type': 'kitty.memory.capabilities', 'refresh': True})",
+        1,
+    )
+    source = source.replace(
+        EVENTS,
+        "        async def client_events():"
+        "\n            nonlocal kitty_memory_last_revision, kitty_memory_context_item"
+        "\n            while True:",
+        1,
+    )
+    replacement = SEMANTIC_EVENT + """                if isinstance(event, dict) and event.get('type') == 'kitty.memory.refresh':
                     # Only an authenticated Kitty client which opted in during auth
                     # may change its own session memory. No server data is persisted.
                     if not kitty_memory_refresh_enabled:
