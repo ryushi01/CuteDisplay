@@ -24,12 +24,15 @@ SEMANTIC_TASK = """        # Optional per-session background semantic lookup. Th
                     os.environ.get('KITTY_MEMORY_TOKEN', ''), query, speaker_id)
             except (ImportError, RuntimeError, ValueError, OSError):
                 result = ''
-            await ws.send_json({
-                'type': 'kitty.memory.semantic.result',
-                'request_id': request_id,
-                'speaker_id': speaker_id,
-                'context': result[:1800],
-            })
+            # No upstream insertion. Empty and late results cannot alter
+            # the session or generate traffic during a live call.
+            if isinstance(result, str) and result:
+                await ws.send_json({
+                    'type': 'kitty.memory.semantic.result',
+                    'request_id': request_id,
+                    'speaker_id': speaker_id,
+                    'context': result[:1800],
+                })
 """
 
 SEMANTIC_EVENT = """                if isinstance(event, dict) and event.get('type') == 'kitty.memory.semantic':
