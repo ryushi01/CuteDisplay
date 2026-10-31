@@ -81,9 +81,29 @@ inline void preflight(){
  Serial.println("[OTA HTTPS] PREFLIGHT_PASS; NO FLASH WRITE");
 }
 
+// Staged image metadata exists only in RAM; power loss requires restaging.
+// The persistent writer session is required because its former local lifetime
+// destroyed the verified target immediately after a successful download.
+static KittyOTAWriter::Session stagedWriter;
+static String stagedRelease,stagedSHA;
+static uint32_t stagedSize=0;
+inline void clearStage(){
+ stagedWriter.abort();stagedRelease="";stagedSHA="";stagedSize=0;
+}
+inline bool stagedReady(){
+ return stagedWriter.status()==KittyOTAWriter::State::Ready &&
+        !stagedRelease.isEmpty() && stagedSize>=1024;
+}
+inline void stageStatus(){
+ Serial.printf("[OTA HTTPS] staged=%d release=%s bytes=%lu boot_switched=0\\n",
+  stagedReady()?1:0,stagedReady()?stagedRelease.c_str():"none",
+  (unsigned long)(stagedReady()?stagedSize:0));
+}
 // Explicit serial-only stage; never arms boot or reboots. Requires user confirmation.
 // This function is intentionally not connected to a background task or remote control.
 inline bool stageToInactiveSlot(bool (*stillIdle)()){
+ if(stagedReady()){Serial.println("[OTA HTTPS] stage refused: verified image already pending");return false;}
+ clearStage();
  Manifest m;
  if(!stillIdle || !stillIdle() || !getManifest(m)){
   Serial.println("[OTA HTTPS] stage refused: busy / manifest unavailable");return false;
@@ -106,8 +126,7 @@ inline bool stageToInactiveSlot(bool (*stillIdle)()){
   Serial.printf("[OTA HTTPS] image rejected HTTP=%d length=%d\\n",status,http.getSize());
   http.end();return false;
  }
- KittyOTAWriter::Session writer;
- if(!stillIdle()||!writer.begin(m.size,digest,true)){
+ if(!stillIdle()||!stagedWriter.begin(m.size,digest,true)){
   http.end();return false;
  }
  WiFiClient *stream=http.getStreamPtr();
@@ -128,16 +147,34 @@ inline bool stageToInactiveSlot(bool (*stillIdle)()){
   if(take>sizeof(buffer))take=sizeof(buffer);
   if(take>m.size-received)take=m.size-received;
   int n=stream->readBytes(buffer,take);
-  if(n<=0 || !writer.append(buffer,(size_t)n)){ok=false;break;}
+  if(n<=0 || !stagedWriter.append(buffer,(size_t)n)){ok=false;break;}
   received+=(uint32_t)n;lastProgress=millis();
   if((received%131072UL)<(uint32_t)n)
    Serial.printf("[OTA HTTPS] staged %lu/%lu\\n",(unsigned long)received,(unsigned long)m.size);
  }
- if(ok)ok=stillIdle() && writer.complete(true);
- if(!ok)writer.abort();
+ if(ok)ok=stillIdle() && stagedWriter.complete(true);
+ if(ok){stagedRelease=m.release;stagedSHA=m.sha;stagedSize=m.size;}
+ else clearStage();
  http.end();
  Serial.printf("[OTA HTTPS] %s bytes=%lu boot_switched=0 reboot=0\\n",
   ok?"INACTIVE_SLOT_VERIFIED":"STAGE_ABORTED",(unsigned long)received);
  return ok;
+}
+// Arm only the EXACT verified release after a second, explicit serial command.
+// Does not reboot: a separate controlled restart remains necessary.
+inline bool activateStaged(const String &release,bool (*stillIdle)()){
+ if(!stillIdle || !stillIdle() || !stagedReady() ||
+    release!=stagedRelease || !KittyOTASafety::inspect().rollbackSupported ||
+    KittyOTASafety::inspect().rollbackPending){
+  Serial.println("[OTA HTTPS] activation refused: no matching verified release / unsafe state");
+  return false;
+ }
+ if(!stagedWriter.armBoot(true)){
+  Serial.println("[OTA HTTPS] activation refused: boot partition unchanged");
+  return false;
+ }
+ Serial.println("[OTA HTTPS] boot slot armed; NO REBOOT. Explicit restart required.");
+ stagedRelease="";stagedSHA="";stagedSize=0;
+ return true;
 }
 } // namespace KittyHTTPSOTA
