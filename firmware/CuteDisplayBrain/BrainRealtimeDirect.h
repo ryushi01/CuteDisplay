@@ -457,9 +457,14 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
     if(strcmp(conf->valuestring,"probable")==0){
      speaker=String(sid->valuestring);source="voice_probable";
     }else if(strcmp(conf->valuestring,"claimed")==0 &&
-              strcmp(sid->valuestring,"person:shana")==0){
-     // A spoken name is a conversational hint, never owner auth.
-     speaker="person:shana";source="explicit_introduction";
+              strncmp(sid->valuestring,"person:",7)==0 &&
+              strlen(sid->valuestring)>7){
+     // Any introduced person is a claim, never verified owner authentication.
+     // Reject control characters to preserve TSV-based speaker boundaries.
+     bool safe=true;
+     for(const char *p=sid->valuestring;*p;++p)
+      if((unsigned char)*p<32 || *p==127){safe=false;break;}
+     if(safe){speaker=String(sid->valuestring);source="explicit_introduction";}
     }
    }
    (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
