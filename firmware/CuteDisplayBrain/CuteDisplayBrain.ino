@@ -794,6 +794,22 @@ static void consoleCommand(String cmd){
   Serial.printf("[MEMORY] probe queued=%d; check 'memory status' after a moment\n",accepted?1:0);
   return;
  }
+ if(cmd=="ota https status"){
+  KittyHTTPSOTA::stageStatus();
+  return;
+ }
+ if(cmd.startsWith("ota https activate ") && cmd.endsWith(" CONFIRM")){
+  // Exact release ID is required. No remote, BLE or LAN activation path.
+  String release=cmd.substring(19,cmd.length()-8);
+  if(otaBusy() || otaReceiver.active()){
+   Serial.println("[OTA HTTPS] activation refused: call/audio/OTA active");
+  }else{
+   KittyHTTPSOTA::activateStaged(release,[]()->bool {
+    return !otaBusy() && !otaReceiver.active();
+   });
+  }
+  return;
+ }
  if(cmd=="ota https stage CONFIRM"){
   if(otaBusy() || otaReceiver.active()){
    Serial.println("[OTA HTTPS] refused: call/audio/OTA active");
