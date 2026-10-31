@@ -16,7 +16,7 @@ class KittySpeakerObserver:
         self.token = token if token is not None else os.environ.get("KITTY_MEMORY_TOKEN", "")
         self.session = session or SpeakerSession()
         self._session_factory = (lambda: SpeakerSession(identify=self.session._identify))
-        self.gate = MemoryTurnGate(ttl=2.0)
+        self.gate = MemoryTurnGate(ttl=15.0)
         self.send_to_s3 = send_to_s3
         self.pending_stopped_item = None
         self.epoch = None
@@ -58,7 +58,7 @@ class KittySpeakerObserver:
             self.epoch = epoch
             self._active_item = item
             self.session.schedule(item, self.url, self.token,
-                                  self._send_recognition, timeout=0.9)
+                                  self._send_recognition, timeout=12.0)
         elif kind == "error":
             self.gate.invalidate()
 
