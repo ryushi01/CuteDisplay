@@ -9,13 +9,14 @@ class SpeakerSessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_matching_upstream_turn_emits(self):
         sent = []
         async def fake(url, token, item, pcm, timeout):
+            self.assertEqual(len(pcm), 16000)
             return {"type":"kitty.speaker.result", "item_id":item,
                     "speaker_id":"person:test", "confidence":"probable"}
         async def emit(value):
             sent.append(value)
         session = SpeakerSession(identify=fake)
         session.speech_started()
-        session.microphone_chunk(base64.b64encode(b"\x01\x00"*40000).decode())
+        session.microphone_chunk(base64.b64encode(b"\x01\x00"*8000).decode())
         session.speech_stopped(item_id="item-1")
         self.assertTrue(session.schedule("item-1", "unix:///run/kitty-semantic/memory.sock",
                                          "token", emit))
