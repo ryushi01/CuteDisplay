@@ -800,7 +800,7 @@ static void consoleCommand(String cmd){
  }
  if(cmd.startsWith("ota https activate ") && cmd.endsWith(" CONFIRM")){
   // Exact release ID is required. No remote, BLE or LAN activation path.
-  String release=cmd.substring(19,cmd.length()-8);
+  String release=cmd.substring(strlen("ota https activate "),cmd.length()-strlen(" CONFIRM"));
   if(otaBusy() || otaReceiver.active()){
    Serial.println("[OTA HTTPS] activation refused: call/audio/OTA active");
   }else{
