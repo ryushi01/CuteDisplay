@@ -267,33 +267,32 @@ static void drawFullScreenKittyFace(){
  oval(x+8,160,8,8,CF_INK);oval(x+width-8,160,8,8,CF_INK);
  rect(x+8,152,width-16,17,CF_INK);
  textAt(label,x+12,155,1,CF_WHITE);
- // Width-aware UTF-8 wrap of the latest caption. Only two rows are
- // visible; older wrapped rows scroll off the top as new text arrives.
- // Unlike fixed byte clipping, no part of a long sentence is discarded.
+ // Full-screen rolling conversation text, retaining the previous turn.
  if(!callCaption.isEmpty()){
-  String lines[2];
-  String current="";
-  int width=0;
-  const int maxWidth=306;
-  for(int pos=0;pos<(int)callCaption.length();){
-   int begin=pos;
-   uint32_t cp=decodeUTF8(callCaption,pos);
-   if(cp=='\\r')continue;
-   if(cp=='\\n'){
-    lines[0]=lines[1];lines[1]=current;
-    current="";width=0;continue;
+  rect(0,0,320,170,CF_WHITE);
+  String rows[11];String current="";int used=0;
+  String transcript=callCaptionPrevious;
+  if(!transcript.isEmpty())transcript+='\n';
+  transcript+=callCaption;
+  auto appendRow=[&](const String &value){
+   for(int i=0;i<10;i++)rows[i]=rows[i+1];
+   rows[10]=value;
+  };
+  for(int pos=0;pos<(int)transcript.length();){
+   const int begin=pos;
+   uint32_t cp=decodeUTF8(transcript,pos);
+   if(cp=='\r')continue;
+   if(cp=='\n'){appendRow(current);current="";used=0;continue;}
+   const int glyph=utfWidth(cp,1,1);
+   if(used+glyph>306 && !current.isEmpty()){
+    appendRow(current);current="";used=0;
    }
-   int glyph=utfWidth(cp,1,1);
-   if(width+glyph>maxWidth && current.length()){
-    lines[0]=lines[1];lines[1]=current;
-    current="";width=0;
-   }
-   current+=callCaption.substring(begin,pos);
-   width+=glyph;
+   current+=transcript.substring(begin,pos);used+=glyph;
   }
-  // Bring the newest wrapped line into the lower row.
-  if(current.length()){lines[0]=lines[1];lines[1]=current;}
-  if(lines[0].length())richText(lines[0],6,3,1,1,CF_INK,316);
-  if(lines[1].length())richText(lines[1],6,16,1,1,CF_INK,316);
+  if(!current.isEmpty())appendRow(current);
+  for(int i=0;i<11;i++)if(!rows[i].isEmpty())
+   richText(rows[i],6,4+i*13,1,1,CF_INK,316);
+  rect(0,150,320,20,CF_INK);
+  textAt(label,8,155,1,CF_WHITE);
  }
 }
