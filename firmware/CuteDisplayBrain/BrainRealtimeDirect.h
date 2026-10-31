@@ -360,11 +360,26 @@ inline void fail(const char *why){
 // V6 speaker recognition is probabilistic and turn-scoped; never owner auth.
 static String pendingSpeakerItem, pendingSpeakerTranscript;
 static uint32_t pendingSpeakerAt=0;
+// Unverified conversation name: reset per call, never owner authorization.
+static String introducedSpeaker;
+inline String selfIntroducedSpeaker(const String &utterance){
+ String key,value;
+ if(!KittyMemory::extractFact(utterance,key,value) || key!="name")return "";
+ value.trim();
+ if(value.length()<2 || value.length()>32)return "";
+ for(size_t i=0;i<value.length();i++){
+  char ch=value[i];
+  if(!((ch>='A'&&ch<='Z')||(ch>='a'&&ch<='z')||
+       (ch>='0'&&ch<='9')||ch=='-'||ch=='_'))return "";
+ }
+ value.toLowerCase();return "person:"+value;
+}
 inline void flushPendingSpeaker(bool timedOut=false){
  if(pendingSpeakerItem.isEmpty())return;
  if(!timedOut && (uint32_t)(millis()-pendingSpeakerAt)<1100UL)return;
  (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
-   "unknown","unverified");
+   introducedSpeaker.isEmpty()?String("unknown"):introducedSpeaker,
+   introducedSpeaker.isEmpty()?String("unverified"):String("explicit_introduction"));
  pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
 }
 
@@ -380,7 +395,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    (unsigned long)BrainRealtimeAudio::droppedSpeakerMs());
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
-  memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();
+  memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();introducedSpeaker="";
   waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  deferredVoiceItem="";playbackSpeechDetected=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -526,9 +541,13 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
      if(c<=32 || c==127){speaker="unknown";source="unverified";break;}
     }
    }
+   if(speaker=="unknown" && !introducedSpeaker.isEmpty()){
+    speaker=introducedSpeaker;source="explicit_introduction";
+   }
    (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
                                      speaker,source);
-   if(speaker!="unknown")
+   // Self-claimed identity must not unlock semantic private-memory lookup.
+   if(source=="voice_probable")
     requestSemanticTurn(pendingSpeakerItem,speaker,source,pendingSpeakerTranscript);
    pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
   }
@@ -546,6 +565,8 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    if(cJSON_IsString(id) && id->valuestring && strlen(id->valuestring)<=160){
     pendingSpeakerItem=String(id->valuestring);
     pendingSpeakerTranscript=KittyMemory::clipUTF8(String(transcript->valuestring),254);
+    String intro=selfIntroducedSpeaker(pendingSpeakerTranscript);
+    if(!intro.isEmpty())introducedSpeaker=intro;
     pendingSpeakerAt=millis();
    }else{
     (void)KittyMemory::queue(String(transcript->valuestring),"[voice transcript]");
