@@ -20,8 +20,7 @@ async def context_for_turn(service_url, service_token, transcript, attribution,
     # A name in speech is a claim; never let it authorize owner-only facts.
     if (source not in PROVENANCE or not isinstance(speaker, str)
             or speaker == "unknown" or not speaker.strip()
-            or attribution.get("speaker_role") == "owner"
-            and source != "session_verified"):
+            or attribution.get("speaker_role") == "owner"):
         return ""
     context = await lookup(service_url, service_token, transcript, speaker)
     if not isinstance(context, str) or not context.strip():
