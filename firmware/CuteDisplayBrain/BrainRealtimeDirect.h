@@ -119,6 +119,8 @@ inline void queueCaption(const char *speaker,const char *words){
 }
 static bool playbackSpeechDetected=false;
 static String delegatedCallId, animationResponseId;
+static String waitingDelegationId,waitingDelegationPrompt;
+static uint32_t waitingDelegationAt=0;
 // The provider must finish the initial tool-call response before bridge.respond.
 static bool toolResponseFinished=false;
 static String failedCallId, failedCallAnswer;
@@ -325,7 +327,7 @@ inline void diagnose(bool audioBusy){
 inline void stop(){
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
  requested=false;ready=false;connected=false;started=false;
- clearSemanticTurn();
+ clearSemanticTurn();waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  deferredVoiceItem="";playbackSpeechDetected=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -585,24 +587,32 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
     // Use attributed context only if the delegated model request exactly
     // matches the transcript which produced this semantic lookup. No
     // guessing from conversation order, speaker names or similar phrasing.
-    String scoped="";
-    if(!semanticPending && !semanticContext.isEmpty() &&
-       !semanticTranscript.isEmpty() && prompt==semanticTranscript &&
-       (uint32_t)(millis()-semanticRequestedAt)<1500UL &&
-       deferredVoiceItem.isEmpty() && delegatedCallId.isEmpty()){
-      scoped=semanticContext;
-    }
-    clearSemanticTurn(); // No later or different call may reuse this memory.
-    if(!delegatedCallId.isEmpty() || prompt.isEmpty() ||
-       !BrainAI::startCallDelegation(prompt,scoped)){
-     if(!failedCallId.isEmpty())failure="TOOL_QUEUE_FULL";
-     else {failedCallId=callId;
-      failedCallAnswer="I could not start the chat model. Please try again.";}
-
+    // A matching in-flight lookup receives at most 80ms of *nonblocking*
+    // grace while ws.loop() continues. Never wait for a different prompt.
+    if(semanticPending && !semanticTranscript.isEmpty() &&
+       prompt==semanticTranscript && waitingDelegationId.isEmpty() &&
+       delegatedCallId.isEmpty() && deferredVoiceItem.isEmpty()){
+      waitingDelegationId=callId;
+      waitingDelegationPrompt=prompt;
+      waitingDelegationAt=millis();
     }else{
-     delegatedCallId=callId;
-     toolResponseFinished=false;
-     status("CALL_THINKING");
+      String scoped="";
+      if(!semanticPending && !semanticContext.isEmpty() &&
+         !semanticTranscript.isEmpty() && prompt==semanticTranscript &&
+         (uint32_t)(millis()-semanticRequestedAt)<1500UL &&
+         deferredVoiceItem.isEmpty() && delegatedCallId.isEmpty())
+        scoped=semanticContext;
+      clearSemanticTurn();
+      if(!delegatedCallId.isEmpty() || !waitingDelegationId.isEmpty() ||
+         prompt.isEmpty() || !BrainAI::startCallDelegation(prompt,scoped)){
+        if(!failedCallId.isEmpty())failure="TOOL_QUEUE_FULL";
+        else {failedCallId=callId;
+         failedCallAnswer="I could not start the chat model. Please try again.";}
+      }else{
+        delegatedCallId=callId;
+        toolResponseFinished=false;
+        status("CALL_THINKING");
+      }
     }
    }else if(strcmp(name->valuestring,"set_expression")==0 ||
              strcmp(name->valuestring,"play_animation")==0){
@@ -806,6 +816,25 @@ inline void tick(bool audioBusy){
  }
  ws.loop();
  if(!requested)return; // A callback may have rejected the session.
+ if(!waitingDelegationId.isEmpty() &&
+    (!semanticPending || (uint32_t)(millis()-waitingDelegationAt)>=80UL)){
+  String callId=waitingDelegationId, prompt=waitingDelegationPrompt;
+  waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
+  String scoped="";
+  if(!semanticPending && !semanticContext.isEmpty() &&
+     prompt==semanticTranscript && deferredVoiceItem.isEmpty() &&
+     (uint32_t)(millis()-semanticRequestedAt)<1500UL)
+    scoped=semanticContext;
+  clearSemanticTurn();
+  if(!delegatedCallId.isEmpty() || !BrainAI::startCallDelegation(prompt,scoped)){
+   if(failedCallId.isEmpty()){
+    failedCallId=callId;
+    failedCallAnswer="I could not start the chat model. Please try again.";
+   }
+  }else{
+   delegatedCallId=callId;toolResponseFinished=false;status("CALL_THINKING");
+  }
+ }
  if(toolResponseFinished && !failedCallId.isEmpty()){
   String id=failedCallId,answer=failedCallAnswer;
   failedCallId="";failedCallAnswer="";toolResponseFinished=false;
