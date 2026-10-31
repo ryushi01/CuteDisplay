@@ -27,7 +27,7 @@ class SpeakerSessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_preroll_is_retained_and_bounded(self):
         session = SpeakerSession()
         # Feed 400ms microphone audio before upstream VAD speech_started.
-        pre = base64.b64encode(b"\\x01\\x00" * 9600).decode()
+        pre = base64.b64encode(b"\x01\x00" * 9600).decode()
         session.microphone_chunk(pre)
         session.speech_started()
         session.speech_stopped(item_id="item-1")
