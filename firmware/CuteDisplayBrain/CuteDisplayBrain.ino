@@ -834,16 +834,6 @@ static void consoleCommand(String cmd){
   }
   return;
  }
- if(false && cmd=="ota https stage CONFIRM"){
-  if(otaBusy() || otaReceiver.active()){
-   Serial.println("[OTA HTTPS] refused: call/audio/OTA active");
-  }else{
-   KittyHTTPSOTA::stageToInactiveSlot([]()->bool {
-    return !otaBusy() && !otaReceiver.active();
-   },showC5UpdateStatus);
-  }
-  return;
- }
  if(cmd=="ota https check"){
   if(otaBusy())Serial.println("[OTA HTTPS] refused: call/audio/OTA active");
   else KittyHTTPSOTA::preflight();
