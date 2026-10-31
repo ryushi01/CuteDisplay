@@ -499,6 +499,17 @@ inline bool start(){
 // Only the Arduino websocket loop calls this. Never called from I2S.
 inline bool startCallDelegation(const String &prompt,const String &context=String("")){
  if(busy || callResultReady || prompt.isEmpty() || prompt.length()>1024)return false;
+ // A live 24 kHz duplex call retains internal audio/network allocations.
+ // Do not start another 16 KB FreeRTOS AI worker stack if internal RAM is
+ // already critically low. The realtime caller returns a normal tool error.
+ // Keep this independent of PSRAM totals, which cannot fund all DMA/TLS allocations.
+ const size_t internalFree=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+ const size_t largestBlock=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+ if(internalFree<32768 || largestBlock<16384){
+  Serial.printf("[AI GUARD] delegated request skipped: internal_free=%lu largest=%lu\\n",
+    (unsigned long)internalFree,(unsigned long)largestBlock);
+  return false;
+ }
  voicePrompt=prompt;voicePromptPending=true;
  delegatedTurnContext=KittyMemory::clipUTF8(context,640);
  callResultText="";callResultOK=false;
