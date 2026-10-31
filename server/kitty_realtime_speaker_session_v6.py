@@ -6,6 +6,9 @@ upstream item_id associated with the same stopped utterance. No persistent
 audio storage, client-provided speaker IDs, or session-global memory.
 """
 import asyncio
+import base64
+import binascii
+import collections
 import re
 from kitty_realtime_speaker_v6 import SpeakerTurn, identify_turn
 
@@ -15,6 +18,9 @@ class SpeakerSession:
     def __init__(self, *, identify=identify_turn):
         self._identify = identify
         self._audio = SpeakerTurn()
+        self._preroll = collections.deque()
+        self._preroll_bytes = 0
+        self._collecting = False
         self._generation = 0
         self._stopped = None
         self._task = None
@@ -22,20 +28,44 @@ class SpeakerSession:
 
     def microphone_chunk(self, encoded):
         """Observe client PCM *without changing or delaying forwarding*."""
-        if not self._closed:
+        if self._closed:
+            return
+        if self._collecting:
             self._audio.append_base64_pcm16(encoded)
+            return
+        # VAD speech-start notifications arrive after initial PCM packets.
+        # Hold bounded pre-roll only in RAM; never retain recordings.
+        if not isinstance(encoded, str) or len(encoded) > 65536:
+            return
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error):
+            return
+        if not raw or len(raw) % 2:
+            return
+        self._preroll.append(raw)
+        self._preroll_bytes += len(raw)
+        while self._preroll_bytes > 24000:
+            chunk = self._preroll.popleft()
+            self._preroll_bytes -= len(chunk)
 
     def speech_started(self):
         self._cancel()
         self._generation += 1
         self._stopped = None
         self._audio.start()
+        self._collecting = True
+        for chunk in self._preroll:
+            self._audio.append_base64_pcm16(base64.b64encode(chunk).decode("ascii"))
+        self._preroll.clear()
+        self._preroll_bytes = 0
 
     def speech_stopped(self, *, item_id=None):
         """Freeze a bounded audio snapshot; item ID may arrive later."""
         if self._closed:
             return
         self._audio.stop()
+        self._collecting = False
         _, pcm = self._audio.snapshot()
         self._stopped = (self._generation, item_id, pcm)
 
@@ -79,3 +109,6 @@ class SpeakerSession:
         self._cancel()
         self._stopped = None
         self._audio.discard()
+        self._collecting = False
+        self._preroll.clear()
+        self._preroll_bytes = 0
