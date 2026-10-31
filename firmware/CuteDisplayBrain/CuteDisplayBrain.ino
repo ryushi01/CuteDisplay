@@ -155,6 +155,12 @@ static uint16_t sendLink(const char *kind,const String &payload=""){
  }
  return seq;
 }
+static void showC5UpdateStatus(const String &value){
+ // C5 v35 already supports TEXT; no C5 firmware update needed.
+ // Send one brief, ASCII-only status message per progress milestone.
+ sendLink("TEXT",value);
+ Serial.printf("[S3 OTA UI] %s\\n",value.c_str());
+}
 static void proxyResult(const String &value){
  if(lanAwaitingCommand &&
     (value.startsWith("ACK:CMD")||value.startsWith("ERR:"))){
@@ -806,7 +812,7 @@ static void consoleCommand(String cmd){
   }else{
    KittyHTTPSOTA::activateStaged(release,[]()->bool {
     return !otaBusy() && !otaReceiver.active();
-   });
+   },showC5UpdateStatus);
   }
   return;
  }
@@ -816,7 +822,7 @@ static void consoleCommand(String cmd){
   }else{
    KittyHTTPSOTA::stageToInactiveSlot([]()->bool {
     return !otaBusy() && !otaReceiver.active();
-   });
+   },showC5UpdateStatus);
   }
   return;
  }
