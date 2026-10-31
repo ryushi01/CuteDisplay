@@ -522,6 +522,8 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   if(cJSON_IsString(transcript) &&
      transcript->valuestring && transcript->valuestring[0]){
    Serial.println("[MEMORY] Realtime user transcript received");
+   // A new transcript invalidates every earlier speaker-scoped recall.
+   clearSemanticTurn();
    // Await the bounded turn-linked speaker result briefly, but never delay
    // replying or block audio. Unknown is persisted on timeout.
    flushPendingSpeaker(true);
