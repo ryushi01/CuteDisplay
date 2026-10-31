@@ -283,6 +283,23 @@ inline bool extractFact(String utterance,String &key,String &value){
  for(const char* marker:{"my name is ","my name's ","my name’s ","i am called ","i'm called ","i’m called ","you can call me ","please call me ","call me ","i go by ","everyone calls me ","people call me ","je m’appelle ","je m'appelle ","mon prénom est ","mon prenom est ","je suis appelé ","je suis appelée ","私の名前は","名前は","私の名前は、","僕の名前は","わたしの名前は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
  }
+ // Natural voice greeting: "Hi Kitty, this is Shana" (name claim only).
+ if(pos<0 && lower.indexOf('?')<0){
+  for(const char* marker:{"this is ","it's ","it is "}){
+   int at=lower.indexOf(marker);
+   if(at<0 || at>28)continue;
+   String candidate=utterance.substring(at+strlen(marker));candidate.trim();
+   while(candidate.endsWith(".") || candidate.endsWith("!"))candidate.remove(candidate.length()-1);
+   candidate.trim();
+   bool safe=candidate.length()>=2 && candidate.length()<=32;
+   for(size_t i=0;safe && i<candidate.length();i++){
+    char ch=candidate[i];
+    safe=(ch>='A'&&ch<='Z')||(ch>='a'&&ch<='z')||
+         ch=='-'||ch=='_';
+   }
+   if(safe){key="name";value=candidate;pos=-2;break;}
+  }
+ }
  // Plain English "I'm Shana"/"I am Shana" is an introduction only when
  // the remaining words form a short name, not a sentence about an activity.
  if(pos<0 && lower.indexOf('?')<0 && lower.indexOf("？")<0){
