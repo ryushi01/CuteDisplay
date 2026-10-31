@@ -7,6 +7,9 @@ def sample():
     return (
         "import asyncio\nimport os\n"
         "async def realtime_call():\n"
+        "        kitty_memory_last_revision = -1\n"
+        "        kitty_memory_context_item = None\n"
+        "        kitty_semantic_task = None\n"
         "        async def client_events():\n"
         "            nonlocal kitty_memory_last_revision, kitty_memory_context_item, kitty_semantic_task\n"
         "            while True:\n"
