@@ -30,11 +30,11 @@ static bool requested=false, started=false, connected=false, ready=false;
 // gateway explicitly advertises support. Never require them for a voice call.
 static bool memoryRefreshSupported=false;
 static bool semanticPending=false;
-static String semanticRequestId,semanticSpeaker,semanticTurnId,semanticContext;
+static String semanticRequestId,semanticSpeaker,semanticTurnId,semanticContext,semanticTranscript;
 static uint32_t semanticRequestedAt=0,semanticSequence=0;
 inline void clearSemanticTurn(){
  semanticPending=false;semanticRequestId="";semanticSpeaker="";semanticTurnId="";
- semanticContext="";semanticRequestedAt=0;
+ semanticContext="";semanticTranscript="";semanticRequestedAt=0;
 }
 inline void requestSemanticTurn(const String &turnId,const String &speaker,
                                 const String &provenance,const String &transcript){
@@ -56,7 +56,8 @@ inline void requestSemanticTurn(const String &turnId,const String &speaker,
  if(!wire)return;
  bool sent=ws.sendTXT(wire);free(wire);
  if(sent){semanticRequestId=id;semanticSpeaker=speaker;semanticTurnId=turnId;
-          semanticPending=true;semanticRequestedAt=millis();semanticContext="";}
+          semanticPending=true;semanticRequestedAt=millis();semanticContext="";
+          semanticTranscript=transcript;}
 }
 
 static uint32_t memoryFactSeen=0,memorySummarySeen=0,memoryRefreshSeq=0,memoryLastAttempt=0,memoryDaySeen=0,memoryMinuteSeen=0;
@@ -322,6 +323,7 @@ inline void diagnose(bool audioBusy){
 inline void stop(){
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
  requested=false;ready=false;connected=false;started=false;
+ clearSemanticTurn();
  deferredVoiceItem="";playbackSpeechDetected=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -483,7 +485,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    // Do not inject per-speaker results into session-wide memory: that
    // could expose one guest's facts to the next speaker. A per-turn
    // upstream context scope is required before using the payload.
-   semanticContext="";
+   semanticContext=KittyMemory::clipUTF8(String(ctx->valuestring),640);
    semanticPending=false;
   }
  }else if(strcmp(type,"kitty.speaker.result")==0){
@@ -566,8 +568,19 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
     if(args)cJSON_Delete(args);
     // The realtime voice engine delegates substantive questions to the
     // SAME saved Open WebUI chat model. No second server or key.
+    // Use attributed context only if the delegated model request exactly
+    // matches the transcript which produced this semantic lookup. No
+    // guessing from conversation order, speaker names or similar phrasing.
+    String scoped="";
+    if(!semanticPending && !semanticContext.isEmpty() &&
+       !semanticTranscript.isEmpty() && prompt==semanticTranscript &&
+       (uint32_t)(millis()-semanticRequestedAt)<1500UL &&
+       deferredVoiceItem.isEmpty() && delegatedCallId.isEmpty()){
+      scoped=semanticContext;
+    }
+    clearSemanticTurn(); // No later or different call may reuse this memory.
     if(!delegatedCallId.isEmpty() || prompt.isEmpty() ||
-       !BrainAI::startCallDelegation(prompt)){
+       !BrainAI::startCallDelegation(prompt,scoped)){
      if(!failedCallId.isEmpty())failure="TOOL_QUEUE_FULL";
      else {failedCallId=callId;
       failedCallAnswer="I could not start the chat model. Please try again.";}
