@@ -13,6 +13,25 @@ READY = "await ws.send_json({'type': 'bridge.ready', 'model': voice_model, 'voic
 EVENTS = "        async def client_events():\n            while True:"
 COMMAND = "                command = protocol.command(event)"
 
+SEMANTIC_TASK = """        # Optional per-session background semantic lookup. This is deliberately
+        # not an upstream/session-wide context insertion.
+        async def kitty_semantic_reply(request_id, speaker_id, query):
+            import os
+            try:
+                from kitty_semantic_async_client_v6 import semantic_context
+                result = await semantic_context(
+                    os.environ.get('KITTY_SEMANTIC_SERVICE_URL', ''),
+                    os.environ.get('KITTY_MEMORY_TOKEN', ''), query, speaker_id)
+            except (ImportError, RuntimeError, ValueError, OSError):
+                result = ''
+            await ws.send_json({
+                'type': 'kitty.memory.semantic.result',
+                'request_id': request_id,
+                'speaker_id': speaker_id,
+                'context': result[:1800],
+            })
+"""
+
 SEMANTIC_EVENT = """                if isinstance(event, dict) and event.get('type') == 'kitty.memory.semantic':
                     # Optional authenticated request, not part of audio streaming.
                     # A speaker's introduction is only a claim, never owner proof.
@@ -33,24 +52,12 @@ SEMANTIC_EVENT = """                if isinstance(event, dict) and event.get('ty
                             or provenance not in ('voice_probable', 'explicit_introduction',
                                                   'explicit_correction')):
                         continue
-                    # No network request from the audio loop; only the async
-                    # WebSocket consumer, using an isolated loopback service.
-                    # Deliberately fail closed when the optional helper is absent.
-                    import os
-                    try:
-                        from kitty_semantic_async_client_v6 import semantic_context
-                        derived = await semantic_context(
-                            os.environ.get('KITTY_SEMANTIC_SERVICE_URL', ''),
-                            os.environ.get('KITTY_MEMORY_TOKEN', ''),
-                            query, speaker_id)
-                    except (ImportError, RuntimeError, ValueError, OSError):
-                        derived = ''
-                    await ws.send_json({
-                        'type': 'kitty.memory.semantic.result',
-                        'request_id': request_id,
-                        'speaker_id': speaker_id,
-                        'context': derived[:1800],
-                    })
+                    # Schedule CPU/HTTP recall separately: never pause the
+                    # WebSocket consumer or wait in the audio event loop.
+                    if kitty_semantic_task is not None and not kitty_semantic_task.done():
+                        continue
+                    kitty_semantic_task = asyncio.create_task(
+                        kitty_semantic_reply(request_id, speaker_id, query))
                     continue
 """
 
@@ -60,6 +67,17 @@ def patch(source: str) -> str:
             if source.count(COMMAND) != 1:
                 raise ValueError("Unexpected command anchor in existing gateway")
             source = source.replace(COMMAND, SEMANTIC_EVENT + COMMAND, 1)
+        if "async def kitty_semantic_reply(" not in source:
+            if source.count(EVENTS) != 1:
+                raise ValueError("Unexpected async event-loop anchor")
+            source = source.replace(EVENTS, SEMANTIC_TASK + EVENTS, 1)
+        if "kitty_semantic_task = None" not in source:
+            source = source.replace(
+                "        kitty_memory_context_item = None",
+                "        kitty_memory_context_item = None\\n        kitty_semantic_task = None", 1)
+        source = source.replace(
+            "nonlocal kitty_memory_last_revision, kitty_memory_context_item\\n",
+            "nonlocal kitty_memory_last_revision, kitty_memory_context_item, kitty_semantic_task\\n", 1)
         compile(source, "realtime.py", "exec")
         return source
     if "kitty_expressions" not in source or AUTH not in source:
@@ -73,7 +91,8 @@ def patch(source: str) -> str:
         AUTH + "\n        " + MARKER
         + "\n        kitty_memory_refresh_enabled = auth.get('kitty_memory_refresh') is True and kitty_expressions"
         + "\n        kitty_memory_last_revision = -1"
-        + "\n        kitty_memory_context_item = None",
+        + "\n        kitty_memory_context_item = None"
+        + "\n        kitty_semantic_task = None",
         1,
     )
     source = source.replace(
@@ -85,8 +104,8 @@ def patch(source: str) -> str:
     )
     source = source.replace(
         EVENTS,
-        "        async def client_events():"
-        "\n            nonlocal kitty_memory_last_revision, kitty_memory_context_item"
+        SEMANTIC_TASK + "        async def client_events():"
+        "\n            nonlocal kitty_memory_last_revision, kitty_memory_context_item, kitty_semantic_task"
         "\n            while True:",
         1,
     )
