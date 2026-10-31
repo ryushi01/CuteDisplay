@@ -756,6 +756,30 @@ static void pollBLECommands(){
  }
  acceptCommand(incoming);
 }
+// HTTPS OTA must not run on Arduino's small loopTask stack.
+// UART UI updates are marshalled back to loopTask; worker never writes C5 UART.
+static QueueHandle_t otaStageUiQueue=nullptr;
+static volatile bool otaStageWorkerRunning=false;
+struct OTAStageUIMessage { char value[81]; };
+static void queueOTAStageUI(const String &value){
+ if(!otaStageUiQueue)return;
+ OTAStageUIMessage msg={};
+ value.substring(0,80).toCharArray(msg.value,sizeof(msg.value));
+ xQueueSend(otaStageUiQueue,&msg,0);
+}
+static bool otaStageStillIdle(){return !otaBusy() && !otaReceiver.active();}
+static void otaStageWorker(void *){
+ KittyHTTPSOTA::stageToInactiveSlot(otaStageStillIdle,queueOTAStageUI);
+ otaStageWorkerRunning=false;
+ vTaskDelete(nullptr);
+}
+static void pollOTAStageUI(){
+ if(!otaStageUiQueue)return;
+ OTAStageUIMessage msg;
+ for(int n=0;n<4 && xQueueReceive(otaStageUiQueue,&msg,0)==pdTRUE;n++)
+  showC5UpdateStatus(String(msg.value));
+}
+
 static void consoleCommand(String cmd){
  cmd.trim();
  if(cmd=="help"){
@@ -1386,29 +1410,6 @@ void setup(){
  restoreBrainWiFi();
  if(wifiEnabled)startBrainWiFi();
  else WiFi.mode(WIFI_OFF);
-}
-// HTTPS OTA must not run on Arduino's small loopTask stack.
-// UART UI updates are marshalled back to loopTask; worker never writes C5 UART.
-static QueueHandle_t otaStageUiQueue=nullptr;
-static volatile bool otaStageWorkerRunning=false;
-struct OTAStageUIMessage { char value[81]; };
-static void queueOTAStageUI(const String &value){
- if(!otaStageUiQueue)return;
- OTAStageUIMessage msg={};
- value.substring(0,80).toCharArray(msg.value,sizeof(msg.value));
- xQueueSend(otaStageUiQueue,&msg,0);
-}
-static bool otaStageStillIdle(){return !otaBusy() && !otaReceiver.active();}
-static void otaStageWorker(void *){
- KittyHTTPSOTA::stageToInactiveSlot(otaStageStillIdle,queueOTAStageUI);
- otaStageWorkerRunning=false;
- vTaskDelete(nullptr);
-}
-static void pollOTAStageUI(){
- if(!otaStageUiQueue)return;
- OTAStageUIMessage msg;
- for(int n=0;n<4 && xQueueReceive(otaStageUiQueue,&msg,0)==pdTRUE;n++)
-  showC5UpdateStatus(String(msg.value));
 }
 void loop(){
  pollOTAStageUI();
