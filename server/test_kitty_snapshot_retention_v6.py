@@ -41,7 +41,9 @@ class RetentionTest(unittest.TestCase):
             for p in (old,active,finalized):
                 (p/"kitty").mkdir(parents=True)
             now=time.time()
-            os.utime(old,(now-9*86400,now-9*86400))
+            # A genuinely abandoned upload has no recently modified children.
+            for entry in (old / "kitty", old):
+                os.utime(entry,(now-9*86400,now-9*86400))
             self.assertEqual(prune_expired_staging(root,now=now),1)
             self.assertFalse(old.exists())
             self.assertTrue(active.exists())
