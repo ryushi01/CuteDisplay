@@ -95,12 +95,10 @@ def refresh(root, db, *, dry_run=False):
     if dry_run:
         return {"snapshot":chosen.name,"index":str(db),"mode":"dry-run"}
     result = build(str(chosen), str(db))
-    # Only prune after a complete successful semantic refresh. SD remains
-    # authoritative; keep the newest verified copy as a bounded recovery cache.
-    removed = prune_superseded(root, chosen)
-    # Cleanup occurs only after build() commits a complete active generation.
-    # Never prune staging in dry-run mode or on an unsuccessful refresh.
-    expired = prune_expired_staging(root)
+    # Snapshots are source evidence; semantic refresh never deletes them.
+    removed = 0  # Never automatically delete previously finalized snapshots.
+    # Staging files are preserved too, including after a successful refresh.
+    expired = 0  # Preserve all staging data unless separately reviewed.
     compact_derived_index(db)
     return {"snapshot":chosen.name, "old_snapshots_removed":removed,
             "expired_staging_removed":expired, **result}
