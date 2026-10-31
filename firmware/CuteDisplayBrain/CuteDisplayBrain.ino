@@ -817,6 +817,24 @@ static void consoleCommand(String cmd){
   return;
  }
  if(cmd=="ota https stage CONFIRM"){
+  if(otaStageWorkerRunning || otaBusy() || otaReceiver.active()){
+   Serial.println("[OTA HTTPS] stage refused: OTA already running or busy");
+  }else{
+   if(!otaStageUiQueue)otaStageUiQueue=xQueueCreate(16,sizeof(OTAStageUIMessage));
+   if(!otaStageUiQueue){
+    Serial.println("[OTA HTTPS] stage refused: UI queue allocation failed");
+   }else{
+    otaStageWorkerRunning=true;
+    BaseType_t created=xTaskCreatePinnedToCore(otaStageWorker,"kitty-https-ota",24576,nullptr,1,nullptr,1);
+    if(created!=pdPASS){
+     otaStageWorkerRunning=false;
+     Serial.println("[OTA HTTPS] stage refused: worker allocation failed");
+    }else Serial.println("[OTA HTTPS] staging started in dedicated task");
+   }
+  }
+  return;
+ }
+ if(false && cmd=="ota https stage CONFIRM"){
   if(otaBusy() || otaReceiver.active()){
    Serial.println("[OTA HTTPS] refused: call/audio/OTA active");
   }else{
@@ -1379,7 +1397,31 @@ void setup(){
  if(wifiEnabled)startBrainWiFi();
  else WiFi.mode(WIFI_OFF);
 }
+// HTTPS OTA must not run on Arduino's small loopTask stack.
+// UART UI updates are marshalled back to loopTask; worker never writes C5 UART.
+static QueueHandle_t otaStageUiQueue=nullptr;
+static volatile bool otaStageWorkerRunning=false;
+struct OTAStageUIMessage { char value[81]; };
+static void queueOTAStageUI(const String &value){
+ if(!otaStageUiQueue)return;
+ OTAStageUIMessage msg={};
+ value.substring(0,80).toCharArray(msg.value,sizeof(msg.value));
+ xQueueSend(otaStageUiQueue,&msg,0);
+}
+static bool otaStageStillIdle(){return !otaBusy() && !otaReceiver.active();}
+static void otaStageWorker(void *){
+ KittyHTTPSOTA::stageToInactiveSlot(otaStageStillIdle,queueOTAStageUI);
+ otaStageWorkerRunning=false;
+ vTaskDelete(nullptr);
+}
+static void pollOTAStageUI(){
+ if(!otaStageUiQueue)return;
+ OTAStageUIMessage msg;
+ for(int n=0;n<4 && xQueueReceive(otaStageUiQueue,&msg,0)==pdTRUE;n++)
+  showC5UpdateStatus(String(msg.value));
+}
 void loop(){
+ pollOTAStageUI();
  static bool bootChirpDone=false;
  if(!bootChirpDone && millis()>4500 && !BrainAudioTest::running && !BrainC5OTA::updating() && !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active()){
   bootChirpDone=true;
