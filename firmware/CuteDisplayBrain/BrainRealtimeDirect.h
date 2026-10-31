@@ -861,6 +861,7 @@ inline void tick(bool audioBusy){
     !BrainRealtimeAudio::hasSpeakerAudio() &&
     delegatedCallId.isEmpty() && failedCallId.isEmpty() &&
     animationResponseId.isEmpty() && deferredVoiceItem.isEmpty() &&
+    waitingDelegationId.isEmpty() && !semanticPending &&
     (uint32_t)(millis()-memoryLastAttempt)>=3000UL &&
     (KittyMemory::factRevision!=memoryFactSeen ||
      KittyMemory::summaryRevision!=memorySummarySeen ||
