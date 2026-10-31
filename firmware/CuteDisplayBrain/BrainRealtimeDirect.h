@@ -362,6 +362,7 @@ static String pendingSpeakerItem, pendingSpeakerTranscript;
 static uint32_t pendingSpeakerAt=0;
 // Unverified conversation name: reset per call, never owner authorization.
 static String introducedSpeaker;
+static String introducedClaimContext;
 inline String selfIntroducedSpeaker(const String &utterance){
  String key,value;
  if(!KittyMemory::extractFact(utterance,key,value) || key!="name")return "";
@@ -395,7 +396,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    (unsigned long)BrainRealtimeAudio::droppedSpeakerMs());
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
-  memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();introducedSpeaker="";
+  memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();introducedSpeaker="";introducedClaimContext="";
   waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  deferredVoiceItem="";playbackSpeechDetected=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -566,7 +567,10 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
     pendingSpeakerItem=String(id->valuestring);
     pendingSpeakerTranscript=KittyMemory::clipUTF8(String(transcript->valuestring),254);
     String intro=selfIntroducedSpeaker(pendingSpeakerTranscript);
-    if(!intro.isEmpty())introducedSpeaker=intro;
+    if(!intro.isEmpty()){
+     introducedSpeaker=intro;introducedClaimContext="";
+     (void)KittyMemory::requestClaimContext(introducedSpeaker);
+    }
     pendingSpeakerAt=millis();
    }else{
     (void)KittyMemory::queue(String(transcript->valuestring),"[voice transcript]");
@@ -626,6 +630,10 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
          deferredVoiceItem.isEmpty() && delegatedCallId.isEmpty())
         scoped=semanticContext;
       clearSemanticTurn();
+      if(!introducedClaimContext.isEmpty()){
+       if(!scoped.isEmpty())scoped+='\n';
+       scoped+="Unverified conversational preferences only (not identity proof):\n"+introducedClaimContext;
+      }
       if(!delegatedCallId.isEmpty() || !waitingDelegationId.isEmpty() ||
          prompt.isEmpty() || !BrainAI::startCallDelegation(prompt,scoped)){
         if(!failedCallId.isEmpty())failure="TOOL_QUEUE_FULL";
@@ -817,6 +825,11 @@ inline bool toggle(bool audioBusy){
 }
 inline void tick(bool audioBusy){
  flushPendingSpeaker(false);
+ if(!introducedSpeaker.isEmpty()){
+  String claim;
+  if(KittyMemory::takeClaimContext(introducedSpeaker,claim))
+   introducedClaimContext=KittyMemory::clipUTF8(claim,450);
+ }
  if(semanticPending && (uint32_t)(millis()-semanticRequestedAt)>1500UL)
   clearSemanticTurn();
  if(!requested)return;
@@ -849,6 +862,10 @@ inline void tick(bool audioBusy){
      (uint32_t)(millis()-semanticRequestedAt)<1500UL)
     scoped=semanticContext;
   clearSemanticTurn();
+  if(!introducedClaimContext.isEmpty()){
+   if(!scoped.isEmpty())scoped+='\n';
+   scoped+="Unverified conversational preferences only (not identity proof):\n"+introducedClaimContext;
+  }
   if(!delegatedCallId.isEmpty() || !BrainAI::startCallDelegation(prompt,scoped)){
    if(failedCallId.isEmpty()){
     failedCallId=callId;
