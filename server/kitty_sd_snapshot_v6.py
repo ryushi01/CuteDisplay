@@ -59,6 +59,12 @@ class SnapshotReceiver:
     def finalize(self,snapshot,manifest):
         if not self.valid_id(snapshot) or not isinstance(manifest,dict) or not manifest or set(manifest)-FILES:
             raise ValueError("invalid manifest")
+        for desc in manifest.values():
+            if (not isinstance(desc, dict) or set(desc) != {"size", "sha256"}
+                or type(desc["size"]) is not int or not 0 <= desc["size"] <= MAX_FILE
+                or not isinstance(desc["sha256"], str) or len(desc["sha256"]) != 64
+                or any(c not in "0123456789abcdef" for c in desc["sha256"])):
+                raise ValueError("invalid snapshot descriptor")
         base=self.root/("staging-"+snapshot)
         complete=self.root/("snapshot-"+snapshot)
         if complete.exists():
