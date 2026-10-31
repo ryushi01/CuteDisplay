@@ -135,6 +135,10 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
 def search(db_path, query, k=5, model_name=DEFAULT_MODEL, speaker_id=None):
     """Return bounded semantic results. Never modify source memories."""
     import numpy as np
+    # Fail closed: callers must establish the speaker identity for this
+    # session. An unknown speaker is not an alias for the device owner.
+    if not speaker_id or speaker_id == "unknown" or len(speaker_id)>128:
+        return []
     if not query or not query.strip() or len(query)>1000:
         return []
     if not os.path.isfile(db_path):
@@ -155,7 +159,7 @@ def search(db_path, query, k=5, model_name=DEFAULT_MODEL, speaker_id=None):
             if model_used != model_name:
                 continue
             attribution=speaker_rows.get(id,{"speaker_id":"unknown","speaker_role":"unknown","provenance":"unverified"})
-            if speaker_id is not None and attribution["speaker_id"] != speaker_id:
+            if attribution["speaker_id"] != speaker_id:
                 continue
             vec = np.frombuffer(raw, dtype="<f4")
             if vec.shape != q.shape:
@@ -175,10 +179,11 @@ def main():
     a=sub.add_parser("build"); a.add_argument("--sd-copy",required=True); a.add_argument("--db",required=True)
     b=sub.add_parser("search"); b.add_argument("--db",required=True); b.add_argument("--query",required=True)
     b.add_argument("--limit",type=int,default=5)
+    b.add_argument("--speaker-id",default=None,help="Required session speaker identity; unknown returns no results")
     args=p.parse_args()
     if args.command=="build":
         print(json.dumps(build(args.sd_copy,args.db)))
     else:
-        print(json.dumps({"results":search(args.db,args.query,args.limit)},ensure_ascii=False))
+        print(json.dumps({"results":search(args.db,args.query,args.limit,speaker_id=args.speaker_id)},ensure_ascii=False))
 if __name__=="__main__":
     main()
