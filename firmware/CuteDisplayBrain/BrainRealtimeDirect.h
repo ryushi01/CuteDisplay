@@ -477,7 +477,10 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
      cJSON_IsString(ctx) && semanticRequestId==id->valuestring &&
      semanticSpeaker==sid->valuestring &&
      (uint32_t)(millis()-semanticRequestedAt)<1500UL){
-   semanticContext=KittyMemory::clipUTF8(String(ctx->valuestring),640);
+   // Do not inject per-speaker results into session-wide memory: that
+   // could expose one guest's facts to the next speaker. A per-turn
+   // upstream context scope is required before using the payload.
+   semanticContext="";
    semanticPending=false;
   }
  }else if(strcmp(type,"kitty.speaker.result")==0){
@@ -803,21 +806,13 @@ inline void tick(bool audioBusy){
     (KittyMemory::factRevision!=memoryFactSeen ||
      KittyMemory::summaryRevision!=memorySummarySeen ||
      (BrainClock::localDayKey() && BrainClock::localDayKey()!=memoryDaySeen) ||
-     (BrainClock::valid() && (uint32_t)(time(nullptr)/60)!=memoryMinuteSeen) ||
-     !semanticContext.isEmpty())){
+     (BrainClock::valid() && (uint32_t)(time(nullptr)/60)!=memoryMinuteSeen))){
   memoryLastAttempt=millis();
   uint32_t factVersion=KittyMemory::factRevision;
   uint32_t summaryVersion=KittyMemory::summaryRevision;
   uint32_t calendarDay=BrainClock::localDayKey();
   uint32_t calendarMinute=BrainClock::valid()?(uint32_t)(time(nullptr)/60):0;
   String context=KittyMemoryContextV6::snapshot(550,160,820);
-  // Semantic excerpts are attributed claims, not owner identity proof.
-  if(!semanticContext.isEmpty()){
-   String excerpt=KittyMemory::clipUTF8(semanticContext,360);
-   context=KittyMemory::clipUTF8(context,450);
-   if(!context.isEmpty())context+='\n';
-   context+="attributed_recall: "+excerpt;
-  }
   cJSON *message=cJSON_CreateObject();
   if(message){
    cJSON_AddStringToObject(message,"type","kitty.memory.refresh");
@@ -825,7 +820,7 @@ inline void tick(bool audioBusy){
    cJSON_AddStringToObject(message,"memory",context.c_str());
    char *wire=cJSON_PrintUnformatted(message);
    if(wire){
-    if(ws.sendTXT(wire)){semanticContext="";memoryFactSeen=factVersion;memorySummarySeen=summaryVersion;memoryDaySeen=calendarDay;memoryMinuteSeen=calendarMinute;}
+    if(ws.sendTXT(wire)){memoryFactSeen=factVersion;memorySummarySeen=summaryVersion;memoryDaySeen=calendarDay;memoryMinuteSeen=calendarMinute;}
     free(wire);
    }
    cJSON_Delete(message);
