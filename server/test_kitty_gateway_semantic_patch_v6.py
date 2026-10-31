@@ -45,6 +45,12 @@ class GatewaySemanticPatchTests(unittest.TestCase):
         compile(upgraded, "realtime.py", "exec")
         self.assertEqual(patch(upgraded), upgraded)
 
+    def test_semantic_response_retains_exact_turn_id(self):
+        patched = patch(BASE)
+        self.assertIn("turn_id = event.get('turn_id')", patched)
+        self.assertIn("'turn_id': turn_id", patched)
+        self.assertIn("kitty_semantic_reply(request_id, turn_id, speaker_id, query)", patched)
+
     def test_missing_expected_anchor_fails_closed(self):
         with self.assertRaises(ValueError):
             patch(BASE.replace("command = protocol.command(event)",
