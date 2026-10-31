@@ -39,6 +39,10 @@ def queue_semantic_refresh(snapshot):
         # A later refresh reads the newest finalized snapshot.
         pass
 
+def legacy_memory_enabled():
+    # Explicit migration-only opt-in; never enabled for normal SD memory use.
+    return os.environ.get("KITTY_LEGACY_MEMORY_DB_ENABLED") == "1"
+
 def connect():
     db = sqlite3.connect(DB, timeout=3)
     db.execute("PRAGMA journal_mode=WAL")
@@ -195,6 +199,16 @@ class Handler(BaseHTTPRequestHandler):
                 zone=str(data.get("timezone","Asia/Tokyo"))[:64]
                 now=datetime.now(ZoneInfo(zone))
                 return self._reply(200,interpret(str(data.get("text",""))[:300],now,zone))
+            if self.path=="/semantic/context":
+                index=os.environ.get("KITTY_SEMANTIC_DB","")
+                if not index or not os.path.isfile(index):
+                    return self._reply(503,{"error":"semantic_index_unavailable"})
+                sid=data.get("speaker_id")
+                if not isinstance(sid,str) or not sid.strip() or sid=="unknown" or len(sid)>128:
+                    return self._reply(400,{"error":"speaker_identity_required"})
+                from kitty_memory_context_v6 import recall_context
+                return self._reply(200,{"context":recall_context(
+                    index,str(data.get("query",""))[:300],sid)})
             if self.path=="/semantic":
                 # Optional local index, refreshed from a read-only SD export.
                 # Disabled when the DB/model aren't configured.
@@ -203,16 +217,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._reply(503,{"error":"semantic_index_unavailable"})
                 from kitty_sd_semantic_index import search
                 speaker_id = data.get("speaker_id")
-                if speaker_id is not None and (
-                    not isinstance(speaker_id,str) or not speaker_id
-                    or len(speaker_id)>128):
+                if (not isinstance(speaker_id,str) or not speaker_id.strip()
+                    or speaker_id=="unknown" or len(speaker_id)>128):
                     return self._reply(400,{"error":"invalid_speaker_id"})
                 return self._reply(200,{"results":search(
                     index,str(data.get("query",""))[:300],
                     speaker_id=speaker_id)})
             if self.path=="/recall":
+                if not legacy_memory_enabled():
+                    return self._reply(410,{"error":"legacy_ubuntu_memory_disabled"})
                 return self._reply(200,{"memories":recall(str(data.get("query",""))[:500])})
             if self.path in ("/turn","/remember","/forget"):
+                if not legacy_memory_enabled():
+                    return self._reply(410,{"error":"legacy_ubuntu_memory_disabled"})
                 try: WRITE_Q.put_nowait((self.path[1:],data))
                 except queue.Full:return self._reply(503,{"error":"queue_full"})
                 return self._reply(202,{"queued":True})
