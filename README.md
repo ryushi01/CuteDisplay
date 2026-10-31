@@ -1,3 +1,7 @@
+## Kitty V6 semantic-memory checkpoint (2026-10-31)
+
+Current deployment status, verified functionality, unfinished speaker identification/per-turn recall, and fast continuation instructions: [Kitty V6 checkpoint](docs/KITTY_V6_CHECKPOINT_2026-10-31.md). Local private deployment files are documented but must be manually exported/sanitized before Git commit.
+
 > **CURRENT VALIDATED SYSTEM (2026-10-29):** [Complete project checkpoint, wiring, runtime, SD memory, C5 v35, OTA, testing and known limitations](docs/VALIDATED_SYSTEM_CHECKPOINT_2026-10-29.md). This supersedes the old October 27 status statements below; historical checkpoints are retained. Latest firmware CI must be checked independently before flashing.
 
 > **Latest user-tested AI milestone (2026-10-27):** [Stable S3 AI + Japanese C5 v10 checkpoint](https://github.com/ryushi01/CuteDisplay/tree/stable/2026-10-27-s3-ai-japanese-working) · [Complete handoff for new chats](docs/handoff/2026-10-27-ai-working.md) · [Successful combined firmware build](https://github.com/ryushi01/CuteDisplay/actions/runs/40476408769). Develop on `feature/s3-ai-streaming`; keep checkpoint unchanged.
