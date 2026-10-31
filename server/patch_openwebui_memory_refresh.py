@@ -56,6 +56,7 @@ SEMANTIC_EVENT = """                if isinstance(event, dict) and event.get('ty
                     # WebSocket consumer or wait in the audio event loop.
                     if kitty_semantic_task is not None and not kitty_semantic_task.done():
                         continue
+                    import asyncio
                     kitty_semantic_task = asyncio.create_task(
                         kitty_semantic_reply(request_id, speaker_id, query))
                     continue
@@ -74,10 +75,10 @@ def patch(source: str) -> str:
         if "kitty_semantic_task = None" not in source:
             source = source.replace(
                 "        kitty_memory_context_item = None",
-                "        kitty_memory_context_item = None\\n        kitty_semantic_task = None", 1)
+                "        kitty_memory_context_item = None\n        kitty_semantic_task = None", 1)
         source = source.replace(
-            "nonlocal kitty_memory_last_revision, kitty_memory_context_item\\n",
-            "nonlocal kitty_memory_last_revision, kitty_memory_context_item, kitty_semantic_task\\n", 1)
+            "nonlocal kitty_memory_last_revision, kitty_memory_context_item\n",
+            "nonlocal kitty_memory_last_revision, kitty_memory_context_item, kitty_semantic_task\n", 1)
         compile(source, "realtime.py", "exec")
         return source
     if "kitty_expressions" not in source or AUTH not in source:
