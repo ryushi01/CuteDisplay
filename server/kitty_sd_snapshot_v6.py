@@ -81,6 +81,23 @@ class SnapshotReceiver:
             raise ValueError("undeclared or missing files")
         complete=self.root/("snapshot-"+snapshot)
         if complete.exists():
-            raise ValueError("snapshot already finalized")
+            # A lost HTTP acknowledgement must not create another snapshot or
+            # turn a successfully finalized upload into an error. Verify that
+            # *all* manifest bytes agree before accepting this as a retry.
+            for name, desc in manifest.items():
+                existing = complete / "kitty" / name
+                if not existing.is_file() or existing.is_symlink() or existing.stat().st_size != desc["size"]:
+                    raise ValueError("snapshot id reused with different content")
+                h = hashlib.sha256()
+                with existing.open("rb") as f:
+                    for block in iter(lambda: f.read(65536), b""):
+                        h.update(block)
+                if h.hexdigest() != desc["sha256"]:
+                    raise ValueError("snapshot id reused with different content")
+            if {p.name for p in (complete / "kitty").iterdir() if p.is_file()} != set(manifest):
+                raise ValueError("snapshot manifest differs")
+            # The staging copy is not removed here: cleanup is a separate,
+            # conservative operation and cannot race an in-flight uploader.
+            return str(complete)
         os.rename(base,complete)
         return str(complete)
