@@ -293,6 +293,12 @@ inline void restoreFactSnapshots(){
 }
 inline bool extractFact(String utterance,String &key,String &value){
  utterance.trim();if(utterance.length()<5)return false;
+ // Keep a single statement within the existing bounded fact extractor.
+ // A second clause is processed separately by the SD worker below.
+ for(const char* delim:{". ","! ","? ","; "}) {
+  int at=utterance.indexOf(delim);
+  if(at>=0 && at<150) {utterance=utterance.substring(0,at);break;}
+ }
  String lower=utterance;lower.toLowerCase();
  int pos=-1,skip=0;
  for(const char* marker:{"my name is ","my name's ","my name’s ","i am called ","i'm called ","i’m called ","you can call me ","please call me ","call me ","i go by ","everyone calls me ","people call me ","je m’appelle ","je m'appelle ","mon prénom est ","mon prenom est ","je suis appelé ","je suis appelée ","私の名前は","名前は","私の名前は、","僕の名前は","わたしの名前は"}){
@@ -1280,6 +1286,32 @@ inline void task(void*){
          (unsigned long)ts,e.speaker,
          sanitize(voiceKey,31).c_str(),sanitize(voiceValue,112).c_str(),e.source);
        scoped.close();
+       Serial.printf("[MEMORY V6] speaker claim SD append speaker=%s key=%s\\n",e.speaker,voiceKey.c_str());
+      }else{
+       Serial.println("[MEMORY V6] speaker claim SD write failed");
+      }
+     }
+     // Capture the preference in a second natural-language clause, rather
+     // than silently saving only "I'm Shana" from a combined introduction.
+     String utterance(e.question);
+     int split=-1,advance=0;
+     for(const char* delim:{". ","! ","; "}) {
+      int at=utterance.indexOf(delim);
+      if(at>=0 && (split<0 || at<split)){split=at;advance=strlen(delim);}
+     }
+     if(split>=0 && split+advance<(int)utterance.length()){
+      String tail=utterance.substring(split+advance);tail.trim();
+      String k2,v2;
+      if(extractFact(tail,k2,v2) && k2!=voiceKey &&
+         k2!="note" && !v2.isEmpty()){
+       File scoped2=SD_MMC.open("/kitty/speaker_claims_v6.tsv",FILE_APPEND);
+       if(scoped2){
+        scoped2.printf("%lu\\t%s\\t%s\\t%s\\t%s\\n",
+         (unsigned long)ts,e.speaker,sanitize(k2,31).c_str(),
+         sanitize(v2,112).c_str(),e.source);
+        scoped2.close();
+        Serial.printf("[MEMORY V6] speaker claim SD append speaker=%s key=%s\\n",e.speaker,k2.c_str());
+       }else Serial.println("[MEMORY V6] second speaker claim SD write failed");
       }
      }
    }
