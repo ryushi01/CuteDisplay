@@ -43,11 +43,25 @@ class SpeakerSession:
             return
         if not raw or len(raw) % 2:
             return
+        # A single incoming chunk may exceed the 500 ms budget.
+        # Keep the newest samples rather than discarding the entire chunk.
+        if len(raw) >= 24000:
+            self._preroll.clear()
+            self._preroll.append(raw[-24000:])
+            self._preroll_bytes = 24000
+            return
         self._preroll.append(raw)
         self._preroll_bytes += len(raw)
         while self._preroll_bytes > 24000:
-            chunk = self._preroll.popleft()
-            self._preroll_bytes -= len(chunk)
+            excess = self._preroll_bytes - 24000
+            chunk = self._preroll[0]
+            drop = min(len(chunk), excess)
+            drop += drop % 2
+            if drop >= len(chunk):
+                self._preroll.popleft()
+            else:
+                self._preroll[0] = chunk[drop:]
+            self._preroll_bytes -= drop
 
     def speech_started(self):
         self._cancel()
