@@ -67,17 +67,9 @@ def patch(source):
         raise ValueError("Expected one provider event forwarding call")
     index = forwards[0]
     indentation = len(lines[index]) - len(lines[index].lstrip(" "))
-    # provider forward must be at exactly same block indentation as injected hook
-    forward_hook = "".join(
-        (" " * indentation + line.lstrip()) if line.strip() else line
-        for line in UPSTREAM_HOOK.splitlines(keepends=True)
-    )
-    # Reindent the prepared body by the difference from 20 spaces.
-    delta = indentation - 20
-    if delta < 0:
-        raise ValueError("Unexpected provider forward indentation")
-    forward_hook = "".join((" "*delta + l if l.strip() else l)
-                           for l in UPSTREAM_HOOK.splitlines(keepends=True))
+    # Adapt the hook to the original forwarding statement's indentation.
+    import textwrap
+    forward_hook = textwrap.indent(textwrap.dedent(UPSTREAM_HOOK), " " * indentation)
     lines.insert(index, forward_hook)
     result = "".join(lines)
     # Nonlocal keyword is needed because an observer can be set to None on error.
