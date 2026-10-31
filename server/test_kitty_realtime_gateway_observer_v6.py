@@ -36,6 +36,27 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(emitted,[])
         obj.close()
 
+    async def test_cancel_preserves_injected_recognizer(self):
+        calls = []
+        emitted = []
+        async def fake(url, token, item, pcm, timeout):
+            calls.append(item)
+            return {"type":"kitty.speaker.result", "item_id":item,
+                    "speaker_id":"person:tester", "confidence":"probable"}
+        async def send(event):
+            emitted.append(event)
+        obj = KittySpeakerObserver(send, session=SpeakerSession(identify=fake),
+                                   enabled=True, url="unix:///run/kitty-semantic/memory.sock",
+                                   token="test")
+        obj.observe_client({"type":"response.cancel"})
+        obj.observe_upstream({"type":"input_audio_buffer.speech_started"})
+        obj.observe_upstream({"type":"input_audio_buffer.speech_stopped", "item_id":"a2"})
+        obj.observe_upstream({"type":"conversation.item.input_audio_transcription.completed", "item_id":"a2"})
+        await asyncio.sleep(0.02)
+        self.assertEqual(calls, ["a2"])
+        self.assertEqual(len(emitted), 1)
+        obj.close()
+
     async def test_disabled_by_default(self):
         emitted=[]
         async def send(ev): emitted.append(ev)
