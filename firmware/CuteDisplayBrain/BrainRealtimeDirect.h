@@ -30,30 +30,32 @@ static bool requested=false, started=false, connected=false, ready=false;
 // gateway explicitly advertises support. Never require them for a voice call.
 static bool memoryRefreshSupported=false;
 static bool semanticPending=false;
-static String semanticRequestId,semanticSpeaker,semanticContext;
+static String semanticRequestId,semanticSpeaker,semanticTurnId,semanticContext;
 static uint32_t semanticRequestedAt=0,semanticSequence=0;
 inline void clearSemanticTurn(){
- semanticPending=false;semanticRequestId="";semanticSpeaker="";
+ semanticPending=false;semanticRequestId="";semanticSpeaker="";semanticTurnId="";
  semanticContext="";semanticRequestedAt=0;
 }
-inline void requestSemanticTurn(const String &speaker,const String &provenance,
-                                const String &transcript){
+inline void requestSemanticTurn(const String &turnId,const String &speaker,
+                                const String &provenance,const String &transcript){
  // Speaker-scoped optional recall; no wait for an HTTP lookup in the audio path.
  if(!memoryRefreshSupported || !ready || speaker=="unknown" ||
     speaker.isEmpty() || transcript.isEmpty() || semanticPending)return;
- if(speaker.length()>60 || transcript.length()>300)return;
+ if(speaker.length()>60 || transcript.length()>300 ||
+    turnId.isEmpty() || turnId.length()>160)return;
  String id="s"+String(++semanticSequence);
  cJSON *m=cJSON_CreateObject();
  if(!m)return;
  cJSON_AddStringToObject(m,"type","kitty.memory.semantic");
  cJSON_AddStringToObject(m,"request_id",id.c_str());
+ cJSON_AddStringToObject(m,"turn_id",turnId.c_str());
  cJSON_AddStringToObject(m,"speaker_id",speaker.c_str());
  cJSON_AddStringToObject(m,"provenance",provenance.c_str());
  cJSON_AddStringToObject(m,"query",transcript.c_str());
  char *wire=cJSON_PrintUnformatted(m);cJSON_Delete(m);
  if(!wire)return;
  bool sent=ws.sendTXT(wire);free(wire);
- if(sent){semanticRequestId=id;semanticSpeaker=speaker;
+ if(sent){semanticRequestId=id;semanticSpeaker=speaker;semanticTurnId=turnId;
           semanticPending=true;semanticRequestedAt=millis();semanticContext="";}
 }
 
@@ -473,7 +475,8 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   cJSON *id=cJSON_GetObjectItem(json,"request_id");
   cJSON *sid=cJSON_GetObjectItem(json,"speaker_id");
   cJSON *ctx=cJSON_GetObjectItem(json,"context");
-  if(semanticPending && cJSON_IsString(id) && cJSON_IsString(sid) &&
+  cJSON *turn=cJSON_GetObjectItem(json,"turn_id");
+  if(semanticPending && cJSON_IsString(turn) && semanticTurnId==turn->valuestring && cJSON_IsString(id) && cJSON_IsString(sid) &&
      cJSON_IsString(ctx) && semanticRequestId==id->valuestring &&
      semanticSpeaker==sid->valuestring &&
      (uint32_t)(millis()-semanticRequestedAt)<1500UL){
@@ -508,7 +511,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
                                      speaker,source);
    if(speaker!="unknown")
-    requestSemanticTurn(speaker,source,pendingSpeakerTranscript);
+    requestSemanticTurn(pendingSpeakerItem,speaker,source,pendingSpeakerTranscript);
    pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
   }
  }else if(strcmp(type,"conversation.item.input_audio_transcription.completed")==0){
