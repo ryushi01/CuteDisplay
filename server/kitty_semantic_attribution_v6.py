@@ -29,7 +29,7 @@ def read_sidecar(sd_root):
             if role not in ("unknown","guest","owner","remote_ai","kitty"):
                 continue
             if provenance not in ("unverified","explicit_introduction",
-                                  "explicit_correction","session_verified"):
+                                  "explicit_correction","session_verified","voice_probable"):
                 continue
             # Never treat an unauthenticated, SD-editable sidecar as proof of
             # owner verification. Verified owner attribution requires trusted
