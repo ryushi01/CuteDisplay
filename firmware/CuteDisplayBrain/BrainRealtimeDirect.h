@@ -348,6 +348,7 @@ inline void fail(const char *why){
  else
   Serial.printf("[CALL] %s (WebSocket / audio protocol or hardware; check detailed preceding log)\n",why);
  // Stop retries on rejected credentials, unexpected PCM or incompatible server.
+ clearSemanticTurn();waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -380,6 +381,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
   memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();
+  waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  deferredVoiceItem="";playbackSpeechDetected=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
   failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
