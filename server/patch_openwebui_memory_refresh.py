@@ -15,7 +15,7 @@ COMMAND = "                command = protocol.command(event)"
 
 SEMANTIC_TASK = """        # Optional per-session background semantic lookup. This is deliberately
         # not an upstream/session-wide context insertion.
-        async def kitty_semantic_reply(request_id, speaker_id, query):
+        async def kitty_semantic_reply(request_id, turn_id, speaker_id, query):
             import os
             try:
                 from kitty_semantic_async_client_v6 import semantic_context
@@ -30,6 +30,7 @@ SEMANTIC_TASK = """        # Optional per-session background semantic lookup. Th
                 await ws.send_json({
                     'type': 'kitty.memory.semantic.result',
                     'request_id': request_id,
+                    'turn_id': turn_id,
                     'speaker_id': speaker_id,
                     'context': result[:1800],
                 })
@@ -40,14 +41,17 @@ SEMANTIC_EVENT = """                if isinstance(event, dict) and event.get('ty
                     # A speaker's introduction is only a claim, never owner proof.
                     if not kitty_memory_refresh_enabled:
                         continue
-                    if set(event) != {'type', 'request_id', 'query', 'speaker_id', 'provenance'}:
+                    if set(event) != {'type', 'request_id', 'turn_id', 'query', 'speaker_id', 'provenance'}:
                         continue
                     request_id = event.get('request_id')
+                    turn_id = event.get('turn_id')
                     query = event.get('query')
                     speaker_id = event.get('speaker_id')
                     provenance = event.get('provenance')
                     if (not isinstance(request_id, str) or not 1 <= len(request_id) <= 64
                             or not request_id.isascii() or not request_id.replace('-', '').replace('_', '').isalnum()
+                            or not isinstance(turn_id, str) or not 1 <= len(turn_id) <= 160
+                            or any(ord(c) < 33 or ord(c) == 127 for c in turn_id)
                             or not isinstance(query, str) or not 1 <= len(query) <= 300
                             or not isinstance(speaker_id, str) or not 1 <= len(speaker_id) <= 64
                             or any(ord(c) < 33 or ord(c) == 127 for c in speaker_id)
@@ -61,7 +65,7 @@ SEMANTIC_EVENT = """                if isinstance(event, dict) and event.get('ty
                         continue
                     import asyncio
                     kitty_semantic_task = asyncio.create_task(
-                        kitty_semantic_reply(request_id, speaker_id, query))
+                        kitty_semantic_reply(request_id, turn_id, speaker_id, query))
                     continue
 """
 
