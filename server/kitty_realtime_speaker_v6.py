@@ -122,12 +122,17 @@ def _request_identify(socket_path, token, audio):
         if res.status != 200:
             return "unknown"
         obj = json.loads(res.read(4096))
+        if obj.get("candidate_only") is True:
+            candidate = obj.get("candidate_speaker_id")
+            if not (isinstance(candidate,str) and candidate.startswith("person:") and len(candidate)<64):
+                candidate = "unknown"
+            return {"authorized":"unknown", "candidate":candidate}
         if obj.get("confidence") != "probable":
-            return "unknown"
+            return {"authorized":"unknown","candidate":"unknown"}
         sid = obj.get("speaker_id")
         if isinstance(sid,str) and sid.startswith("person:") and len(sid)<64:
-            return sid
-        return "unknown"
+            return {"authorized":sid,"candidate":"unknown"}
+        return {"authorized":"unknown","candidate":"unknown"}
     except (OSError, ValueError, TimeoutError, KeyError):
         return "unknown"
     finally:
@@ -143,10 +148,15 @@ async def identify_turn(url, token, item_id, pcm24, *, timeout=12.0):
                 "speaker_id":"unknown","confidence":"unknown"}
     try:
         audio = await asyncio.to_thread(to_16k_wav, pcm24)
-        sid = await asyncio.wait_for(
+        match = await asyncio.wait_for(
             asyncio.to_thread(_request_identify, url[len("unix://"):],
                               token, audio),timeout=timeout)
     except (ValueError, OSError, TimeoutError):
-        sid = "unknown"
+        match = {"authorized":"unknown","candidate":"unknown"}
+    if not isinstance(match,dict):
+        match = {"authorized":"unknown","candidate":"unknown"}
+    sid = match.get("authorized","unknown")
+    candidate = match.get("candidate","unknown")
     return {"type":"kitty.speaker.result","item_id":item_id,
-            "speaker_id":sid,"confidence":"probable" if sid!="unknown" else "unknown"}
+            "speaker_id":sid,"confidence":"probable" if sid!="unknown" else "unknown",
+            "candidate_speaker_id":candidate}
