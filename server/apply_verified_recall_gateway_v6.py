@@ -36,19 +36,19 @@ def patch(source):
         raise ValueError("Semantic request handler differs from inspected gateway")
     source = source.replace(
         guard,
-        "                    observer = kitty_speaker_observer\\n"
-        "                    if observer is None:\\n"
-        "                        continue\\n"
-        "                    epoch = observer.authorized_recall(turn_id, speaker_id, provenance)\\n"
-        "                    if epoch is None:\\n"
-        "                        continue\\n"
+        "                    observer = kitty_speaker_observer\n"
+        "                    if observer is None:\n"
+        "                        continue\n"
+        "                    epoch = observer.authorized_recall(turn_id, speaker_id, provenance)\n"
+        "                    if epoch is None:\n"
+        "                        continue\n"
         + guard, 1)
-    sink = "                ), flush=True)\\n        kitty_speaker_observer = None"
+    sink = "                ), flush=True)\n        kitty_speaker_observer = None"
     if source.count(sink) != 1:
         raise ValueError("Speaker-result callback differs from inspected gateway")
     source = source.replace(sink,
-        "                ), flush=True)\\n"
-        "                await ws.send_json(event)\\n"
+        "                ), flush=True)\n"
+        "                await ws.send_json(event)\n"
         "        kitty_speaker_observer = None", 1)
     ast.parse(source)
     return source
