@@ -12,7 +12,10 @@ import json
 import os
 import struct
 import wave
-from kitty_semantic_async_client_v6 import _UnixHTTPConnection
+try:
+    from .kitty_semantic_async_client_v6 import _UnixHTTPConnection
+except ImportError:
+    from kitty_semantic_async_client_v6 import _UnixHTTPConnection
 
 RATE = 24000
 MAX_SECONDS = 8
