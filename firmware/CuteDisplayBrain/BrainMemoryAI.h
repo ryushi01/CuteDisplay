@@ -81,7 +81,7 @@ inline void tick(bool busy){
    cJSON *root=cJSON_CreateObject();
    cJSON_AddStringToObject(root,"model",model.c_str());
    cJSON_AddBoolToObject(root,"stream",false);
-   cJSON_AddNumberToObject(root,"max_tokens",160);
+   cJSON_AddNumberToObject(root,"max_tokens",96);
    cJSON *messages=cJSON_AddArrayToObject(root,"messages");
    cJSON *system=cJSON_CreateObject();
    cJSON_AddStringToObject(system,"role","system");
