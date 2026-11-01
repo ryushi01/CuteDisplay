@@ -100,3 +100,10 @@ Run build script from this clean worktree using private environment variables as
 - Changing fact/summary revisions still aborts the export rather than finalizing a potentially mixed rewrite. Existing SHA-256 manifest verification, TLS, bearer-token separation, speaker authorization guard, speaker/microphone audio and C5 v38 remain untouched.
 - This is a candidate requiring the Ubuntu Python contract suite and Arduino S3 compile before upload; do not report hardware success from static checks alone. No server redeploy is required for the fixed-boundary protocol; the deployed 8s gateway and 12s S3 timeout baseline remains in place.
 - The latest pre-change hardware run successfully finalized a snapshot after the realtime call, with 0 mic drops, 0 speaker dropped ms, and 0 observed HTTP 502; active-call archive changes still caused stage=4/1 interruptions.
+
+
+### 2026-11-01: semantic-refresh rollout pending
+- Latest source commit 147d75d: opt-in memory-service automatic semantic index refresh is debounced by 90 seconds across bursty finalized SD snapshots, and queues a startup refresh to index existing snapshots. Queue is bounded and HTTP uploads never wait on embedding. Contract test added. Not yet deployed or runtime-tested.
+- Ubuntu observation: 160 finalized snapshots with eight files each, a semantic SQLite index with 49 indexed/attributed rows and active generation 1; `KITTY_SEMANTIC_AUTO_REFRESH` was false. Existing index freshness and cross-call recall unverified. Protect private data; never print env secrets or conversation contents.
+- User clarified a single person's voice can vary across a long conversation: future speaker-continuity logic may retain a probable candidate through isolated low-confidence turns, but must never convert that into verified owner authentication or retroactively rewrite unknown transcripts.
+- Latest frozen-boundary S3 firmware: two finalized snapshots, no sync failures and no dropped audio in test. User manually ended call; do not investigate UART ACK noise or change audio. Preserve C5 v38.
