@@ -15,7 +15,7 @@
 | Recall an **explicitly approved shareable** memory across calls | **Verified** with Mochi Planet |
 | Familiar-sounding voice hint (“sounds like Shana”) | **Experimental**; voice similarity varies |
 | Verified owner identity, private cross-call recall | **Not yet validated**; candidate-only matching never authorizes access |
-| Reliable long-conversation summaries for unknown/unverified speakers | **Initial source patch**; unverified batches now reach an isolated idle summary path, but call-scoped recall is not yet implemented or hardware-validated |
+| Reliable long-conversation summaries for unknown/unverified speakers | **Source patch**; unverified summaries are isolated and conversation-batched with end-of-call flushing, but call-scoped recall is not yet implemented or hardware-validated |
 | iPhone companion app for setup/settings | **Configuration role only**, not everyday conversation |
 | S3-to-C5 firmware delivery via existing UART | **Implemented**; protect validated C5 build |
 
@@ -82,7 +82,7 @@ The **microSD in the S3** is the durable source of truth for Kitty's archived me
 
 ## Next improvement
 
-Continue making **long conversations reliable regardless of voice identity** (the initial isolated-summary source patch is merged, but end-to-end recall remains unfinished): always preserve complete turns, create bounded **conversation-scoped** summaries even when speaker is unverified, retrieve those summaries during the same call, and keep private owner facts protected. Scope/context must not leak to other callers or calls. Avoid disruptions to the validated realtime audio path.
+Continue making **long conversations reliable regardless of voice identity** (the initial isolated-summary and session-batching source patches are merged, but end-to-end recall remains unfinished): always preserve complete turns, create bounded **conversation-scoped** summaries even when speaker is unverified, retrieve those summaries during the same call, and keep private owner facts protected. Scope/context must not leak to other callers or calls. Avoid disruptions to the validated realtime audio path.
 
 **Start here:** [Kitty V6 current status + next-chat handoff](docs/KITTY_V6_CURRENT_HANDOFF_2026-11-01.md).
 
