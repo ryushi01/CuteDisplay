@@ -65,7 +65,7 @@ def warm_async():
     return True
 
 
-def recognize_candidate(audio, *, threshold=None):
+def recognize_candidate(audio, *, threshold=None, conversational_hint=False):
     """Opt-in experimental identity match. Caller controls any authorization.
 
     Higher threshold than the diagnostic shadow 0.957; this is NOT calibrated
@@ -76,8 +76,10 @@ def recognize_candidate(audio, *, threshold=None):
             threshold = float(os.environ.get("KITTY_XVECTOR_EXPERIMENTAL_THRESHOLD", "0.970"))
         except ValueError:
             threshold = 0.970
-    # Reject unsafe or invalid configuration; never weaken automatically.
-    if not 0.965 <= threshold <= 1.0:
+    # Conversational hints never authorize identity/private recall. Keep the
+    # identity path's historical 0.965 minimum independent of this threshold.
+    minimum = 0.960 if conversational_hint is True else 0.965
+    if not minimum <= threshold <= 1.0:
         return {"speaker_id":"unknown","confidence":"unknown","score":None}
     if not _GATE.acquire(blocking=False):
         return {"speaker_id":"unknown","confidence":"unknown","score":None}
