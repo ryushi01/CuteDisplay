@@ -19,10 +19,12 @@ class RefreshFinalizedTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)
             (root/"snapshot-final"/"kitty").mkdir(parents=True)
-            with patch("kitty_refresh_finalized_v6.build",return_value={"indexed":2}) as build:
+            with patch("kitty_refresh_finalized_v6.compact_derived_index") as compact, \
+                 patch("kitty_refresh_finalized_v6.build",return_value={"indexed":2}) as build:
                 result=refresh(root,root/"index.sqlite")
                 build.assert_called_once_with(str(root/"snapshot-final"),str(root/"index.sqlite"))
                 self.assertEqual(result["indexed"],2)
+                compact.assert_called_once_with(root/"index.sqlite")
     def test_skips_symlinked_snapshots(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)
