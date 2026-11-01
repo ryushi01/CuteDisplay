@@ -52,7 +52,7 @@ def propose(profile, embedding, *, now, score, verified, explicit_approval):
     if not isinstance(score, (float, int)) or not isfinite(score) or score < MIN_SCORE:
         raise ValueError("insufficient_similarity")
     vec = _unit(embedding)
-    anchor = profile.get("anchor_embeddings", ())
+    anchor = profile.get("anchor_embeddings", profile.get("embeddings", ()))
     if len(anchor) < 3:
         raise ValueError("at_least_three_protected_anchors_required")
     for item in anchor:
