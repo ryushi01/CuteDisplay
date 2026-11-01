@@ -12,7 +12,7 @@ class ContextTests(unittest.TestCase):
         ]
 
     def test_only_matching_speaker(self):
-        result = recall_context("cache.db", "私の名前は？", "speaker-1", search_fn=self.fake)
+        result = recall_context("cache.db", "私の名前は？", "person:camille", search_fn=self.fake)
         self.assertIn("Camille", result)
         self.assertNotIn("secret", result)
         self.assertIn("unverified_identity", result)
@@ -22,10 +22,18 @@ class ContextTests(unittest.TestCase):
             raise AssertionError("Must not query for unknown speaker")
         self.assertEqual(recall_context("cache.db", "name", "unknown", search_fn=forbidden), "")
 
+    def test_unenrolled_or_claimed_names_never_query_memory(self):
+        def forbidden(*args, **kwargs):
+            raise AssertionError("Invalid identity must not query memory")
+        for identity in ("owner", "Camille", "speaker-1", "person:",
+                         "person:日本", "person:" + "x" * 49, None):
+            self.assertEqual(
+                recall_context("cache.db", "my name", identity, search_fn=forbidden), "")
+
     def test_cache_failure_does_not_break_calls(self):
         def missing(*args, **kwargs):
             raise OSError("cache unavailable")
-        self.assertEqual(recall_context("missing.db", "name", "speaker-1", search_fn=missing), "")
+        self.assertEqual(recall_context("missing.db", "name", "person:camille", search_fn=missing), "")
 
 
 if __name__ == "__main__":
