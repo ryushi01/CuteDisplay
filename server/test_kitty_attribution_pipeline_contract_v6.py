@@ -16,11 +16,15 @@ INDEX = ROOT / "server/kitty_sd_semantic_index.py"
 class AttributionContract(unittest.TestCase):
     def test_firmware_writes_explicit_provenance(self):
         code = FW.read_text()
-        self.assertIn('KittyMemory::queueAttributed(pendingSpeakerTranscript', code)
+        self.assertIn('KittyMemory::queueAttributed(transcript', code)
+        self.assertIn('KittyMemory::queueAttributed(t.transcript', code)
         self.assertIn('source="explicit_introduction"', code)
         self.assertIn('source="voice_probable"', code)
-        self.assertIn('pendingSpeakerItem==id->valuestring', code)
-        self.assertIn('introducedSpeaker.isEmpty()?String("unknown")', code)
+        self.assertIn('findSpeakerTurn(String(id->valuestring))', code)
+        self.assertIn('clearSpeakerTurn((uint8_t)slot)', code)
+        self.assertIn('const String introduction=speakerTurns[slot].intro;', code)
+        self.assertIn('t.intro.isEmpty()?String("unknown")', code)
+        self.assertIn('t.intro.isEmpty()?String("unverified")', code)
 
     def test_candidate_does_not_enter_authorized_identity(self):
         cpu = CPU.read_text()
