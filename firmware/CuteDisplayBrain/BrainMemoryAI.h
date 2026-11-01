@@ -132,7 +132,7 @@ inline void tick(bool busy){
           (void)KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified,summaryConversation);
        }
        cJSON *facts=cJSON_GetObjectItem(parsed,"facts");
-       if(cJSON_IsArray(facts) && cJSON_GetArraySize(facts)<=3){
+       if(!summarize && cJSON_IsArray(facts) && cJSON_GetArraySize(facts)<=3){
         int accepted=0;
         cJSON *item=nullptr;
         cJSON_ArrayForEach(item,facts){
