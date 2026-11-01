@@ -23,8 +23,8 @@ class SpeakerSemanticTests(unittest.TestCase):
             conn.execute("CREATE TABLE semantic_meta (key TEXT PRIMARY KEY, value TEXT)")
             conn.execute("INSERT INTO semantic_meta VALUES ('active','1')")
             for key, text, speaker in (
-                ("intro-owner", "Je m'appelle Camille", "voice-camille"),
-                ("intro-guest", "私の名前はアキです", "voice-aki"),
+                ("intro-owner", "Je m'appelle Camille", "person:camille"),
+                ("intro-guest", "私の名前はアキです", "person:aki"),
             ):
                 conn.execute(
                     "INSERT INTO semantic_v6 VALUES (?,?,?,?,?,?)",
@@ -49,19 +49,20 @@ class SpeakerSemanticTests(unittest.TestCase):
     def test_missing_or_unknown_speaker_never_returns_other_memories(self):
         self.assertEqual(self.lookup("what is my name?"), [])
         self.assertEqual(self.lookup("what is my name?", "unknown"), [])
+        self.assertEqual(self.lookup("what is my name?", "voice-camille"), [])
 
     def test_speaker_context_is_separate_across_languages(self):
         for query in ("What is my name?", "Comment je m'appelle ?", "私の名前は？"):
-            camille = self.lookup(query, "voice-camille")
-            aki = self.lookup(query, "voice-aki")
+            camille = self.lookup(query, "person:camille")
+            aki = self.lookup(query, "person:aki")
             self.assertEqual([r["id"] for r in camille], ["intro-owner"])
             self.assertEqual([r["id"] for r in aki], ["intro-guest"])
-            self.assertEqual(camille[0]["speaker_id"], "voice-camille")
-            self.assertEqual(aki[0]["speaker_id"], "voice-aki")
+            self.assertEqual(camille[0]["speaker_id"], "person:camille")
+            self.assertEqual(aki[0]["speaker_id"], "person:aki")
 
     def test_unattributed_archive_is_not_treated_as_owner(self):
         self.assertFalse(any(r["id"] == "unattributed"
-                             for r in self.lookup("name", "voice-camille")))
+                             for r in self.lookup("name", "person:camille")))
 
 
 if __name__ == "__main__":
