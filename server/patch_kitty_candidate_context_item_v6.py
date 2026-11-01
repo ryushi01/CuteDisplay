@@ -52,9 +52,17 @@ REPLACEMENT = '''        # KITTY_CANDIDATE_CONTEXT_ITEM_V6
 
         async def kitty_candidate_clear():
             nonlocal _kitty_candidate_item_id
-            # Leave context only during the same call; new call resets the
-            # conversation. Do not send deletion while a response is active.
-            return
+            if _kitty_candidate_item_id is None:
+                return
+            previous = _kitty_candidate_item_id
+            _kitty_candidate_item_id = None
+            try:
+                await upstream.send_json({
+                    'type': 'conversation.item.delete',
+                    'item_id': previous,
+                })
+            except Exception:
+                pass
 
 '''
 
@@ -73,6 +81,11 @@ def patch(src):
         out = out.replace('on_candidate=None)', 'on_candidate=kitty_candidate_hint)', 1)
     elif out.count('on_candidate=kitty_candidate_hint)') != 1:
         raise ValueError('Observer initialization not found')
+    # The context item must be retracted when a new utterance starts.
+    out = out.replace(
+        'on_candidate=kitty_candidate_hint)',
+        'on_candidate=kitty_candidate_hint,\n'
+        '                    on_candidate_clear=kitty_candidate_clear)', 1)
     ast.parse(out)
     return out
 
