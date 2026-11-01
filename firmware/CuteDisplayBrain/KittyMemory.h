@@ -10,7 +10,8 @@
 
 namespace KittyMemory {
 static constexpr size_t SLOT_BYTES=768;
-struct Entry { char question[256]; char answer[512]; };
+struct Entry { char question[256]; char answer[512]; uint8_t ownerVerified=0;
+ char speaker[64]="unknown"; char source[24]="unverified"; };
 static QueueHandle_t writes=nullptr;
 // Bounded RAM handoff to the optional idle-only AI consolidator.
 // Never waits on inference, and never touches SD in a network task.
@@ -45,8 +46,58 @@ inline bool proposeConsolidatedFact(const String &key,const String &value){
  return xQueueSend(consolidatedFacts,&item,0)==pdTRUE;
 }
 
-static TaskHandle_t worker=nullptr;
+// Network-free one-slot SD export. Only kitty_sd opens SD_MMC.
+struct ExportRequest { uint8_t file; uint32_t offset; uint32_t limit; };
+struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint32_t boundaries[9]; uint8_t ok; };
+static QueueHandle_t exportRequests=nullptr,exportBlocks=nullptr;
 static volatile bool mounted=false;
+struct SharedMemoryWrite {char id[65];char text[321];};
+static QueueHandle_t sharedMemoryWrites=nullptr;
+static volatile uint32_t sharedRevision=0;
+// Explicit approval only: never automatically promote speech to shared.
+inline bool queueApprovedSharedMemory(const String &id,const String &text,bool approved){
+ if(!approved || !mounted || !sharedMemoryWrites ||
+    id.isEmpty() || id.length()>64 || text.isEmpty() || text.length()>320)return false;
+ for(size_t i=0;i<id.length();i++){
+  char c=id[i];
+  if(!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||
+       (c>='0'&&c<='9')||c=='_'||c=='-'))return false;
+ }
+ for(size_t i=0;i<text.length();i++){
+  uint8_t c=(uint8_t)text[i];if(c<32||c==127)return false;
+ }
+ SharedMemoryWrite item={};
+ id.toCharArray(item.id,sizeof(item.id));
+ text.toCharArray(item.text,sizeof(item.text));
+ return xQueueSend(sharedMemoryWrites,&item,0)==pdTRUE;
+}
+
+struct ClaimRequest {char speaker[48];};
+struct ClaimResult {char speaker[48];char context[512];};
+static QueueHandle_t claimRequests=nullptr,claimResults=nullptr;
+inline bool requestClaimContext(const String &speaker){
+ if(!mounted||!claimRequests||!claimResults||!speaker.startsWith("person:")||speaker.length()>47)return false;
+ ClaimRequest q={};speaker.toCharArray(q.speaker,sizeof(q.speaker));
+ xQueueReset(claimResults);
+ return xQueueSend(claimRequests,&q,0)==pdTRUE;
+}
+inline bool takeClaimContext(const String &speaker,String &out){
+ ClaimResult result={};
+ if(!claimResults||xQueueReceive(claimResults,&result,0)!=pdTRUE)return false;
+ if(speaker!=result.speaker)return false;
+ out=String(result.context);return true;
+}
+static constexpr const char* EXPORT_NAMES[]={"facts.tsv","factsmeta.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv","turn_sources.tsv","voice_profiles_v6.json","speaker_claims_v6.tsv","shareable_memories_v6.tsv"};
+static constexpr uint8_t EXPORT_COUNT=sizeof(EXPORT_NAMES)/sizeof(EXPORT_NAMES[0]);
+// Sentinel file=EXPORT_COUNT captures all file sizes in one SD-worker pass.
+inline bool requestExport(uint8_t file,uint32_t offset,uint32_t limit=UINT32_MAX){
+ if(!exportRequests || !exportBlocks || !mounted || file>EXPORT_COUNT)return false;
+ ExportRequest req={file,offset,limit};return xQueueSend(exportRequests,&req,0)==pdTRUE;
+}
+inline bool takeExport(ExportBlock &block,uint32_t timeoutMs=150){
+ return exportBlocks && xQueueReceive(exportBlocks,&block,pdMS_TO_TICKS(timeoutMs))==pdTRUE;
+}
+static TaskHandle_t worker=nullptr;
 static volatile uint8_t cardState=0; // 0=starting,1=ready,2=needs format/check,3=formatting,4=error
 static volatile bool formatRequested=false;
 inline uint8_t status(){return cardState;}
@@ -58,6 +109,45 @@ static volatile uint32_t saved=0, failed=0;
 static String recent[8];
 static uint8_t recentCount=0,recentNext=0;
 static SemaphoreHandle_t cacheMutex=nullptr;
+static char sharedContextCache[641]={0};
+inline String shareableContext(){
+ if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(2))!=pdTRUE)return "";
+ String result(sharedContextCache);
+ xSemaphoreGive(cacheMutex);
+ return result;
+}
+// Only the dedicated SD worker reads the explicitly shared file.
+inline void refreshSharedContextOnSdWorker(){
+ String content;
+ File in=SD_MMC.open("/kitty/shareable_memories_v6.tsv",FILE_READ);
+ if(in){
+  if(in.size()<=65536){
+   while(in.available() && content.length()<580){
+    String row=in.readStringUntil('\n');
+    int first=row.indexOf('\t'),second=first<0?-1:row.indexOf('\t',first+1);
+    if(first<1 || second<=first || row.substring(first+1,second)!="shared")continue;
+    String id=row.substring(0,first),value=row.substring(second+1);
+    if(id.length()>64 || value.isEmpty() || value.length()>320)continue;
+    bool clean=true;
+    for(size_t i=0;i<id.length();i++){
+     char c=id[i];if(!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||
+     (c>='0'&&c<='9')||c=='_'||c=='-')){clean=false;break;}
+    }
+    for(size_t i=0;i<value.length();i++)
+     if((uint8_t)value[i]<32 || (uint8_t)value[i]==127){clean=false;break;}
+    if(!clean || content.length()+value.length()+2>640)continue;
+    if(!content.isEmpty())content+='\n';
+    content+=value;
+   }
+  }
+  in.close();
+ }
+ if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
+  content.toCharArray(sharedContextCache,sizeof(sharedContextCache));
+  xSemaphoreGive(cacheMutex);
+ }
+}
+
 
 // ASCII-safe UTF-8 truncation. Writes are bounded and never persist API keys.
 inline String clipUTF8(const String &s,size_t maxBytes){
@@ -264,10 +354,33 @@ inline void restoreFactSnapshots(){
 }
 inline bool extractFact(String utterance,String &key,String &value){
  utterance.trim();if(utterance.length()<5)return false;
+ // Keep a single statement within the existing bounded fact extractor.
+ // A second clause is processed separately by the SD worker below.
+ for(const char* delim:{". ","! ","? ","; "}) {
+  int at=utterance.indexOf(delim);
+  if(at>=0 && at<150) {utterance=utterance.substring(0,at);break;}
+ }
  String lower=utterance;lower.toLowerCase();
  int pos=-1,skip=0;
  for(const char* marker:{"my name is ","my name's ","my name’s ","i am called ","i'm called ","i’m called ","you can call me ","please call me ","call me ","i go by ","everyone calls me ","people call me ","je m’appelle ","je m'appelle ","mon prénom est ","mon prenom est ","je suis appelé ","je suis appelée ","私の名前は","名前は","私の名前は、","僕の名前は","わたしの名前は"}){
   pos=lower.indexOf(marker);if(pos>=0){key="name";skip=strlen(marker);break;}
+ }
+ // Natural voice greeting: "Hi Kitty, this is Shana" (name claim only).
+ if(pos<0 && lower.indexOf('?')<0){
+  for(const char* marker:{"this is ","it's ","it is "}){
+   int at=lower.indexOf(marker);
+   if(at<0 || at>28)continue;
+   String candidate=utterance.substring(at+strlen(marker));candidate.trim();
+   while(candidate.endsWith(".") || candidate.endsWith("!"))candidate.remove(candidate.length()-1);
+   candidate.trim();
+   bool safe=candidate.length()>=2 && candidate.length()<=32;
+   for(size_t i=0;safe && i<candidate.length();i++){
+    char ch=candidate[i];
+    safe=(ch>='A'&&ch<='Z')||(ch>='a'&&ch<='z')||
+         ch=='-'||ch=='_';
+   }
+   if(safe){key="name";value=candidate;pos=-2;break;}
+  }
  }
  // Plain English "I'm Shana"/"I am Shana" is an introduction only when
  // the remaining words form a short name, not a sentence about an activity.
@@ -708,17 +821,29 @@ inline void consolidatePreferences(const String &utterance){
  }
 }
 
-inline bool queue(const String &question,const String &answer){
+inline bool queueAttributed(const String &question,const String &answer,
+                            const String &speaker,const String &source){
  if(!writes || !mounted || question.isEmpty() || answer.isEmpty()){Serial.printf("[MEMORY] enqueue refused mounted=%d queue=%d\n",mounted?1:0,writes?1:0);return false;}
  Entry e={};
  sanitize(question,sizeof(e.question)-1).toCharArray(e.question,sizeof(e.question));
  sanitize(answer,sizeof(e.answer)-1).toCharArray(e.answer,sizeof(e.answer));
+ // Voice matching is probabilistic: NEVER set ownerVerified from a match.
+ String safeSpeaker=(!speaker.isEmpty() && speaker.length()<sizeof(e.speaker) &&
+   speaker.indexOf('\t')<0 && speaker.indexOf('\n')<0)?speaker:String("unknown");
+ String safeSource=(source=="voice_probable" || source=="explicit_introduction")
+   ?source:String("unverified");
+ safeSpeaker.toCharArray(e.speaker,sizeof(e.speaker));
+ safeSource.toCharArray(e.source,sizeof(e.source));
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
  // Facts are merged exclusively in the SD worker, so revision detection
  // and snapshot persistence cannot miss an early RAM-only mutation.
  // The active recall cache updates immediately; SD persistence is deferred.
  addCache(question,answer);
  return true;
+}
+
+inline bool queue(const String &question,const String &answer){
+ return queueAttributed(question,answer,"unknown","unverified");
 }
 
 #include <esp_heap_caps.h>
@@ -977,7 +1102,7 @@ inline void task(void*){
     while(archive.available()){
      uint32_t offset=(uint32_t)archive.position();
      String line=archive.readStringUntil('\\n');
-     int a=line.indexOf('\\t'),b=line.indexOf('\\t',a+1);
+     int a=line.indexOf('\t'),b=line.indexOf('\\t',a+1);
      if(a>=0 && b>a){
       Entry item={};
       line.substring(a+1,b).toCharArray(item.question,sizeof(item.question));
@@ -994,13 +1119,14 @@ inline void task(void*){
   Serial.printf("[MEMORY] SD mounted: total=%llu MB free~=%llu MB\n",
     (unsigned long long)(SD_MMC.totalBytes()/1048576ULL),
     (unsigned long long)((SD_MMC.totalBytes()-SD_MMC.usedBytes())/1048576ULL));
+  refreshSharedContextOnSdWorker();
   // Restore only the newest concise summary; the full history stays on SD.
   File summaryFile=SD_MMC.open("/kitty/summaries.tsv",FILE_READ);
   if(summaryFile){
    if(summaryFile.size()>1024){summaryFile.seek(summaryFile.size()-1024);summaryFile.readStringUntil('\n');}
    while(summaryFile.available()){
     String line=summaryFile.readStringUntil('\n');
-    int tab=line.indexOf('\\t');
+    int tab=line.indexOf('\t');
     if(tab>=0 && tab+1<(int)line.length()){
      latestSummary=sanitize(line.substring(tab+1),220);
      latestSummaryAt=(uint32_t)line.substring(0,tab).toInt();
@@ -1027,6 +1153,87 @@ inline void task(void*){
  String summaryBatch;
  uint8_t summaryTurnCount=0;
  while(true){
+  // Serve at most one bounded export block per pass, on the SD-owning task.
+  ExportRequest exportReq={};
+  if(mounted && exportRequests && exportBlocks &&
+     xQueueReceive(exportRequests,&exportReq,0)==pdTRUE){
+   ExportBlock block={};
+   block.file=exportReq.file;block.offset=exportReq.offset;
+   if(exportReq.file==EXPORT_COUNT){
+    // No other Kitty SD write occurs between these eight stat operations.
+    block.ok=1;
+    for(uint8_t n=0;n<EXPORT_COUNT;n++){
+     String filename=String("/kitty/")+EXPORT_NAMES[n];
+     File f=SD_MMC.open(filename,FILE_READ);
+     if(f){block.boundaries[n]=(uint32_t)f.size();f.close();}
+     else if(!SD_MMC.exists(filename))block.boundaries[n]=0;
+     else {block.ok=0;break;}
+    }
+   }else if(exportReq.file<EXPORT_COUNT){
+    String filename=String("/kitty/")+EXPORT_NAMES[exportReq.file];
+    File f=SD_MMC.open(filename,FILE_READ);
+    if(f){
+     const uint32_t size=(uint32_t)f.size();
+     block.total=exportReq.limit==UINT32_MAX?size:exportReq.limit;
+     if(size>=block.total && exportReq.offset<=block.total && f.seek(exportReq.offset)){
+      const size_t needed=min((size_t)sizeof(block.data),(size_t)(block.total-exportReq.offset));
+      block.length=(uint16_t)f.read(block.data,needed);
+      block.ok=(block.length==needed);
+     }
+     f.close();
+    }else if(!SD_MMC.exists(filename)){
+     block.ok=(exportReq.limit==0 && exportReq.offset==0)?1:0;
+     block.total=0;
+    }
+   }
+   (void)xQueueSend(exportBlocks,&block,0);
+  }
+  // Only the SD worker persists explicitly approved shared memories.
+  SharedMemoryWrite shared={};
+  if(mounted && sharedMemoryWrites &&
+     xQueueReceive(sharedMemoryWrites,&shared,0)==pdTRUE){
+   File out=SD_MMC.open("/kitty/shareable_memories_v6.tsv",FILE_APPEND);
+   if(out){
+    size_t written=out.printf("%s\tshared\t%s\n",shared.id,shared.text);
+    out.flush();out.close();
+    if(written>0){sharedRevision++;refreshSharedContextOnSdWorker();}
+   }
+  }
+  // Read only explicitly introduced, non-sensitive speaker claims.
+  ClaimRequest req={};
+  if(mounted&&claimRequests&&claimResults&&xQueueReceive(claimRequests,&req,0)==pdTRUE){
+   ClaimResult reply={};strlcpy(reply.speaker,req.speaker,sizeof(reply.speaker));
+   File f=SD_MMC.open("/kitty/speaker_claims_v6.tsv",FILE_READ);
+   if(f){
+    if(f.size()>8192){f.seek(f.size()-8192);f.readStringUntil('\n');}
+    String keys[6],values[6];size_t count=0;
+    while(f.available()){
+     String line=f.readStringUntil('\n');
+     int a=line.indexOf('\t'),b=a<0?-1:line.indexOf('\t',a+1);
+     int c=b<0?-1:line.indexOf('\t',b+1);
+     int d=c<0?-1:line.indexOf('\t',c+1);
+     if(a<0||b<0||c<0||d<0)continue;
+     if(line.substring(a+1,b)!=req.speaker ||
+        line.substring(d+1)!="explicit_introduction")continue;
+     String key=line.substring(b+1,c),value=line.substring(c+1,d);
+     if(key!="name"&&key!="likes"&&key!="dislikes"&&!key.startsWith("attr_"))continue;
+     if(value.isEmpty())continue;
+     size_t slot=count<6?count++:5;
+     for(size_t j=0;j<count;j++)if(keys[j]==key){slot=j;break;}
+     keys[slot]=key;values[slot]=value;
+    }
+    f.close();
+    String context;
+    for(size_t j=0;j<count;j++){
+     String entry=keys[j]+": "+values[j];
+     if(values[j].isEmpty()||context.length()+entry.length()+2>511)continue;
+     if(!context.isEmpty())context+='\n';
+     context+=entry;
+    }
+    context.toCharArray(reply.context,sizeof(reply.context));
+   }
+   (void)xQueueSend(claimResults,&reply,0);
+  }
   // Apply completed summaries entirely on the SD task, never the network callback.
   SummaryResult summary={};
   if(mounted && summaryResults && xQueueReceive(summaryResults,&summary,0)==pdTRUE){
@@ -1132,7 +1339,74 @@ inline void task(void*){
   uint32_t offset=(uint32_t)f.size();
   bool ok=f.printf("%lu\t%s\t%s\n",(unsigned long)ts,e.question,e.answer)>0;
   f.close();
-  if(ok){saved++;appendIndex(e,offset,ts);
+  if(ok){
+   // V6: backward-compatible attribution sidecar. Archive rows preserve
+   // their existing ts/question/answer format and index offsets. Do NOT
+   // infer that a caller is Shana merely because Kitty has one owner.
+   // Unverified microphone transcripts remain unknown until a trusted
+   // identity source is wired into a later protocol revision.
+   File sources=SD_MMC.open("/kitty/turn_sources.tsv",FILE_APPEND);
+   if(sources){
+    sources.printf("%lu\t%lu\t%s\t%s\t%s\n",
+      (unsigned long)ts,(unsigned long)offset,
+      e.speaker,strcmp(e.speaker,"unknown")==0?"unknown":"guest",e.source);
+    sources.close();
+   }else{
+    Serial.println("[MEMORY V6] attribution sidecar unavailable; source remains unknown");
+   }
+   saved++;appendIndex(e,offset,ts);
+   // Voice-linked preferences belong to the matched voice identity, NOT
+   // the verified owner facts.tsv catalog. Voice matching can be spoofed;
+   // these are attributed, revocable *claims*, not authentication.
+   if((strcmp(e.source,"voice_probable")==0 ||
+       strcmp(e.source,"explicit_introduction")==0) &&
+      strcmp(e.speaker,"unknown")!=0){
+     String voiceKey,voiceValue;
+     if(extractFact(String(e.question),voiceKey,voiceValue)){
+      File scoped=SD_MMC.open("/kitty/speaker_claims_v6.tsv",FILE_APPEND);
+      if(scoped){
+       scoped.printf("%lu\t%s\t%s\t%s\t%s\n",
+         (unsigned long)ts,e.speaker,
+         sanitize(voiceKey,31).c_str(),sanitize(voiceValue,112).c_str(),e.source);
+       scoped.close();
+       Serial.printf("[MEMORY V6] speaker claim SD append speaker=%s key=%s\\n",e.speaker,voiceKey.c_str());
+      }else{
+       Serial.println("[MEMORY V6] speaker claim SD write failed");
+      }
+     }
+     // Capture the preference in a second natural-language clause, rather
+     // than silently saving only "I'm Shana" from a combined introduction.
+     String utterance(e.question);
+     int split=-1,advance=0;
+     for(const char* delim:{". ","! ","; "}) {
+      int at=utterance.indexOf(delim);
+      if(at>=0 && (split<0 || at<split)){split=at;advance=strlen(delim);}
+     }
+     if(split>=0 && split+advance<(int)utterance.length()){
+      String tail=utterance.substring(split+advance);tail.trim();
+      String k2,v2;
+      if(extractFact(tail,k2,v2) && k2!=voiceKey &&
+         k2!="note" && !v2.isEmpty()){
+       File scoped2=SD_MMC.open("/kitty/speaker_claims_v6.tsv",FILE_APPEND);
+       if(scoped2){
+        scoped2.printf("%lu\\t%s\\t%s\\t%s\\t%s\\n",
+         (unsigned long)ts,e.speaker,sanitize(k2,31).c_str(),
+         sanitize(v2,112).c_str(),e.source);
+        scoped2.close();
+        Serial.printf("[MEMORY V6] speaker claim SD append speaker=%s key=%s\\n",e.speaker,k2.c_str());
+       }else Serial.println("[MEMORY V6] second speaker claim SD write failed");
+      }
+     }
+   }
+   // Security boundary: unverified microphone input may be archived but
+   // cannot become a verified owner profile/preference/correction. No
+   // trustworthy human identity issuer is connected yet, so ownerVerified
+   // stays false. The trusted-session integration must set it only at enqueue.
+   if(!e.ownerVerified){
+     Serial.println("[MEMORY V6] unverified turn archived; owner fact writes skipped");
+     updateStorage();
+     continue;
+   }
    // Batch user statements for an idle-only model summary. No model call or SD
    // summary write occurs on the websocket or I2S execution path.
    String snippet=sanitize(String(e.question),115);
@@ -1216,6 +1490,24 @@ inline void init(){
  }
  if(!summaryResults)summaryResults=xQueueCreate(2,sizeof(SummaryResult));
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
+ if(!exportRequests)exportRequests=xQueueCreate(1,sizeof(ExportRequest));
+ if(!claimRequests)claimRequests=xQueueCreate(1,sizeof(ClaimRequest));
+ if(!sharedMemoryWrites)sharedMemoryWrites=xQueueCreate(2,sizeof(SharedMemoryWrite));
+ if(!claimResults){
+  static StaticQueue_t claimQueueCtrl;
+  static uint8_t *claimStorage=nullptr;
+  claimStorage=(uint8_t*)heap_caps_malloc(sizeof(ClaimResult),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(claimStorage)claimResults=xQueueCreateStatic(1,sizeof(ClaimResult),claimStorage,&claimQueueCtrl);
+ }
+ if(!exportBlocks){
+  // One 780-byte block; PSRAM-backed queue avoids internal heap pressure.
+  static StaticQueue_t exportQueueCtrl;
+  static uint8_t *exportStorage=nullptr;
+  exportStorage=(uint8_t*)heap_caps_malloc(sizeof(ExportBlock),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(exportStorage)exportBlocks=xQueueCreateStatic(1,sizeof(ExportBlock),exportStorage,&exportQueueCtrl);
+ }
+ if(!exportRequests || !exportBlocks)Serial.println("[MEMORY] Export queues unavailable");
+
  if(writes && !worker){
   // Memory parsing and SD index scanning exceed the old 6144-byte stack
   // budget in some realtime sessions. Keep the FreeRTOS task stack in

@@ -19,6 +19,7 @@
 #include "BrainAudioTest.h"
 #include "BrainRealtimeAudio.h"
 #include "BrainAI.h"
+#include "KittyMemoryContextV6.h"
 
 namespace BrainRealtimeDirect {
 extern const uint8_t ca_bundle_start[] asm("_binary_x509_crt_bundle_start");
@@ -28,6 +29,39 @@ static bool requested=false, started=false, connected=false, ready=false;
 // Provider memory updates are opt-in and disabled unless the authenticated
 // gateway explicitly advertises support. Never require them for a voice call.
 static bool memoryRefreshSupported=false;
+static bool semanticPending=false;
+static String semanticRequestId,semanticSpeaker,semanticTurnId,semanticContext,semanticTranscript;
+static uint32_t semanticRequestedAt=0,semanticSequence=0;
+inline void clearSemanticTurn(){
+ semanticPending=false;semanticRequestId="";semanticSpeaker="";semanticTurnId="";
+ semanticContext="";semanticTranscript="";semanticRequestedAt=0;
+}
+inline void requestSemanticTurn(const String &turnId,const String &speaker,
+                                const String &provenance,const String &transcript){
+ // Speaker-scoped optional recall; no wait for an HTTP lookup in the audio path.
+ if(!memoryRefreshSupported || !ready || speaker=="unknown" ||
+    speaker.isEmpty() || transcript.isEmpty() || semanticPending)return;
+ if(!speaker.startsWith("person:") || speaker.length()<=7 ||
+    (provenance!="voice_probable" && provenance!="explicit_introduction") ||
+    speaker.length()>60 || transcript.length()>300 ||
+    turnId.isEmpty() || turnId.length()>160)return;
+ String id="s"+String(++semanticSequence);
+ cJSON *m=cJSON_CreateObject();
+ if(!m)return;
+ cJSON_AddStringToObject(m,"type","kitty.memory.semantic");
+ cJSON_AddStringToObject(m,"request_id",id.c_str());
+ cJSON_AddStringToObject(m,"turn_id",turnId.c_str());
+ cJSON_AddStringToObject(m,"speaker_id",speaker.c_str());
+ cJSON_AddStringToObject(m,"provenance",provenance.c_str());
+ cJSON_AddStringToObject(m,"query",transcript.c_str());
+ char *wire=cJSON_PrintUnformatted(m);cJSON_Delete(m);
+ if(!wire)return;
+ bool sent=ws.sendTXT(wire);free(wire);
+ if(sent){semanticRequestId=id;semanticSpeaker=speaker;semanticTurnId=turnId;
+          semanticPending=true;semanticRequestedAt=millis();semanticContext="";
+          semanticTranscript=transcript;}
+}
+
 static uint32_t memoryFactSeen=0,memorySummarySeen=0,memoryRefreshSeq=0,memoryLastAttempt=0,memoryDaySeen=0,memoryMinuteSeen=0;
 static bool remoteResponse=false, streamedSpeech=false;
 static bool bargeCancelling=false;
@@ -48,6 +82,7 @@ inline void appendLiveKitty(const String &delta){
 }
 static size_t captionOffset=0;
 static bool captionReady=false;
+static String captionLastQueued;
 // Chunk long UTF-8 captions into the existing 80-byte UART channel.
 // '0' begins a new caption; '1' appends its continuation on the C5.
 inline bool takeCaption(String &out){
@@ -80,11 +115,15 @@ inline void queueCaption(const char *speaker,const char *words){
   while(begin<c.length() && ((uint8_t)c[begin]&0xC0)==0x80)begin++;
   c=c.substring(begin);
  }
+ if(c==captionLastQueued)return; // Provider repeats snapshots; no duplicate UI work.
+ captionLastQueued=c;
  if(captionReady){captionDeferred=c;return;}
  captionPending=c;captionOffset=0;captionReady=true;
 }
 static bool playbackSpeechDetected=false;
 static String delegatedCallId, animationResponseId;
+static String waitingDelegationId,waitingDelegationPrompt;
+static uint32_t waitingDelegationAt=0;
 // The provider must finish the initial tool-call response before bridge.respond.
 static bool toolResponseFinished=false;
 static String failedCallId, failedCallAnswer;
@@ -269,8 +308,8 @@ inline const char *preflightError(){
  if(WiFi.status()!=WL_CONNECTED)return "S3_WIFI_OFFLINE";
  if(!BrainClock::valid())return "S3_CLOCK_UNSYNCED";
  if(url.isEmpty())return "OPENWEBUI_URL_MISSING";
- if(!url.startsWith("https://")||url.indexOf('@')>=0||
-    url.indexOf('#')>=0||url.indexOf('?')>=0||url.length()>256)
+ if(url!="https://ragnarok-project.com" &&
+    !url.startsWith("https://ragnarok-project.com/"))
   return "OPENWEBUI_URL_INVALID";
  if(model.isEmpty()||model.length()>128)return "OPENWEBUI_MODEL_MISSING_OR_INVALID";
  if(!key.startsWith("sk-")||key.length()<=20)return "S3_SAVED_KEY_NOT_VALID_SK_FORMAT";
@@ -288,9 +327,12 @@ inline void diagnose(bool audioBusy){
   !url.isEmpty()?1:0,!model.isEmpty()?1:0,
   key.startsWith("sk-")&&key.length()>20?1:0,audioBusy?1:0);
 }
+inline void flushSpeakerTurns(bool all);
 inline void stop(){
+ flushSpeakerTurns(true);
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
  requested=false;ready=false;connected=false;started=false;
+ clearSemanticTurn();waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  deferredVoiceItem="";playbackSpeechDetected=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -300,6 +342,7 @@ inline void stop(){
  status("CALL_OFF");
 }
 inline void fail(const char *why){
+ flushSpeakerTurns(true);
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
  const bool localAudio=(strcmp(why,"I2S_RUNTIME")==0 ||
    strcmp(why,"AUDIO_TASK_ALLOC")==0 ||
@@ -311,6 +354,7 @@ inline void fail(const char *why){
  else
   Serial.printf("[CALL] %s (WebSocket / audio protocol or hardware; check detailed preceding log)\n",why);
  // Stop retries on rejected credentials, unexpected PCM or incompatible server.
+ clearSemanticTurn();waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  requested=false;ready=false;connected=false;started=false;
  remoteResponse=false;streamedSpeech=false;
  delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -319,11 +363,79 @@ inline void fail(const char *why){
  ws.disconnect();
  status("CALL_ERROR");
 }
+// V6 speaker recognition is probabilistic and turn-scoped; never owner auth.
+static constexpr uint8_t SPEAKER_PENDING_MAX=6;
+static constexpr uint32_t SPEAKER_WAIT_MS=5000UL;
+struct SpeakerTurn {String item,transcript,intro;uint32_t at=0;};
+static SpeakerTurn speakerTurns[SPEAKER_PENDING_MAX];
+static uint32_t speakerMatched=0,speakerExpired=0,speakerOverflow=0,speakerUnmatched=0;
+inline int findSpeakerTurn(const String &id){
+ for(uint8_t i=0;i<SPEAKER_PENDING_MAX;i++)
+  if(!speakerTurns[i].item.isEmpty() && speakerTurns[i].item==id)return i;
+ return -1;
+}
+inline void clearSpeakerTurn(uint8_t i){speakerTurns[i]=SpeakerTurn();}
+inline void archiveSpeakerTurn(uint8_t i){
+ SpeakerTurn &t=speakerTurns[i];
+ if(t.item.isEmpty())return;
+ (void)KittyMemory::queueAttributed(t.transcript,"[voice transcript]",
+  t.intro.isEmpty()?String("unknown"):t.intro,
+  t.intro.isEmpty()?String("unverified"):String("explicit_introduction"));
+ clearSpeakerTurn(i);
+}
+inline void flushSpeakerTurns(bool all){
+ const uint32_t now=millis();
+ for(uint8_t i=0;i<SPEAKER_PENDING_MAX;i++){
+  if(speakerTurns[i].item.isEmpty())continue;
+  if(!all && (uint32_t)(now-speakerTurns[i].at)<SPEAKER_WAIT_MS)continue;
+  speakerExpired++;archiveSpeakerTurn(i);
+ }
+}
+inline void addSpeakerTurn(const String &id,const String &transcript,const String &intro){
+ int slot=findSpeakerTurn(id);
+ if(slot>=0)archiveSpeakerTurn((uint8_t)slot);
+ if(slot<0)for(uint8_t i=0;i<SPEAKER_PENDING_MAX;i++)
+  if(speakerTurns[i].item.isEmpty()){slot=i;break;}
+ if(slot<0){
+  uint8_t oldest=0;
+  for(uint8_t i=1;i<SPEAKER_PENDING_MAX;i++)
+   if((int32_t)(speakerTurns[i].at-speakerTurns[oldest].at)<0)oldest=i;
+  slot=oldest;speakerOverflow++;archiveSpeakerTurn((uint8_t)slot);
+ }
+ speakerTurns[slot].item=id;speakerTurns[slot].transcript=transcript;
+ speakerTurns[slot].intro=intro;speakerTurns[slot].at=millis();
+}
+// Unverified conversation name: reset per call, never owner authorization.
+static String introducedSpeaker;
+static String introducedClaimContext;
+inline String selfIntroducedSpeaker(const String &utterance){
+ String key,value;
+ if(!KittyMemory::extractFact(utterance,key,value) || key!="name")return "";
+ value.trim();
+ if(value.length()<2 || value.length()>32)return "";
+ for(size_t i=0;i<value.length();i++){
+  char ch=value[i];
+  if(!((ch>='A'&&ch<='Z')||(ch>='a'&&ch<='z')||
+       (ch>='0'&&ch<='9')||ch=='-'||ch=='_'))return "";
+ }
+ value.toLowerCase();return "person:"+value;
+}
+// Late speaker results are matched by item ID rather than arrival order.
+
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
+  Serial.printf("[CALL NET] ws_disconnected requested=%d connected=%d ready=%d state=%s wifi=%d rssi=%d free_internal=%lu largest_internal=%lu free_psram=%lu buffered_ms=%lu skipped_ms=%lu\\n",
+   requested?1:0,connected?1:0,ready?1:0,state.c_str(),
+   WiFi.status()==WL_CONNECTED?1:0,WiFi.RSSI(),
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+   (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT),
+   (unsigned long)BrainRealtimeAudio::bufferedMs(),
+   (unsigned long)BrainRealtimeAudio::droppedSpeakerMs());
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
-  memoryRefreshSupported=false;memoryRefreshSeq=0;
+  memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();flushSpeakerTurns(true);introducedSpeaker="";introducedClaimContext="";
+  waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  deferredVoiceItem="";playbackSpeechDetected=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
   failedCallId="";failedCallAnswer="";BrainAI::cancelCallDelegation();
@@ -344,18 +456,16 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   // ordinary browser/mobile voice clients.
   cJSON_AddBoolToObject(auth,"kitty_expressions",true);
   cJSON_AddBoolToObject(auth,"kitty_memory_refresh",true);
+  // Opt in to gateway voice recognition when running the V6 experimental build.
+  // Older gateways ignore this field and preserve existing realtime behavior.
+  cJSON_AddBoolToObject(auth,"kitty_voice_v6",true);
   memoryRefreshSupported=false;memoryRefreshSeq=0;
   memoryDaySeen=BrainClock::localDayKey();
   memoryMinuteSeen=BrainClock::valid()?(uint32_t)(time(nullptr)/60):0;
   memoryFactSeen=KittyMemory::factRevision;
   memorySummarySeen=KittyMemory::summaryRevision;
   // Only ephemeral facts travel with this authenticated session. No server storage.
-  String facts=KittyMemory::factSummary(580);
-  String summary=KittyMemory::latestSummaryContext(170);
-  if(!summary.isEmpty()){if(!facts.isEmpty())facts+='\n';facts+="recent_summary: "+summary;}
-  String calendar=BrainClock::calendarContext();
-  if(!calendar.isEmpty())facts=calendar+(facts.isEmpty()?String(""):String("\n")+facts);
-  facts=KittyMemory::clipUTF8(facts,820);
+  String facts=KittyMemoryContextV6::snapshot(580,170,820);
   if(!facts.isEmpty())cJSON_AddStringToObject(auth,"kitty_sd_memory",facts.c_str());
   char* json=cJSON_PrintUnformatted(auth);
   cJSON_Delete(auth);
@@ -398,7 +508,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   lastPing=millis();
  }else if(strcmp(type,"response.created")==0){
   remoteResponse=true;streamedSpeech=false;expressionIdleSince=0;
-  liveKittyCaption="";captionLastSent=0;
+  liveKittyCaption="";captionLastSent=0;captionLastQueued="";
   playbackSpeechDetected=false;
   bargeCancelling=false;BrainRealtimeAudio::resetBarge();
   BrainRealtimeAudio::setRemoteReply(true);
@@ -420,17 +530,121 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    }
   }
  }else if(strcmp(type,"input_audio_buffer.speech_started")==0){
+  // A new utterance invalidates an earlier speaker-specific result immediately.
+  clearSemanticTurn();
   if(!remoteResponse)status("CALL_LISTENING");
  }else if(strcmp(type,"input_audio_buffer.speech_stopped")==0){
   status("CALL_THINKING");
+ }else if(strcmp(type,"kitty.memory.semantic.result")==0){
+  cJSON *id=cJSON_GetObjectItem(json,"request_id");
+  cJSON *sid=cJSON_GetObjectItem(json,"speaker_id");
+  cJSON *ctx=cJSON_GetObjectItem(json,"context");
+  cJSON *turn=cJSON_GetObjectItem(json,"turn_id");
+  if(semanticPending && cJSON_IsString(turn) && semanticTurnId==turn->valuestring && cJSON_IsString(id) && cJSON_IsString(sid) &&
+     cJSON_IsString(ctx) && semanticRequestId==id->valuestring &&
+     semanticSpeaker==sid->valuestring &&
+     (uint32_t)(millis()-semanticRequestedAt)<1500UL){
+   // Do not inject per-speaker results into session-wide memory: that
+   // could expose one guest's facts to the next speaker. A per-turn
+   // upstream context scope is required before using the payload.
+   semanticContext=KittyMemory::clipUTF8(String(ctx->valuestring),640);
+   semanticPending=false;
+  }
+ }else if(strcmp(type,"kitty.speaker.result")==0){
+  cJSON *id=cJSON_GetObjectItem(json,"item_id");
+  cJSON *sid=cJSON_GetObjectItem(json,"speaker_id");
+  cJSON *conf=cJSON_GetObjectItem(json,"confidence");
+  const int slot=cJSON_IsString(id)?findSpeakerTurn(String(id->valuestring)):-1;
+   if(slot>=0 && !speakerTurns[slot].transcript.isEmpty()){
+    speakerMatched++;
+    const String item=speakerTurns[slot].item;
+    const String transcript=speakerTurns[slot].transcript;
+    const String introduction=speakerTurns[slot].intro;
+   String speaker="unknown",source="unverified";
+   if(cJSON_IsString(sid) && cJSON_IsString(conf) &&
+      strlen(sid->valuestring)<60){
+    if(strcmp(conf->valuestring,"probable")==0 &&
+       strncmp(sid->valuestring,"person:",7)==0 && strlen(sid->valuestring)>7){
+     speaker=String(sid->valuestring);source="voice_probable";
+    }else if(strcmp(conf->valuestring,"claimed")==0 &&
+              strncmp(sid->valuestring,"person:",7)==0 &&
+              strlen(sid->valuestring)>7){
+     // Any introduced person is a claim, never verified owner authentication.
+     // Reject control characters to preserve TSV-based speaker boundaries.
+     bool safe=true;
+     for(const char *p=sid->valuestring;*p;++p)
+      if((unsigned char)*p<32 || *p==127){safe=false;break;}
+     if(safe){speaker=String(sid->valuestring);source="explicit_introduction";}
+    }
+   }
+   // Enforce the same identifier safety for probabilistic recognition.
+   if(speaker!="unknown"){
+    for(size_t k=0;k<speaker.length();++k){
+     uint8_t c=(uint8_t)speaker[k];
+     if(c<=32 || c==127){speaker="unknown";source="unverified";break;}
+    }
+   }
+   // Candidate-only voice recognition is attribution, NEVER authentication.
+   // This message comes from the existing gateway speaker-result path.
+   // A self-introduction never overrides a valid same-turn voice candidate.
+   if(speaker=="unknown"){
+    cJSON *candidate=cJSON_GetObjectItem(json,"candidate_speaker_id");
+    cJSON *candidateSource=cJSON_GetObjectItem(json,"candidate_provenance");
+    if(cJSON_IsString(sid) && strcmp(sid->valuestring,"unknown")==0 &&
+       cJSON_IsString(conf) && strcmp(conf->valuestring,"unknown")==0 &&
+       cJSON_IsString(candidate) && candidate->valuestring &&
+       cJSON_IsString(candidateSource) &&
+       strcmp(candidateSource->valuestring,"voice_probable")==0){
+     const char *name=candidate->valuestring;
+     size_t n=strlen(name);
+     bool safe=n>7 && n<=55 && strncmp(name,"person:",7)==0;
+     for(size_t i=7;safe && i<n;++i){
+      char ch=name[i];
+      if(!((ch>='A'&&ch<='Z')||(ch>='a'&&ch<='z')||
+           (ch>='0'&&ch<='9')||ch=='_'||ch=='-'))safe=false;
+     }
+     if(safe){speaker=String(name);source="voice_probable";}
+    }
+   }
+   if(speaker=="unknown" && !introduction.isEmpty()){
+     speaker=introduction;source="explicit_introduction";
+    }
+   (void)KittyMemory::queueAttributed(transcript,"[voice transcript]",
+                                     speaker,source);
+   // A different recognized speaker invalidates any prior introduction.
+   if(source=="voice_probable" && !introducedSpeaker.isEmpty() &&
+      speaker!=introducedSpeaker){
+    introducedSpeaker="";introducedClaimContext="";
+   }
+   // Self-claimed identity must not unlock semantic private-memory lookup.
+   // Candidate metadata never permits private semantic recall.
+   if(source=="voice_probable" && cJSON_IsString(sid) &&
+      strcmp(sid->valuestring,speaker.c_str())==0)
+    requestSemanticTurn(item,speaker,source,transcript);
+    clearSpeakerTurn((uint8_t)slot);
+  }
  }else if(strcmp(type,"conversation.item.input_audio_transcription.completed")==0){
   cJSON *id=cJSON_GetObjectItem(json,"item_id");
   cJSON *transcript=cJSON_GetObjectItem(json,"transcript");
   if(cJSON_IsString(transcript) &&
      transcript->valuestring && transcript->valuestring[0]){
    Serial.println("[MEMORY] Realtime user transcript received");
-   bool archived=KittyMemory::queue(String(transcript->valuestring),String("[voice transcript]"));
-   Serial.printf("[MEMORY] transcript queued=%d\n",archived?1:0);
+   // A new transcript invalidates every earlier speaker-scoped recall.
+   clearSemanticTurn();
+   // Await the bounded turn-linked speaker result briefly, but never delay
+   // replying or block audio. Unknown is persisted on timeout.
+   flushSpeakerTurns(false);
+    if(cJSON_IsString(id) && id->valuestring && strlen(id->valuestring)<=160){
+     String clipped=KittyMemory::clipUTF8(String(transcript->valuestring),254);
+     String intro=selfIntroducedSpeaker(clipped);
+    if(!intro.isEmpty()){
+     introducedSpeaker=intro;introducedClaimContext="";
+     (void)KittyMemory::requestClaimContext(introducedSpeaker);
+    }
+    addSpeakerTurn(String(id->valuestring),clipped,intro);
+   }else{
+    (void)KittyMemory::queue(String(transcript->valuestring),"[voice transcript]");
+   }
    queueCaption("YOU: ",transcript->valuestring);
    // Realtime voice often responds without delegated BrainAI chat;
    // archive the transcript independently of whether delegation occurs.
@@ -467,16 +681,39 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
     if(args)cJSON_Delete(args);
     // The realtime voice engine delegates substantive questions to the
     // SAME saved Open WebUI chat model. No second server or key.
-    if(!delegatedCallId.isEmpty() || prompt.isEmpty() ||
-       !BrainAI::startCallDelegation(prompt)){
-     if(!failedCallId.isEmpty())failure="TOOL_QUEUE_FULL";
-     else {failedCallId=callId;
-      failedCallAnswer="I could not start the chat model. Please try again.";}
-
+    // Use attributed context only if the delegated model request exactly
+    // matches the transcript which produced this semantic lookup. No
+    // guessing from conversation order, speaker names or similar phrasing.
+    // A matching in-flight lookup receives at most 80ms of *nonblocking*
+    // grace while ws.loop() continues. Never wait for a different prompt.
+    if(semanticPending && !semanticTranscript.isEmpty() &&
+       prompt==semanticTranscript && waitingDelegationId.isEmpty() &&
+       delegatedCallId.isEmpty() && deferredVoiceItem.isEmpty()){
+      waitingDelegationId=callId;
+      waitingDelegationPrompt=prompt;
+      waitingDelegationAt=millis();
     }else{
-     delegatedCallId=callId;
-     toolResponseFinished=false;
-     status("CALL_THINKING");
+      String scoped="";
+      if(!semanticPending && !semanticContext.isEmpty() &&
+         !semanticTranscript.isEmpty() && prompt==semanticTranscript &&
+         (uint32_t)(millis()-semanticRequestedAt)<1500UL &&
+         deferredVoiceItem.isEmpty() && delegatedCallId.isEmpty())
+        scoped=semanticContext;
+      clearSemanticTurn();
+      if(!introducedClaimContext.isEmpty()){
+       if(!scoped.isEmpty())scoped+='\n';
+       scoped+="Unverified conversational preferences only (not identity proof):\n"+introducedClaimContext;
+      }
+      if(!delegatedCallId.isEmpty() || !waitingDelegationId.isEmpty() ||
+         prompt.isEmpty() || !BrainAI::startCallDelegation(prompt,scoped)){
+        if(!failedCallId.isEmpty())failure="TOOL_QUEUE_FULL";
+        else {failedCallId=callId;
+         failedCallAnswer="I could not start the chat model. Please try again.";}
+      }else{
+        delegatedCallId=callId;
+        toolResponseFinished=false;
+        status("CALL_THINKING");
+      }
     }
    }else if(strcmp(name->valuestring,"set_expression")==0 ||
              strcmp(name->valuestring,"play_animation")==0){
@@ -619,7 +856,8 @@ inline bool connect(){
  ws.onEvent(onEvent);
  ws.beginSslWithBundle(host.c_str(),port,path.c_str(),ca_bundle_start,bytes);
  ws.setReconnectInterval(RECONNECT_DELAY);
- ws.enableHeartbeat(15000,3000,2);
+ // Allow brief CPU/TLS scheduling stalls without falsely disconnecting voice.
+ ws.enableHeartbeat(20000,8000,3);
  started=true;connected=false;ready=false;lastAttempt=millis();
  status("CALL_CONNECTING");
  return true;
@@ -656,6 +894,14 @@ inline bool toggle(bool audioBusy){
  return true;
 }
 inline void tick(bool audioBusy){
+ flushSpeakerTurns(false);
+ if(!introducedSpeaker.isEmpty()){
+  String claim;
+  if(KittyMemory::takeClaimContext(introducedSpeaker,claim))
+   introducedClaimContext=KittyMemory::clipUTF8(claim,450);
+ }
+ if(semanticPending && (uint32_t)(millis()-semanticRequestedAt)>1500UL)
+  clearSemanticTurn();
  if(!requested)return;
  if(WiFi.status()!=WL_CONNECTED){
   if(started){BrainRealtimeAudio::stop();ws.disconnect();started=false;connected=false;ready=false;}
@@ -676,6 +922,29 @@ inline void tick(bool audioBusy){
  }
  ws.loop();
  if(!requested)return; // A callback may have rejected the session.
+ if(!waitingDelegationId.isEmpty() &&
+    (!semanticPending || (uint32_t)(millis()-waitingDelegationAt)>=80UL)){
+  String callId=waitingDelegationId, prompt=waitingDelegationPrompt;
+  waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
+  String scoped="";
+  if(!semanticPending && !semanticContext.isEmpty() &&
+     prompt==semanticTranscript && deferredVoiceItem.isEmpty() &&
+     (uint32_t)(millis()-semanticRequestedAt)<1500UL)
+    scoped=semanticContext;
+  clearSemanticTurn();
+  if(!introducedClaimContext.isEmpty()){
+   if(!scoped.isEmpty())scoped+='\n';
+   scoped+="Unverified conversational preferences only (not identity proof):\n"+introducedClaimContext;
+  }
+  if(!delegatedCallId.isEmpty() || !BrainAI::startCallDelegation(prompt,scoped)){
+   if(failedCallId.isEmpty()){
+    failedCallId=callId;
+    failedCallAnswer="I could not start the chat model. Please try again.";
+   }
+  }else{
+   delegatedCallId=callId;toolResponseFinished=false;status("CALL_THINKING");
+  }
+ }
  if(toolResponseFinished && !failedCallId.isEmpty()){
   String id=failedCallId,answer=failedCallAnswer;
   failedCallId="";failedCallAnswer="";toolResponseFinished=false;
@@ -702,6 +971,7 @@ inline void tick(bool audioBusy){
     !BrainRealtimeAudio::hasSpeakerAudio() &&
     delegatedCallId.isEmpty() && failedCallId.isEmpty() &&
     animationResponseId.isEmpty() && deferredVoiceItem.isEmpty() &&
+    waitingDelegationId.isEmpty() && !semanticPending &&
     (uint32_t)(millis()-memoryLastAttempt)>=3000UL &&
     (KittyMemory::factRevision!=memoryFactSeen ||
      KittyMemory::summaryRevision!=memorySummarySeen ||
@@ -712,12 +982,7 @@ inline void tick(bool audioBusy){
   uint32_t summaryVersion=KittyMemory::summaryRevision;
   uint32_t calendarDay=BrainClock::localDayKey();
   uint32_t calendarMinute=BrainClock::valid()?(uint32_t)(time(nullptr)/60):0;
-  String context=KittyMemory::factSummary(550);
-  String brief=KittyMemory::latestSummaryContext(160);
-  if(!brief.isEmpty()){if(!context.isEmpty())context+='\n';context+="recent_summary: "+brief;}
-  String calendar=BrainClock::calendarContext();
-  if(!calendar.isEmpty())context=calendar+(context.isEmpty()?String(""):String("\n")+context);
-  context=KittyMemory::clipUTF8(context,820);
+  String context=KittyMemoryContextV6::snapshot(550,160,820);
   cJSON *message=cJSON_CreateObject();
   if(message){
    cJSON_AddStringToObject(message,"type","kitty.memory.refresh");
@@ -758,8 +1023,10 @@ inline void tick(bool audioBusy){
       (unsigned long)BrainRealtimeAudio::overlapCount());
    }
    // 20ms mono little-endian PCM16, encoded as a native Open WebUI event.
-   // Never send more than 2 frames per tick (40ms maximum).
-   for(int n=0;n<2;n++){
+   // Normally send 2 frames per tick; catch up to 4 only if backlog rises.
+   // Keep the extra network work off the I2S task; queue remains bounded.
+   const int micBudget=BrainRealtimeAudio::queuedMicFrames()>=8?4:2;
+   for(int n=0;n<micBudget;n++){
     BrainRealtimeAudio::Frame frame={};
     if(!BrainRealtimeAudio::takeMic(frame))break;
     unsigned char encoded[4*((sizeof(frame.pcm)+2)/3)+4]={0};

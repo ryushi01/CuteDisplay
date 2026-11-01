@@ -9,6 +9,7 @@
 #include <ESPmDNS.h>
 #include <mbedtls/md.h>
 #include <esp_system.h>
+#include <esp_ota_ops.h>
 #include <Preferences.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -27,14 +28,30 @@
 // Do not include the ESP-IDF-internal esp_gatt_defs.h directly.
 #include "BrainPinPlan.h"
 #include "CuteLink.h"
+#include "KittyAppLink.h"
 #include "BrainC5OTA.h"
+#include "KittyOTASafety.h"
+#include "KittyOTAWriter.h"
+#include "KittyOTAFrames.h"
+#include "KittyOTASession.h"
 #include "BrainAudioTest.h"
 #include "BrainVoiceSTT.h"
 #include "BrainClock.h"
 #include "BrainAI.h"
 #include "BrainRealtimeDirect.h"
 #include "BrainMemoryAI.h"
+#include "KittyMemorySyncV6.h"
+#include "KittyHTTPSOTA.h"
 
+// Complete migration must be enabled on both boards in the same release.
+#ifndef KITTY_C5_BLE_MIGRATION_ENABLED
+#define KITTY_C5_BLE_MIGRATION_ENABLED 1
+#endif
+static bool c5AppSession=false;
+static bool c5AppCommandPending=false;
+static uint16_t c5AppSeq=0;
+static uint32_t c5AppSince=0;
+static void networkInfo(const String &field);
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr char S3_FW_VERSION[]="CallFace-v23-dev";
 static constexpr size_t MAX_CMD=96;
@@ -63,6 +80,10 @@ static WiFiServer brainLAN(BRAIN_LAN_PORT);
 static WiFiClient lanClient;
 static bool lanListening=false,lanAuthenticated=false,lanAwaitingCommand=false,brainMDNS=false;
 static String lanSecret,lanNonce;
+static KittyOTASession::Receiver otaReceiver;
+static bool otaBusy(){return BrainC5OTA::updating() || BrainRealtimeDirect::active() ||
+ BrainRealtimeAudio::active() || BrainAI::busy || BrainVoiceSTT::running ||
+ BrainTTS::running || BrainAudioTest::running || lanAwaitingCommand;}
 static char lanLine[192]={0};
 static size_t lanLineLen=0;
 static uint32_t lanLastActivity=0;
@@ -144,14 +165,34 @@ static uint16_t sendLink(const char *kind,const String &payload=""){
  }
  return seq;
 }
+static void showC5UpdateStatus(const String &value){
+ // C5 v35 already supports TEXT; no C5 firmware update needed.
+ // Send one brief, ASCII-only status message per progress milestone.
+ sendLink("TEXT",value);
+ Serial.printf("[S3 OTA UI] %s\\n",value.c_str());
+}
 static void proxyResult(const String &value){
- if(lanAwaitingCommand &&
-    (value.startsWith("ACK:CMD")||value.startsWith("ERR:"))){
+ if(lanAwaitingCommand && (value.startsWith("ACK:CMD")||value.startsWith("ERR:"))){
   if(lanClient && lanAuthenticated)
    lanClient.println(value.startsWith("ACK:")?"ACK":"NACK");
   lanAwaitingCommand=false;
   return;
  }
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ if(c5AppSession && faceOnline && !BrainC5OTA::updating()){
+  // Asynchronous AI status is not the synchronous ACK of the pending app command.
+  // Otherwise the app advances its provisioning stream before the S3 accepts it.
+  const bool isFinalReply=value.startsWith("ACK:") ||
+      value.startsWith("ERR:") || value.startsWith("NACK:");
+  if(c5AppCommandPending && isFinalReply){
+   if(KittyAppLink::sendReply(Serial1,c5AppSeq,value)) c5AppCommandPending=false;
+  }else{
+   String coded;
+   if(KittyAppLink::encode(value,coded,KittyAppLink::MAX_EVENT)) sendLink("APP_EVENT",coded);
+  }
+ }
+ return;
+#endif
  if(!controlChar)return;
  controlChar->setValue(value.c_str());
  if(clientConnected && bleAuthenticated)controlChar->notify();
@@ -220,6 +261,13 @@ static void reportPower(const String &v){
  }
 }
 static void pushNetwork(const String &v){
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ if(c5AppSession && faceOnline && !BrainC5OTA::updating()){
+  String coded;
+  if(KittyAppLink::encode(v,coded,KittyAppLink::MAX_EVENT)) sendLink("APP_EVENT",coded);
+ }
+ return;
+#endif
  // Wi-Fi events can occur before a paired phone exists. Retain only the
  // last failure locally; do not overflow a queue no phone is draining.
  if(!networkQueue||!clientConnected||!bleAuthenticated||v.length()>96)return;
@@ -240,6 +288,33 @@ static void processFace(const CuteLink::Frame &f){
   BrainC5OTA::onConnected(Serial1);
  }
  faceOnline=true;
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ if(f.type=="APP_SESSION"){
+  if(BrainC5OTA::updating())return;
+  if(f.payload=="ON"){
+   c5AppSession=true;clientConnected=true;bleAuthenticated=true;proxyEnabled=true;
+   c5AppCommandPending=false;
+   networkInfo("LINK");networkInfo("STATE");networkInfo("IP");networkInfo("KEY");
+  }else if(f.payload=="OFF"){
+   c5AppSession=false;clientConnected=false;bleAuthenticated=false;
+   proxyEnabled=false;c5AppCommandPending=false;
+  }
+  return;
+ }
+ if(f.type=="APP_CMD"){
+  String command;
+  if(!c5AppSession || !faceOnline || !KittyAppLink::readCommand(f,command) ||
+     !incomingCommands || c5AppCommandPending || BrainC5OTA::updating()){
+    KittyAppLink::sendReply(Serial1,f.seq,"ERR:NOT_READY");return;
+  }
+  char item[MAX_CMD+1]={};
+  memcpy(item,command.c_str(),command.length());
+  if(xQueueSend(incomingCommands,item,0)!=pdTRUE){
+   KittyAppLink::sendReply(Serial1,f.seq,"ERR:QUEUE_FULL");return;
+  }
+  c5AppSeq=f.seq;c5AppCommandPending=true;c5AppSince=millis();return;
+ }
+#endif
  if(f.type.startsWith("OTA_")){
   BrainC5OTA::onFrame(Serial1,f);
   return;
@@ -634,6 +709,15 @@ static void pollFace(){
  recoverFreshBootUART(now);
  if(faceOnline&&(uint32_t)(now-lastFace)>10000UL){
   faceOnline=false;
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+  // A dead C5 cannot be allowed to leave a remote app session authorized.
+  c5AppSession=false;
+  c5AppCommandPending=false;
+  clientConnected=false;
+  bleAuthenticated=false;
+  proxyEnabled=false;
+  if(incomingCommands)xQueueReset(incomingCommands);
+#endif
   Serial.printf("[S3] Face UART timed out: silence=%lums bad_frames=%lu queued=%u\n",
      (unsigned long)(now-lastFace),(unsigned long)frameReader.invalid,
      incomingCommands?(unsigned)uxQueueMessagesWaiting(incomingCommands):0);
@@ -658,6 +742,12 @@ static void pollFace(){
  }
 }
 static void pollNetwork(){
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ // C5 sends its own BLE notifications; S3 has no GATT characteristic.
+ // Do not retain unconsumed network telemetry in a RAM queue.
+ if(networkQueue && uxQueueMessagesWaiting(networkQueue))xQueueReset(networkQueue);
+ return;
+#endif
  if(!clientConnected||!bleAuthenticated||!networkQueue||!networkChar)return;
  if((uint32_t)(millis()-lastNetSent)<50UL)return;
  char item[97]={};
@@ -739,6 +829,30 @@ static void pollBLECommands(){
  }
  acceptCommand(incoming);
 }
+// HTTPS OTA must not run on Arduino's small loopTask stack.
+// UART UI updates are marshalled back to loopTask; worker never writes C5 UART.
+static QueueHandle_t otaStageUiQueue=nullptr;
+static volatile bool otaStageWorkerRunning=false;
+struct OTAStageUIMessage { char value[81]; };
+static void queueOTAStageUI(const String &value){
+ if(!otaStageUiQueue)return;
+ OTAStageUIMessage msg={};
+ value.substring(0,80).toCharArray(msg.value,sizeof(msg.value));
+ xQueueSend(otaStageUiQueue,&msg,0);
+}
+static bool otaStageStillIdle(){return !otaBusy() && !otaReceiver.active();}
+static void otaStageWorker(void *){
+ KittyHTTPSOTA::stageToInactiveSlot(otaStageStillIdle,queueOTAStageUI);
+ otaStageWorkerRunning=false;
+ vTaskDelete(nullptr);
+}
+static void pollOTAStageUI(){
+ if(!otaStageUiQueue)return;
+ OTAStageUIMessage msg;
+ for(int n=0;n<4 && xQueueReceive(otaStageUiQueue,&msg,0)==pdTRUE;n++)
+  showC5UpdateStatus(String(msg.value));
+}
+
 static void consoleCommand(String cmd){
  cmd.trim();
  if(cmd=="help"){
@@ -781,6 +895,62 @@ static void consoleCommand(String cmd){
  if(cmd=="memory probe"){
   bool accepted=KittyMemory::queue("memory diagnostic probe","SD write test only");
   Serial.printf("[MEMORY] probe queued=%d; check 'memory status' after a moment\n",accepted?1:0);
+  return;
+ }
+ if(cmd=="ota https status"){
+  KittyHTTPSOTA::stageStatus();
+  return;
+ }
+ if(cmd.startsWith("ota https activate ") && cmd.endsWith(" CONFIRM")){
+  // Exact release ID is required. No remote, BLE or LAN activation path.
+  String release=cmd.substring(strlen("ota https activate "),cmd.length()-strlen(" CONFIRM"));
+  if(otaBusy() || otaReceiver.active()){
+   Serial.println("[OTA HTTPS] activation refused: call/audio/OTA active");
+  }else{
+   KittyHTTPSOTA::activateStaged(release,[]()->bool {
+    return !otaBusy() && !otaReceiver.active();
+   },showC5UpdateStatus);
+  }
+  return;
+ }
+ if(cmd=="ota https stage CONFIRM"){
+  if(otaStageWorkerRunning || otaBusy() || otaReceiver.active()){
+   Serial.println("[OTA HTTPS] stage refused: OTA already running or busy");
+  }else{
+   if(!otaStageUiQueue)otaStageUiQueue=xQueueCreate(16,sizeof(OTAStageUIMessage));
+   if(!otaStageUiQueue){
+    Serial.println("[OTA HTTPS] stage refused: UI queue allocation failed");
+   }else{
+    otaStageWorkerRunning=true;
+    BaseType_t created=xTaskCreatePinnedToCore(otaStageWorker,"kitty-https-ota",24576,nullptr,1,nullptr,1);
+    if(created!=pdPASS){
+     otaStageWorkerRunning=false;
+     Serial.println("[OTA HTTPS] stage refused: worker allocation failed");
+    }else Serial.println("[OTA HTTPS] staging started in dedicated task");
+   }
+  }
+  return;
+ }
+ if(cmd=="ota https check"){
+  if(otaBusy())Serial.println("[OTA HTTPS] refused: call/audio/OTA active");
+  else KittyHTTPSOTA::preflight();
+  return;
+ }
+ if(cmd=="memory sync status"){
+  Serial.printf("[MEMSYNC] configured=%d running=%d completed=%lu failures=%lu sd_ready=%d wifi=%d\n",
+    KittyMemorySyncV6::configured()?1:0,KittyMemorySyncV6::worker?1:0,
+    (unsigned long)KittyMemorySyncV6::completed,
+    (unsigned long)KittyMemorySyncV6::failures,
+    KittyMemory::ready()?1:0,WiFi.status()==WL_CONNECTED?1:0);
+  Serial.printf("[MEMSYNC DIAG] eligible=%d realtime=%d audio=%d ai=%d stt=%d tts=%d ota=%d stage=%u file=%u http=%d bytes=%lu\n",
+    KittyMemorySyncV6::allowed()?1:0,
+    BrainRealtimeDirect::active()?1:0,BrainRealtimeAudio::active()?1:0,
+    BrainAI::busy?1:0,BrainVoiceSTT::running?1:0,BrainTTS::running?1:0,
+    BrainC5OTA::updating()?1:0,
+    (unsigned)KittyMemorySyncV6::failureStage,
+    (unsigned)KittyMemorySyncV6::lastFileIndex,
+    (int)KittyMemorySyncV6::lastHttpStatus,
+    (unsigned long)KittyMemorySyncV6::bytesSent);
   return;
  }
  if(cmd=="memory status"){
@@ -843,6 +1013,22 @@ static void consoleCommand(String cmd){
  if(cmd=="c5 ota status"){
   Serial.printf("[S3 OTA] automatic update enabled; stage=%d target_v=%lu\n",
    (int)BrainC5OTA::stage,(unsigned long)C5Image::version);
+  return;
+ }
+ // Physical USB console only. The operator explicitly chooses content to share.
+ // Never accept share requests from voice transcripts, BLE, or LAN.
+ if(cmd.startsWith("memory share ")){
+  if(BrainRealtimeDirect::active()){
+   Serial.println("[MEM SHARE] Finish the live call before approving memory");return;
+  }
+  String payload=cmd.substring(13);
+  int space=payload.indexOf(' ');
+  if(space<=0){
+   Serial.println("[MEM SHARE] Usage: memory share <id> <non-secret text>");return;
+  }
+  String id=payload.substring(0,space),note=payload.substring(space+1);
+  bool queued=KittyMemory::queueApprovedSharedMemory(id,note,true);
+  Serial.println(queued?"[MEM SHARE] queued for S3 SD write":"[MEM SHARE] rejected; verify SD and format");
   return;
  }
  if(cmd=="call diagnose"){
@@ -1032,6 +1218,7 @@ static bool verifyBrainLANHMAC(const String &hmac){
  return differences==0;
 }
 static void stopBrainLAN(){
+ otaReceiver.cancel();
  if(lanAwaitingCommand)cancelCommand("LAN_LINK_LOST");
  if(lanClient)lanClient.stop();
  lanAuthenticated=false;lanAwaitingCommand=false;
@@ -1049,6 +1236,81 @@ static void handleBrainLANLine(const String &line){
   }else{
    lanClient.println("DENIED");lanClient.stop();
   }
+  return;
+ }
+ if(line=="OTA_ABORT"){otaReceiver.cancel();lanClient.println("OTA:ABORTED");return;}
+ if(line.startsWith("OTA_BEGIN ") || line.startsWith("OTA_DATA ") ||
+    line=="OTA_FINISH" || line=="OTA_COMMIT"){
+#if KITTY_V6_ENABLE_OTA_TRANSPORT
+  // Realtime audio takes priority: never begin or continue OTA when busy.
+  // No command here can set the boot partition or trigger a reboot.
+  if(line=="OTA_COMMIT"){lanClient.println("OTA:COMMIT_DISABLED");return;}
+  if(line.startsWith("OTA_BEGIN ")){
+   if(otaReceiver.active() || otaBusy() || !KittyOTASafety::inspect().rollbackSupported){
+    lanClient.println("OTA:BUSY_OR_ROLLBACK_UNAVAILABLE");return;
+   }
+   int split=line.indexOf(' ',10);
+   if(split<0 || split!=line.lastIndexOf(' ') || split>19){
+    lanClient.println("OTA:INVALID_BEGIN");return;
+   }
+   String lengthText=line.substring(10,split);
+   String shaText=line.substring(split+1);
+   if(lengthText.isEmpty() || lengthText.length()>8 || shaText.length()!=64){
+    lanClient.println("OTA:INVALID_BEGIN");return;
+   }
+   uint32_t length=0;
+   for(size_t i=0;i<lengthText.length();++i){
+    if(lengthText[i]<'0'||lengthText[i]>'9'){lanClient.println("OTA:INVALID_BEGIN");return;}
+    length=length*10+(lengthText[i]-'0');
+   }
+   uint8_t digest[32],secret[32],nonce[16];
+   if(!KittyOTAFrames::hexDecode(shaText,digest,sizeof(digest)) ||
+      !KittyOTAFrames::hexDecode(lanSecret,secret,sizeof(secret))){
+    lanClient.println("OTA:INVALID_DIGEST");return;
+   }
+   esp_fill_random(nonce,sizeof(nonce));
+   bool started=otaReceiver.begin(length,digest,secret,nonce,!otaBusy());
+   memset(secret,0,sizeof(secret));
+   if(!started){lanClient.println("OTA:BEGIN_REFUSED");return;}
+   lanClient.println("OTA:READY:"+lanEncode(nonce,sizeof(nonce)));
+   return;
+  }
+  if(line.startsWith("OTA_DATA ")){
+   if(otaBusy() || !otaReceiver.append(line,true)){
+    otaReceiver.cancel();lanClient.println("OTA:DATA_REJECTED");return;
+   }
+   lanClient.printf("OTA:ACK:%lu\n",(unsigned long)otaReceiver.progress());
+   return;
+  }
+  if(line=="OTA_FINISH"){
+   if(otaBusy() || !otaReceiver.finish(true)){
+    otaReceiver.cancel();lanClient.println("OTA:VERIFY_FAILED");return;
+   }
+   lanClient.println("OTA:VERIFIED_NO_BOOT_SWITCH");return;
+  }
+#else
+  lanClient.println("OTA:DISABLED");return;
+#endif
+ }
+
+ if(line=="OTA_CAPS"){
+  // Read-only inventory after HMAC authentication; never writes flash.
+  const KittyOTASafety::Status ota=KittyOTASafety::inspect();
+  const bool busy=otaBusy() || otaReceiver.active();
+  lanClient.printf("OTA:FW:%s\n",S3_FW_VERSION);
+  lanClient.printf("OTA:RUNNING_SIZE:%lu\n",(unsigned long)ota.runningBytes);
+  lanClient.printf("OTA:NEXT_SIZE:%lu\n",(unsigned long)ota.nextBytes);
+  lanClient.printf("OTA:RUNNING_SUBTYPE:%u\n",(unsigned)ota.runningSubtype);
+  lanClient.printf("OTA:BUSY:%u\n",busy?1:0);
+  lanClient.println("OTA:DEPLOY_SUPPORTED:0");
+  return;
+ }
+ if(line=="OTA_STATUS"){
+  const KittyOTASafety::Status ota=KittyOTASafety::inspect();
+  lanClient.printf("OTA:IMAGE_STATE:%u\n",(unsigned)ota.imageState);
+  lanClient.printf("OTA:ROLLBACK_PENDING:%u\n",ota.rollbackPending?1:0);
+  lanClient.printf("OTA:ROLLBACK_SUPPORTED:%u\n",ota.rollbackSupported?1:0);
+  lanClient.printf("OTA:TRANSFER_ENABLED:%u\n",(unsigned)KITTY_V6_ENABLE_OTA_TRANSPORT);
   return;
  }
  if(line=="STATUS"){
@@ -1078,6 +1340,7 @@ static void handleBrainLANLine(const String &line){
  acceptCommand(command);
 }
 static void pollBrainLAN(){
+ otaReceiver.tick();
  if(!brainWiFiOnline()||lanSecret.length()!=64){
   if(lanListening||lanClient||brainMDNS)stopBrainLAN();
   return;
@@ -1100,6 +1363,7 @@ static void pollBrainLAN(){
    if((theirIP[j]&mask[j])!=(ourIP[j]&mask[j]))sameSubnet=false;
   if(!sameSubnet||lanAwaitingCommand){incoming.stop();}
   else{
+   otaReceiver.cancel();
    if(lanClient)lanClient.stop();
    lanClient=incoming;lanAuthenticated=false;
    lanLineLen=0;lanLastActivity=millis();
@@ -1111,6 +1375,7 @@ static void pollBrainLAN(){
  if(!lanClient)return;
  if(!lanClient.connected()||(uint32_t)(millis()-lanLastActivity)>45000UL){
   if(lanAwaitingCommand)cancelCommand("LAN_CLIENT_LOST");
+  otaReceiver.cancel();
   lanClient.stop();lanAuthenticated=false;lanNonce="";
   lanAwaitingCommand=false;lanLineLen=0;return;
  }
@@ -1139,6 +1404,14 @@ void setup(){
   (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
  Serial.printf("[S3] CuteDisplay Brain FW=%s\n",S3_FW_VERSION);
+ const esp_partition_t *runningApp=esp_ota_get_running_partition();
+ const esp_partition_t *bootApp=esp_ota_get_boot_partition();
+ Serial.printf("[S3 BOOT PARTITION] running=%s offset=0x%08lx selected=%s offset=0x%08lx build=kitty-v6-partition-diag-20261031\\n",
+  runningApp?runningApp->label:"unknown",
+  runningApp?(unsigned long)runningApp->address:0UL,
+  bootApp?bootApp->label:"unknown",
+  bootApp?(unsigned long)bootApp->address:0UL);
+
 #if defined(CONFIG_NIMBLE_ENABLED)
  Serial.println("[S3] BLE host=NimBLE");
 #elif defined(CONFIG_BLUEDROID_ENABLED)
@@ -1151,6 +1424,21 @@ void setup(){
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
  BrainAI::init();
  KittyMemory::init();
+ KittyMemorySyncV6::init([]()->bool {
+  // The low-priority sync task uses the existing SD worker and is safe to
+  // schedule during calls. Do not stall long conversations waiting for idle.
+  return !BrainC5OTA::updating();
+ });
+ KittyMemorySyncV6::setCallActive([]()->bool {
+  return BrainRealtimeDirect::active() || BrainRealtimeAudio::active() ||
+         BrainAI::busy || BrainVoiceSTT::running || BrainTTS::running;
+ });
+ KittyMemorySyncV6::setSpeechActive([]()->bool {
+  // Still synchronize in CALL_LISTENING, but pause transport during playback.
+  return BrainRealtimeDirect::state=="CALL_SPEAKING" ||
+         BrainRealtimeDirect::state=="CALL_THINKING" ||
+         BrainTTS::running;
+ });
  BrainRealtimeDirect::init();
  BrainTTS::init();
  BrainVoiceSTT::init();
@@ -1164,6 +1452,7 @@ void setup(){
   Serial.println("[S3] ERROR: unable to allocate command/telemetry queues");
   return;
  }
+#if !KITTY_C5_BLE_MIGRATION_ENABLED
  BLEDevice::init(BRAIN_NAME);
  BLEDevice::setMTU(185);
  BLESecurity *security=new BLESecurity();
@@ -1224,6 +1513,9 @@ void setup(){
  ad->setScanResponse(true);
  BLEDevice::startAdvertising();
  Serial.println("[S3] Encrypted FFF1 writes; relay activates automatically once BLE pairs");
+#else
+ Serial.println("[S3] Phone Bluetooth delegated to C5; S3 BLE not initialized");
+#endif
  // Start BLE before WiFi (avoids radio/heap fragmentation during BLE init).
  WiFi.onEvent(onBrainWiFiEvent);
  initBrainLANSecret();
@@ -1232,12 +1524,16 @@ void setup(){
  else WiFi.mode(WIFI_OFF);
 }
 void loop(){
+ pollOTAStageUI();
  static bool bootChirpDone=false;
  if(!bootChirpDone && millis()>4500 && !BrainAudioTest::running && !BrainC5OTA::updating() && !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active()){
   bootChirpDone=true;
   BrainAudioTest::beep(false);
  }
+ // Never start C5 OTA while a phone command or secured phone session is live.
+ // The C5 BLE host must survive until commands have completed, not mid-write.
  BrainC5OTA::permitUpdate=!activeSeq && !lanAwaitingCommand &&
+    !c5AppSession && !c5AppCommandPending &&
     !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active() &&
     incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
@@ -1358,6 +1654,7 @@ void loop(){
  BrainClock::tick(brainWiFiOnline());
  BrainClock::sendDisplay(Serial1,faceOnline && !BrainC5OTA::updating() && !BrainAI::pending && !activeSeq);
  pollBrainLAN();
+#if !KITTY_C5_BLE_MIGRATION_ENABLED
  if(connectPending){
   connectPending=false;clientConnected=true;
   bleAuthenticated=false;
@@ -1406,6 +1703,13 @@ void loop(){
    Serial.println("[S3] NimBLE 0x0508: unspecified peer SMP failure (bond compatibility test not yet verified).");
   }
  }
+#endif
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ if(c5AppCommandPending && (uint32_t)(millis()-c5AppSince)>4500UL){
+  KittyAppLink::sendReply(Serial1,c5AppSeq,"ERR:COMMAND_TIMEOUT");
+  c5AppCommandPending=false;
+ }
+#endif
  pollBLECommands();
  pollNetwork();
  delay(5);

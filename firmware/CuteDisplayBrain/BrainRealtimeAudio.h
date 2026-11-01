@@ -35,7 +35,7 @@ static Buffers *work=nullptr;
 static QueueHandle_t micQueue=nullptr;
 static StaticQueue_t micQueueControl;
 static uint8_t *micQueueStorage=nullptr;
-static constexpr UBaseType_t MIC_FRAMES=16;
+static constexpr UBaseType_t MIC_FRAMES=48; // 960 ms PSRAM queue tolerates short Wi-Fi/TLS stalls
 static int16_t *speakerRing=nullptr;
 static size_t speakerCapacity=0, speakerRead=0, speakerWrite=0, speakerCount=0;
 static portMUX_TYPE speakerMux=portMUX_INITIALIZER_UNLOCKED;
@@ -119,6 +119,7 @@ inline void clearSpeaker(){
  portEXIT_CRITICAL(&speakerMux);
  remoteReply=false;
 }
+inline UBaseType_t queuedMicFrames(){return micQueue?uxQueueMessagesWaiting(micQueue):0;}
 inline bool takeMic(Frame &f){
  return micQueue && xQueueReceive(micQueue,&f,0)==pdTRUE;
 }

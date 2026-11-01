@@ -25,4 +25,7 @@
 // v33: SD card formatting, ready, and error popups during Kitty calls.
 // v34: SD usage percentage, used KB/MB and capacity on right-button info card.
 // v35: transient FACT MEMORIZED toast next to Call Mode status (3.5s).
-static constexpr uint32_t C5_FIRMWARE_VERSION = 35;
+// v36: full-screen scrolling conversation text, including preceding turn.
+// v37: C5-hosted iPhone BLE with S3 UART command relay (pending CI/hardware validation).
+// v38: keep expressive Kitty face visible behind compact call caption overlay.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 38;

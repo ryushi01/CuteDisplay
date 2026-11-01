@@ -3,7 +3,7 @@
 # Runs on macOS or a GitHub Actions Linux runner; never flashes a USB device.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$ROOT/release"
+OUT="${KITTY_RELEASE_OUT:-$ROOT/release}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 C5_FQBN="esp32:esp32:esp32c5:FlashSize=16M,PSRAM=enabled,PartitionScheme=custom"
@@ -12,7 +12,7 @@ if ! [[ "$VERSION" =~ ^[0-9]+$ ]] || [ "$VERSION" -lt 2 ]; then
   echo "Invalid C5 firmware version. Set C5_FIRMWARE_VERSION to 2 or higher." >&2; exit 1
 fi
 echo "Packaging C5 firmware version $VERSION"
-S3_FQBN="esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=custom"
+S3_FQBN="esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=custom,CDCOnBoot=cdc,LoopCore=1,EventsCore=0,CPUFreq=240"
 
 for program in arduino-cli git python3; do
   command -v "$program" >/dev/null || { echo "Missing $program" >&2; exit 1; }
@@ -32,13 +32,16 @@ if [ -z "$PARTITIONS" ]; then
   echo "Cannot find Arduino-ESP32 3.3.12 default_16MB.csv; install the board core." >&2
   exit 1
 fi
-echo "[1/7] Fetch official LILYGO C5 board/AXP2602/ST7789 drivers"
+echo "[1/5] Fetch official LILYGO C5 board/AXP2602/ST7789 drivers"
 git clone --quiet --depth 1 --filter=blob:none --sparse \
   https://github.com/Xinyuan-LilyGO/T-Display-C5.git "$WORK/vendor"
 git -C "$WORK/vendor" sparse-checkout set include lib/AXP2602 lib/esp_lcd_st7789
 
 # Arduino requires the main lcd.ino sketch in a folder called lcd.
-rm -rf "$OUT"
+if [ -e "$OUT" ]; then
+  echo "Release output already exists; refusing to overwrite: $OUT" >&2
+  exit 1
+fi
 mkdir -p "$WORK/lcd" "$OUT"
 cp -R "$ROOT/firmware/CuteDisplay/." "$WORK/lcd/"
 cp "$PARTITIONS" "$WORK/lcd/partitions.csv"
@@ -77,6 +80,18 @@ echo "PASS: automatic C5 OTA allowed only when version is newer and devices are 
 echo "[3/5] Embed C5 v$VERSION in S3 firmware"
 mkdir -p "$WORK/CuteDisplayBrain"
 cp -R "$ROOT/firmware/CuteDisplayBrain/." "$WORK/CuteDisplayBrain/"
+# Local private sync credentials must never appear in GitHub Actions artifacts.
+# This option is intended only for a trusted offline/local build machine.
+if [ -n "${KITTY_SYNC_PRIVATE_HEADER:-}" ]; then
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    echo "Refusing private credential injection in public CI" >&2; exit 1
+  fi
+  test -f "$KITTY_SYNC_PRIVATE_HEADER" || {
+    echo "Missing private sync configuration header" >&2; exit 1;
+  }
+  cp "$KITTY_SYNC_PRIVATE_HEADER" "$WORK/CuteDisplayBrain/KittySyncPrivateConfig.h"
+  chmod 600 "$WORK/CuteDisplayBrain/KittySyncPrivateConfig.h"
+fi
 cp "$PARTITIONS" "$WORK/CuteDisplayBrain/partitions.csv"
 python3 "$ROOT/tools/package_c5_firmware.py" \
   --bin "$WORK/build-c5/lcd.ino.bin" --version "$VERSION" \
@@ -94,6 +109,8 @@ arduino-cli compile --clean --fqbn "$S3_FQBN" \
 test -s "$WORK/build-s3/CuteDisplayBrain.ino.bin"
 mkdir -p "$OUT/CuteDisplayBrain"
 cp -R "$WORK/CuteDisplayBrain/." "$OUT/CuteDisplayBrain/"
+# Never distribute the plaintext header alongside the release sources.
+rm -f "$OUT/CuteDisplayBrain/KittySyncPrivateConfig.h"
 cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
   "$OUT/CuteDisplay-CombinedFirmware.bin"
 cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
@@ -109,7 +126,9 @@ Preserve the previous tested S3+C5 v22 archive for recovery.
 NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
 1. Open CuteDisplayBrain/CuteDisplayBrain.ino FROM THIS ARTIFACT.
 2. Choose ESP32S3 Dev Module, 16 MB flash, OPI PSRAM, Custom
-   partition scheme (included partitions.csv); select S3 USB port.
+   partition scheme (included partitions.csv), USB CDC On Boot Enabled,
+   Arduino Runs On Core 1, Events Run On Core 0, CPU 240 MHz;
+   select S3 USB port.
 3. BEFORE clicking Arduino IDE Verify or Upload, open Library Manager
    and install both exact libraries:
    - WebSockets by Markus Sattler (Links2004), version 2.7.2
