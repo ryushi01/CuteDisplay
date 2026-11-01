@@ -742,6 +742,12 @@ static void pollFace(){
  }
 }
 static void pollNetwork(){
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ // C5 sends its own BLE notifications; S3 has no GATT characteristic.
+ // Do not retain unconsumed network telemetry in a RAM queue.
+ if(networkQueue && uxQueueMessagesWaiting(networkQueue))xQueueReset(networkQueue);
+ return;
+#endif
  if(!clientConnected||!bleAuthenticated||!networkQueue||!networkChar)return;
  if((uint32_t)(millis()-lastNetSent)<50UL)return;
  char item[97]={};
