@@ -14,6 +14,7 @@ static uint32_t lastAttempt=0;
 static String pending;
 static bool pendingSummary=false;
 static bool pendingSummaryOwnerVerified=false;
+static uint32_t pendingSummaryConversation=0;
 // No more than one inference at once. Model is shared with live conversation.
 inline void tick(bool busy){
  uint32_t now=millis();
@@ -24,7 +25,7 @@ inline void tick(bool busy){
     (uint32_t)(now-lastAttempt)<RETRY_GAP_MS)return;
  if(pending.isEmpty()){
   // Summaries only run after conversational work is idle, never during calls.
-  pendingSummary=KittyMemory::takeSummaryCandidate(pending,pendingSummaryOwnerVerified);
+  pendingSummary=KittyMemory::takeSummaryCandidate(pending,pendingSummaryOwnerVerified,pendingSummaryConversation);
   if(!pendingSummary && !KittyMemory::takeConsolidationCandidate(pending))return;
  }
  lastAttempt=now;abortRequested=false;
@@ -34,7 +35,8 @@ inline void tick(bool busy){
    String utterance=pending;pending="";
    bool summarize=pendingSummary;pendingSummary=false;
    bool summaryOwnerVerified=pendingSummaryOwnerVerified;
-   pendingSummaryOwnerVerified=false;
+   uint32_t summaryConversation=pendingSummaryConversation;
+   pendingSummaryOwnerVerified=false;pendingSummaryConversation=0;
    auto finish=[](){running=false;worker=nullptr;vTaskDelete(nullptr);};
    if(abortRequested || interactive || utterance.length()<12){finish();return;}
    String l=utterance;l.toLowerCase();
@@ -127,7 +129,7 @@ inline void tick(bool busy){
         cJSON *sentence=cJSON_GetObjectItem(parsed,"summary");
         if(cJSON_IsString(sentence) && sentence->valuestring &&
            !abortRequested && !interactive)
-          (void)KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified);
+          (void)KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified,summaryConversation);
        }
        cJSON *facts=cJSON_GetObjectItem(parsed,"facts");
        if(cJSON_IsArray(facts) && cJSON_GetArraySize(facts)<=3){
