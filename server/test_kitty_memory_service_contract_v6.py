@@ -5,6 +5,7 @@ Runs in-process with a disposable test cache. No S3, Docker, or real listener.
 import io
 import json
 import os
+import queue
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,6 +34,19 @@ class ServiceContextContract(unittest.TestCase):
         with patch.object(service, "TOKEN", "test-token"):
             service.Handler.do_POST(req)
         return req.response
+
+    def test_refresh_notifications_are_opt_in_and_coalesced(self):
+        q = queue.Queue(maxsize=1)
+        with patch.object(service, "SEMANTIC_REFRESH_Q", q):
+            with patch.dict(os.environ, {"KITTY_SEMANTIC_AUTO_REFRESH": "0"}):
+                service.queue_semantic_refresh("first")
+                self.assertTrue(q.empty())
+            with patch.dict(os.environ, {"KITTY_SEMANTIC_AUTO_REFRESH": "1"}):
+                service.queue_semantic_refresh("first")
+                service.queue_semantic_refresh("second")
+                self.assertEqual(q.qsize(), 1)
+                self.assertEqual(q.get_nowait(), "first")
+        self.assertGreaterEqual(service.SEMANTIC_REFRESH_QUIET_SECONDS, 60)
 
     def test_unknown_speaker_refused_before_search(self):
         with tempfile.TemporaryDirectory() as temp:
