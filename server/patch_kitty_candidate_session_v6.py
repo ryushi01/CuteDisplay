@@ -18,7 +18,7 @@ READY_INSERT = """            _kitty_base_instructions = (
             )
 """
 CALLBACK = """        # KITTY_CANDIDATE_SESSION_CALLBACK_V6
-        _kitty_base_instructions = ''
+        _kitty_base_instructions = ((event.get('session') or {}).get('instructions') or '')
         _kitty_candidate_active = False
 
         async def kitty_candidate_hint(item_id, speaker_id):
@@ -66,11 +66,10 @@ def patch(src):
         raise ValueError('Gateway anchors not unique; no changes made')
     src = src.replace('        async def kitty_speaker_sink(event):', CALLBACK + '        async def kitty_speaker_sink(event):', 1)
     src = src.replace(ANCHOR,
-        "                kitty_speaker_observer = KittySpeakerObserver(\\n"
-        "                    kitty_speaker_sink, enabled=True,\\n"
-        "                    on_candidate=kitty_candidate_hint,\\n"
+        "                kitty_speaker_observer = KittySpeakerObserver(\n"
+        "                    kitty_speaker_sink, enabled=True,\n"
+        "                    on_candidate=kitty_candidate_hint,\n"
         "                    on_candidate_clear=kitty_candidate_clear)", 1)
-    src = src.replace(READY, READY_INSERT + READY, 1)
     ast.parse(src)
     return src
 
