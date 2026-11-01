@@ -262,6 +262,14 @@ def main():
         if not os.environ.get("KITTY_SD_SNAPSHOT_ROOT") or not os.environ.get("KITTY_SEMANTIC_DB"):
             raise SystemExit("Auto refresh requires KITTY_SD_SNAPSHOT_ROOT and KITTY_SEMANTIC_DB")
         threading.Thread(target=semantic_refresh_worker,daemon=True).start()
+    # Preload optional diagnostics off-thread; never delay HTTP startup or
+    # authorize memories based on shadow scores.
+    if os.environ.get("KITTY_XVECTOR_SHADOW_ENABLED") == "1":
+        try:
+            from kitty_xvector_shadow_worker_v6 import warm_async
+            warm_async()
+        except (ImportError, OSError, RuntimeError) as exc:
+            print("[KITTY_XVECTOR_SHADOW] startup_error=%s" % type(exc).__name__, flush=True)
     print("Kitty Memory storage ready",args.host,args.port,flush=True)
     ThreadingHTTPServer((args.host,args.port),Handler).serve_forever()
 if __name__=="__main__":main()
