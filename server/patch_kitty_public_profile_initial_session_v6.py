@@ -8,6 +8,7 @@ import argparse
 import ast
 import shutil
 import re
+import textwrap
 from pathlib import Path
 
 MARKER = "# KITTY_INITIAL_PUBLIC_PROFILE_V6"
@@ -63,7 +64,7 @@ def patch(src):
         raise ValueError("Initial session update not uniquely located; unchanged")
     indent = update.group("indent")
     block = "".join(indent + line + "\n" if line else "\n"
-                    for line in INSERT.strip("\n").splitlines())
+                    for line in textwrap.dedent(INSERT).strip("\n").splitlines())
     src = src[:update.start()] + block + src[update.start():]
     # Match fresh expression after insertion; insert immediately after it.
     expression = re.search(
