@@ -28,6 +28,7 @@
 // Do not include the ESP-IDF-internal esp_gatt_defs.h directly.
 #include "BrainPinPlan.h"
 #include "CuteLink.h"
+#include "KittyAppLink.h"
 #include "BrainC5OTA.h"
 #include "KittyOTASafety.h"
 #include "KittyOTAWriter.h"
@@ -42,6 +43,15 @@
 #include "KittyMemorySyncV6.h"
 #include "KittyHTTPSOTA.h"
 
+// Complete migration must be enabled on both boards in the same release.
+#ifndef KITTY_C5_BLE_MIGRATION_ENABLED
+#define KITTY_C5_BLE_MIGRATION_ENABLED 0
+#endif
+static bool c5AppSession=false;
+static bool c5AppCommandPending=false;
+static uint16_t c5AppSeq=0;
+static uint32_t c5AppSince=0;
+static void networkInfo(const String &field);
 static constexpr char BRAIN_NAME[]="CuteDisplay-Brain-DEV";
 static constexpr char S3_FW_VERSION[]="CallFace-v23-dev";
 static constexpr size_t MAX_CMD=96;
@@ -162,6 +172,17 @@ static void showC5UpdateStatus(const String &value){
  Serial.printf("[S3 OTA UI] %s\\n",value.c_str());
 }
 static void proxyResult(const String &value){
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ if(c5AppSession && faceOnline && !BrainC5OTA::updating()){
+  if(c5AppCommandPending){
+   if(KittyAppLink::sendReply(Serial1,c5AppSeq,value)) c5AppCommandPending=false;
+  }else{
+   String coded;
+   if(KittyAppLink::encode(value,coded,KittyAppLink::MAX_EVENT)) sendLink("APP_EVENT",coded);
+  }
+ }
+ return;
+#endif
  if(lanAwaitingCommand &&
     (value.startsWith("ACK:CMD")||value.startsWith("ERR:"))){
   if(lanClient && lanAuthenticated)
@@ -237,6 +258,13 @@ static void reportPower(const String &v){
  }
 }
 static void pushNetwork(const String &v){
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ if(c5AppSession && faceOnline && !BrainC5OTA::updating()){
+  String coded;
+  if(KittyAppLink::encode(v,coded,KittyAppLink::MAX_EVENT)) sendLink("APP_EVENT",coded);
+ }
+ return;
+#endif
  // Wi-Fi events can occur before a paired phone exists. Retain only the
  // last failure locally; do not overflow a queue no phone is draining.
  if(!networkQueue||!clientConnected||!bleAuthenticated||v.length()>96)return;
@@ -257,6 +285,32 @@ static void processFace(const CuteLink::Frame &f){
   BrainC5OTA::onConnected(Serial1);
  }
  faceOnline=true;
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ if(f.type=="APP_SESSION"){
+  if(f.payload=="ON"){
+   c5AppSession=true;clientConnected=true;bleAuthenticated=true;proxyEnabled=true;
+   c5AppCommandPending=false;
+   networkInfo("LINK");networkInfo("STATE");networkInfo("IP");networkInfo("KEY");
+  }else if(f.payload=="OFF"){
+   c5AppSession=false;clientConnected=false;bleAuthenticated=false;
+   proxyEnabled=false;c5AppCommandPending=false;
+  }
+  return;
+ }
+ if(f.type=="APP_CMD"){
+  String command;
+  if(!c5AppSession || !KittyAppLink::readCommand(f,command) ||
+     !incomingCommands || c5AppCommandPending || BrainC5OTA::updating()){
+    KittyAppLink::sendReply(Serial1,f.seq,"ERR:NOT_READY");return;
+  }
+  char item[MAX_CMD+1]={};
+  memcpy(item,command.c_str(),command.length());
+  if(xQueueSend(incomingCommands,item,0)!=pdTRUE){
+   KittyAppLink::sendReply(Serial1,f.seq,"ERR:QUEUE_FULL");return;
+  }
+  c5AppSeq=f.seq;c5AppCommandPending=true;c5AppSince=millis();return;
+ }
+#endif
  if(f.type.startsWith("OTA_")){
   BrainC5OTA::onFrame(Serial1,f);
   return;
@@ -1344,6 +1398,7 @@ void setup(){
   Serial.println("[S3] ERROR: unable to allocate command/telemetry queues");
   return;
  }
+#if !KITTY_C5_BLE_MIGRATION_ENABLED
  BLEDevice::init(BRAIN_NAME);
  BLEDevice::setMTU(185);
  BLESecurity *security=new BLESecurity();
@@ -1404,6 +1459,9 @@ void setup(){
  ad->setScanResponse(true);
  BLEDevice::startAdvertising();
  Serial.println("[S3] Encrypted FFF1 writes; relay activates automatically once BLE pairs");
+#else
+ Serial.println("[S3] Phone Bluetooth delegated to C5; S3 BLE not initialized");
+#endif
  // Start BLE before WiFi (avoids radio/heap fragmentation during BLE init).
  WiFi.onEvent(onBrainWiFiEvent);
  initBrainLANSecret();
@@ -1539,6 +1597,7 @@ void loop(){
  BrainClock::tick(brainWiFiOnline());
  BrainClock::sendDisplay(Serial1,faceOnline && !BrainC5OTA::updating() && !BrainAI::pending && !activeSeq);
  pollBrainLAN();
+#if !KITTY_C5_BLE_MIGRATION_ENABLED
  if(connectPending){
   connectPending=false;clientConnected=true;
   bleAuthenticated=false;
@@ -1587,6 +1646,13 @@ void loop(){
    Serial.println("[S3] NimBLE 0x0508: unspecified peer SMP failure (bond compatibility test not yet verified).");
   }
  }
+#endif
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ if(c5AppCommandPending && (uint32_t)(millis()-c5AppSince)>4500UL){
+  KittyAppLink::sendReply(Serial1,c5AppSeq,"ERR:COMMAND_TIMEOUT");
+  c5AppCommandPending=false;
+ }
+#endif
  pollBLECommands();
  pollNetwork();
  delay(5);
