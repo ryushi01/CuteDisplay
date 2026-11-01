@@ -82,6 +82,7 @@ inline void appendLiveKitty(const String &delta){
 }
 static size_t captionOffset=0;
 static bool captionReady=false;
+static String captionLastQueued;
 // Chunk long UTF-8 captions into the existing 80-byte UART channel.
 // '0' begins a new caption; '1' appends its continuation on the C5.
 inline bool takeCaption(String &out){
@@ -114,6 +115,8 @@ inline void queueCaption(const char *speaker,const char *words){
   while(begin<c.length() && ((uint8_t)c[begin]&0xC0)==0x80)begin++;
   c=c.substring(begin);
  }
+ if(c==captionLastQueued)return; // Provider repeats snapshots; no duplicate UI work.
+ captionLastQueued=c;
  if(captionReady){captionDeferred=c;return;}
  captionPending=c;captionOffset=0;captionReady=true;
 }
@@ -470,7 +473,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   lastPing=millis();
  }else if(strcmp(type,"response.created")==0){
   remoteResponse=true;streamedSpeech=false;expressionIdleSince=0;
-  liveKittyCaption="";captionLastSent=0;
+  liveKittyCaption="";captionLastSent=0;captionLastQueued="";
   playbackSpeechDetected=false;
   bargeCancelling=false;BrainRealtimeAudio::resetBarge();
   BrainRealtimeAudio::setRemoteReply(true);
