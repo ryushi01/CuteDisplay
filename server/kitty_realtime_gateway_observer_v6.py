@@ -96,8 +96,8 @@ class KittySpeakerObserver:
                 return
             event = {"type": "kitty.speaker.result", "item_id": item,
                      "speaker_id": "unknown", "confidence": "unknown"}
-        # Candidate metadata stays server-side. Never send candidate identity to
-        # the S3 or allow it to authorize person-scoped memory.
+        # Candidate may travel to S3 as non-authorizing attribution metadata.
+        # Never replace the authorized speaker_id with a voice candidate.
         if candidate == "person:shana":
             self.candidate_hint = (item, candidate)
             self.candidate_expires = time.monotonic() + 20.0
@@ -113,6 +113,9 @@ class KittySpeakerObserver:
             "speaker_id": event.get("speaker_id", "unknown"),
             "confidence": event.get("confidence", "unknown"),
         }
+        if candidate == "person:shana" and sid == "unknown":
+            safe_event["candidate_speaker_id"] = candidate
+            safe_event["candidate_provenance"] = "voice_probable"
         try:
             await self.send_to_s3(safe_event)
         except Exception as exc:
