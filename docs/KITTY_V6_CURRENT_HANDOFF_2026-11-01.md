@@ -114,3 +114,7 @@ The user reports successfully flashing the previous S3 firmware; this confirms f
 ## Hardware observation: idle summary timeout — 2026-11-01
 
 User hardware log after normal conversation: `awaiting=1 summary_queue=0 ai_pending=1 job_ack_offset=0` with `[MEMORY AI] skipped HTTP=-1 err=28679`. Espressif error 28679 (`0x7007`) means `ESP_ERR_HTTP_EAGAIN`, indicating timeout waiting for response; the idle worker used `cfg.timeout_ms=2500`. Source commit `ade44e97` increases **idle-only** summary HTTP timeout to 10000 ms; it does not touch realtime WebSocket/voice or C5. The in-flight durable job remains unacknowledged and eligible for retry. This patch requires S3 rebuild/flash and has not yet been compiled or hardware-tested. If still failing, check host availability, TLS and model latency; do not print API keys.
+
+## USB idle AI endpoint diagnostics — 2026-11-01
+
+Added `memory ai config` to the S3 physical USB console (commits `4e9f6100` / `ac549026`). It reads `brain-ai` Preferences and outputs whether settings can be read, URL scheme, redacted host:port (never path, query or URL credentials), model name and a boolean key-present flag. No actual API key is printed, and no configuration is modified. This does not affect realtime voice or TTS. The command is only available **after rebuilding and flashing S3**. Use it to diagnose idle memory summary HTTP error `28679` and distinguish a TLS/HTTPS misconfiguration from Mac-hosted model routing. The previously queued job remains in the SD journal; do not format SD or change C5.
