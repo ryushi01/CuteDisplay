@@ -942,6 +942,15 @@ static void consoleCommand(String cmd){
     (unsigned long)KittyMemorySyncV6::completed,
     (unsigned long)KittyMemorySyncV6::failures,
     KittyMemory::ready()?1:0,WiFi.status()==WL_CONNECTED?1:0);
+  Serial.printf("[MEMSYNC DIAG] eligible=%d realtime=%d audio=%d ai=%d stt=%d tts=%d ota=%d stage=%u file=%u http=%d bytes=%lu\\n",
+    KittyMemorySyncV6::allowed()?1:0,
+    BrainRealtimeDirect::active()?1:0,BrainRealtimeAudio::active()?1:0,
+    BrainAI::busy?1:0,BrainVoiceSTT::running?1:0,BrainTTS::running?1:0,
+    BrainC5OTA::updating()?1:0,
+    (unsigned)KittyMemorySyncV6::failureStage,
+    (unsigned)KittyMemorySyncV6::lastFileIndex,
+    (int)KittyMemorySyncV6::lastHttpStatus,
+    (unsigned long)KittyMemorySyncV6::bytesSent);
   return;
  }
  if(cmd=="memory status"){
