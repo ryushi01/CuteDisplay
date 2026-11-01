@@ -150,7 +150,7 @@ QueueHandle_t commandQueue = nullptr;
 AXP2602 axp;
 Preferences displayPrefs;
 #ifndef KITTY_C5_BLE_MIGRATION_ENABLED
-#define KITTY_C5_BLE_MIGRATION_ENABLED 0
+#define KITTY_C5_BLE_MIGRATION_ENABLED 1
 #endif
 static BLECharacteristic *appControlCharacteristic = nullptr;
 static volatile bool appEncryptedReadSeen = false;
