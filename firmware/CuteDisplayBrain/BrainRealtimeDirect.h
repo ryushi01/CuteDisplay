@@ -870,7 +870,7 @@ inline void init(){
  status("CALL_OFF");
 }
 inline bool toggle(bool audioBusy){
- if(requested){stop();return true;}
+ if(requested){stop("toggle");return true;}
  if(audioBusy){
   Serial.println("[CALL] PREFLIGHT REFUSED: AUDIO_BUSY");
   status("CALL_ERROR");return false;
