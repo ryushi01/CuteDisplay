@@ -109,6 +109,45 @@ static volatile uint32_t saved=0, failed=0;
 static String recent[8];
 static uint8_t recentCount=0,recentNext=0;
 static SemaphoreHandle_t cacheMutex=nullptr;
+static char sharedContextCache[641]={0};
+inline String shareableContext(){
+ if(!cacheMutex || xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(2))!=pdTRUE)return "";
+ String result(sharedContextCache);
+ xSemaphoreGive(cacheMutex);
+ return result;
+}
+// Only the dedicated SD worker reads the explicitly shared file.
+inline void refreshSharedContextOnSdWorker(){
+ String content;
+ File in=SD_MMC.open("/kitty/shareable_memories_v6.tsv",FILE_READ);
+ if(in){
+  if(in.size()<=65536){
+   while(in.available() && content.length()<580){
+    String row=in.readStringUntil('\n');
+    int first=row.indexOf('\t'),second=first<0?-1:row.indexOf('\t',first+1);
+    if(first<1 || second<=first || row.substring(first+1,second)!="shared")continue;
+    String id=row.substring(0,first),value=row.substring(second+1);
+    if(id.length()>64 || value.isEmpty() || value.length()>320)continue;
+    bool clean=true;
+    for(size_t i=0;i<id.length();i++){
+     char c=id[i];if(!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||
+     (c>='0'&&c<='9')||c=='_'||c=='-')){clean=false;break;}
+    }
+    for(size_t i=0;i<value.length();i++)
+     if((uint8_t)value[i]<32 || (uint8_t)value[i]==127){clean=false;break;}
+    if(!clean || content.length()+value.length()+2>640)continue;
+    if(!content.isEmpty())content+='\n';
+    content+=value;
+   }
+  }
+  in.close();
+ }
+ if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
+  content.toCharArray(sharedContextCache,sizeof(sharedContextCache));
+  xSemaphoreGive(cacheMutex);
+ }
+}
+
 
 // ASCII-safe UTF-8 truncation. Writes are bounded and never persist API keys.
 inline String clipUTF8(const String &s,size_t maxBytes){
@@ -1080,6 +1119,7 @@ inline void task(void*){
   Serial.printf("[MEMORY] SD mounted: total=%llu MB free~=%llu MB\n",
     (unsigned long long)(SD_MMC.totalBytes()/1048576ULL),
     (unsigned long long)((SD_MMC.totalBytes()-SD_MMC.usedBytes())/1048576ULL));
+  refreshSharedContextOnSdWorker();
   // Restore only the newest concise summary; the full history stays on SD.
   File summaryFile=SD_MMC.open("/kitty/summaries.tsv",FILE_READ);
   if(summaryFile){
@@ -1156,7 +1196,7 @@ inline void task(void*){
    if(out){
     size_t written=out.printf("%s\tshared\t%s\n",shared.id,shared.text);
     out.flush();out.close();
-    if(written>0)sharedRevision++;
+    if(written>0){sharedRevision++;refreshSharedContextOnSdWorker();}
    }
   }
   // Read only explicitly introduced, non-sensitive speaker claims.
