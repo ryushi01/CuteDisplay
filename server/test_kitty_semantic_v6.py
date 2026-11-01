@@ -38,11 +38,11 @@ class SemanticV6Tests(unittest.TestCase):
         self.assertEqual((first["indexed"],first["embedded"],first["reused"]),(2,2,0))
         second=v6.build(self.root/"sd",self.db,"fake-test")
         self.assertEqual((second["indexed"],second["embedded"],second["reused"]),(2,0,2))
-        self.assertEqual(len(v6.search(self.db,"cat",5,"fake-test")),2)
+        self.assertEqual(v6.search(self.db,"cat",5,"fake-test"),[])  # No attributed person, no disclosure
         self.data.write_text("pet\tmy cat\nnew\tnew cat\n",encoding="utf-8")
         third=v6.build(self.root/"sd",self.db,"fake-test")
         self.assertEqual((third["indexed"],third["embedded"],third["reused"]),(2,1,1))
-        hits=v6.search(self.db,"cat",5,"fake-test")
+        hits=v6.search(self.db,"cat",5,"fake-test",speaker_id="person:owner")
         self.assertTrue(all("plan" not in h["id"] for h in hits))
     def test_speaker_sidecar_and_legacy_are_distinct(self):
         archive=self.root/"sd"/"kitty"/"conversations.tsv"
@@ -53,18 +53,18 @@ class SemanticV6Tests(unittest.TestCase):
         sidecar.write_text(f"1761790000\t0\tremote_ai:chatgpt\tremote_ai\texplicit_introduction\n")
         v6.build(self.root/"sd",self.db,"fake-test")
         ai=v6.search(self.db,"cat",10,"fake-test",speaker_id="remote_ai:chatgpt")
-        self.assertEqual(len(ai),1)
-        self.assertEqual(ai[0]["speaker_role"],"remote_ai")
+        self.assertEqual(ai,[])  # Remote AI is not an enrolled human speaker
+        
         # No sidecar record => unknown, never inherited owner's identity.
         others=v6.search(self.db,"cat",10,"fake-test",speaker_id="unknown")
-        self.assertGreaterEqual(len(others),1)
+        self.assertEqual(others,[])  # Unknown attribution is not a searchable identity
         self.assertTrue(all(h["speaker_id"]=="unknown" for h in others))
         self.assertEqual(v6.search(self.db,"cat",10,"fake-test",speaker_id="person:owner"),[])
 
     def test_missing_and_empty_query(self):
         self.assertEqual(v6.search(self.db,"",5,"fake-test"),[])
         with self.assertRaises(FileNotFoundError):
-            v6.search(self.db,"cat",5,"fake-test")
+            v6.search(self.db,"cat",5,"fake-test",speaker_id="person:owner")
 
 if __name__=="__main__":
     unittest.main()
