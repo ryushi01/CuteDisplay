@@ -117,6 +117,23 @@ def identify(wav_b64):
     if not isinstance(wav_b64, str) or len(wav_b64) > 410000:
         raise ValueError("invalid_audio_size")
     raw = base64.b64decode(wav_b64, validate=True)
+    # Safe two-tier evaluation: report candidate separately, never grant memory.
+    # Avoids running slow ECAPA in addition to X-vector. HTTP caller ignores
+    # candidate fields, so the gateway continues to fail closed.
+    if os.environ.get("KITTY_XVECTOR_CANDIDATE_ONLY") == "1":
+        try:
+            from kitty_xvector_shadow_worker_v6 import recognize_candidate
+            guess = recognize_candidate(raw, threshold=0.965)
+            candidate = guess.get("speaker_id", "unknown")
+            print("[KITTY_XVECTOR_CANDIDATE] candidate=%s score=%s memory_authorization=disabled" %
+                  (candidate, guess.get("score")), flush=True)
+            return {"speaker_id":"unknown", "confidence":"unknown", "score":None,
+                    "candidate_speaker_id": candidate,
+                    "candidate_score":guess.get("score"),
+                    "candidate_only":True}
+        except Exception as exc:
+            print("[KITTY_XVECTOR_CANDIDATE] error=%s" % type(exc).__name__, flush=True)
+            return {"speaker_id":"unknown","confidence":"unknown","score":None}
     # Explicit experimental opt-in. This returns an identity used downstream for
     # speaker-scoped recall; enable only with acceptance of voice spoofing risk.
     if os.environ.get("KITTY_XVECTOR_EXPERIMENTAL_IDENTITY") == "1":
