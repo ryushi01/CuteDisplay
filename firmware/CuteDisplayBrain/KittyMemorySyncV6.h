@@ -217,7 +217,7 @@ inline void task(void*){
     completed++;
     syncedSaved=startSaved;syncedFacts=startFacts;syncedSummaries=startSummaries;
     lastSuccess=millis();lastFailure=0;
-    Serial.printf("[MEMSYNC] snapshot finalized call_posts=%lu speech_overlap=%lu max_post_ms=%lu changed=%lu\\n",
+    Serial.printf("[MEMSYNC] snapshot finalized call_posts=%lu speech_overlap=%lu max_post_ms=%lu changed=%lu\n",
       (unsigned long)inCallPosts,(unsigned long)speechOverlapPosts,
       (unsigned long)slowestPostMs,(unsigned long)changedDuringExport);
    }else{
