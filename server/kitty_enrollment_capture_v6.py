@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path("/run/kitty-semantic")
 MARKER = ROOT / "enrollment.enabled"
-OUTPUT = ROOT / "enrollment-samples"
+OUTPUT = Path("/app/backend/data/kitty-enrollment-samples")
 
 def capture(pcm24):
     if not MARKER.is_file() or MARKER.is_symlink():
@@ -35,10 +35,7 @@ def capture(pcm24):
         with os.fdopen(fd, "wb") as file:
             file.write(audio)
         print("[KITTY_ENROLL] captured_sample=%d" % index, flush=True)
-        if index == 3:
-            try:
-                MARKER.unlink()
-            except OSError:
-                pass
+        # Three existing filenames limit capture automatically.
+        # Marker remains on the read-only mount; operator removes it on host.
         return True
     return False
