@@ -36,7 +36,7 @@ jobs:
       - name: Compile optional server memory tools and run storage regression tests
         run: |
           python3 -m py_compile server/kitty_memory_service.py server/kitty_calendar.py server/kitty_sd_semantic_index.py server/patch_openwebui_memory_refresh.py
-          python3 -m unittest server.test_kitty_memory_service
+          python3 -m unittest server.test_kitty_memory_service server.test_kitty_memory_context_v6
           python3 server/test_patch_openwebui_memory_refresh.py
 
       - name: Set up Arduino CLI
