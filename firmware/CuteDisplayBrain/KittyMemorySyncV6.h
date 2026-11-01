@@ -30,15 +30,6 @@ static bool (*idleCheck)()=nullptr;
 static bool (*callActive)()=nullptr;
 static bool (*speechActive)()=nullptr;
 inline void setSpeechActive(bool (*check)()){speechActive=check;}
-inline bool pauseForSpeech(){
- // Pause *between* chunks, never from an audio thread. Avoid prolonged
- // network contention while Kitty is generating/playback speech.
- while(speechActive && speechActive()){
-  if(!allowed())return false;
-  vTaskDelay(pdMS_TO_TICKS(100));
- }
- return allowed();
-}
 inline void setCallActive(bool (*check)()){callActive=check;}
 static volatile uint32_t completed=0,failures=0;
 static volatile uint32_t bytesSent=0;
@@ -53,6 +44,15 @@ inline bool configured(){
 inline bool allowed(){
  return configured() && WiFi.status()==WL_CONNECTED &&
         KittyMemory::ready() && (!idleCheck || idleCheck());
+}
+inline bool pauseForSpeech(){
+ // Pause *between* chunks, never from an audio thread. Avoid prolonged
+ // network contention while Kitty is generating/playback speech.
+ while(speechActive && speechActive()){
+  if(!allowed())return false;
+  vTaskDelay(pdMS_TO_TICKS(100));
+ }
+ return allowed();
 }
 inline String encode(const uint8_t* data,size_t n){
  size_t capacity=4*((n+2)/3)+4;
