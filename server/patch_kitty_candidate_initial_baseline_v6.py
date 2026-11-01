@@ -20,8 +20,8 @@ def patch(src):
     if src.count(CALLBACK_BASE) != 1 or "on_candidate=kitty_candidate_hint" not in src:
         raise ValueError("Candidate callback not deployed as expected")
     # Restrict to the first initial session sent by the server. No client forwarding.
-    match = re.search(r"(?m)^(?P<indent> +)await upstream[.]send_json[(]\\s*\\{\\s*"
-                      r"['\x22]type['\x22]\\s*:\\s*['\x22]session[.]update['\x22]", src)
+    match = re.search(r"(?m)^(?P<indent> +)await upstream[.]send_json[(]\s*\{\s*"
+                      r"['\x22]type['\x22]\s*:\s*['\x22]session[.]update['\x22]", src)
     if not match:
         raise ValueError("Server-generated initial session.update not found")
     indent = match.group("indent")
