@@ -134,9 +134,12 @@ class KittySpeakerObserver:
                 or not isinstance(turn_id, str)
                 or not isinstance(speaker_id, str)
                 or self.epoch is None):
+            print("[KITTY_RECALL_DIAG] request=skipped reason=no_authorized_turn", flush=True)
             return None
         if not self.gate.allow_recall(self.epoch, turn_id, speaker_id):
+            print("[KITTY_RECALL_DIAG] request=skipped reason=turn_gate", flush=True)
             return None
+        print("[KITTY_RECALL_DIAG] request=accepted provenance=voice_probable", flush=True)
         return self.epoch
 
     def complete_recall(self, epoch, turn_id, speaker_id, context):
