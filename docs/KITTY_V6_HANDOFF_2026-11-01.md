@@ -52,3 +52,23 @@ Build with `KITTY_SYNC_PRIVATE_HEADER` and a NEW `KITTY_RELEASE_OUT`, run `bash 
 
 ## New chat starting instruction
 > Continue Kitty V6 on GitHub `ryushi01/CuteDisplay` branch `feature/kitty-semantic-v6-cpu`. Read `docs/KITTY_V6_HANDOFF_2026-11-01.md`. Preserve current voice, full-screen Kitty face, C5 v38, and TLS/private memory. User wants minimal command/test loops and responsive live conversations. Latest tests show 22 mic drops in a call and incomplete sync while archive is written. Fix consistent audio-first live sync and delayed per-turn probable-speaker attribution safely; then validate persisted semantic recall. Update GitHub and tests; distinguish code-only checks from real hardware validation.
+
+## Continuation update — 2026-11-01 (speaker queue source patch)
+
+Commits on this branch:
+- `a9e108ecada4e9de93e36a690e65585c43f71e74` — replace the single 1100 ms speaker pending slot with six item-ID-keyed pending turns and a five-second independent expiry. Late/out-of-order results can match their original turn rather than being forcibly flushed when a new transcript arrives. Expired and overflowed turns are archived as unknown/unverified unless the **same turn** contains a self-introduction claim. The code clears pending turns on stop, local failure and WebSocket disconnect; no firmware flash was performed.
+- `3d315f9c1721703a88175370189a2fb04c1d5865` — add `server/test_kitty_speaker_queue_contract_v6.py` with static safety and queue-contract checks.
+
+**Verification scope:** the updated GitHub source and test file were re-fetched successfully and checked against nine source invariants. No local Arduino toolchain or live Ubuntu container was accessible from this chat, so the new Python tests and Arduino compile have **not** been executed. The pre-existing two passing live-sync tests apply to the *previous* baseline, not these commits. No C5 change, no private config change, no Open WebUI protocol/session-update change. This is a source-only patch pending compilation and one combined real-world test.
+
+**Still open:** sync export file 4/5 failures during writes, in-call mic drops, provider receipt of public profile, complete semantic ingestion and private authorized recall. Do not claim resolved. Do not merge until compile/hardware validation and memory isolation review.
+
+One compact validation pass before deciding on a single S3-only flash:
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin feature/kitty-semantic-v6-cpu
+git switch --detach origin/feature/kitty-semantic-v6-cpu
+python3 -m unittest discover -s server -p 'test_kitty_*contract_v6.py' -v
+test -s ~/kitty-v6/private/kitty-sync-deployment/KittySyncPrivateConfig.h
+```
+Do not print the private header or include it in a commit. Build from this clean worktree and verify the S3 sketch before the single flash. C5 stays v38.
