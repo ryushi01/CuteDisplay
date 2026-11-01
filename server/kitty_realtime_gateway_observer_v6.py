@@ -19,6 +19,7 @@ class KittySpeakerObserver:
         self.enabled = enabled is True
         self.on_candidate = on_candidate
         self.on_candidate_clear = on_candidate_clear
+        self.candidate_hint = None
         self.url = url if url is not None else os.environ.get("KITTY_SEMANTIC_SERVICE_URL", "")
         self.token = token if token is not None else os.environ.get("KITTY_MEMORY_TOKEN", "")
         self.session = session or SpeakerSession()
@@ -54,6 +55,7 @@ class KittySpeakerObserver:
             self.gate.invalidate()
             self.pending_stopped_item = None
             self._active_item = None
+            self.candidate_hint = None
         elif kind == "input_audio_buffer.speech_stopped":
             item = event.get("item_id")
             self.session.speech_stopped(item_id=item if isinstance(item, str) else None)
@@ -91,6 +93,8 @@ class KittySpeakerObserver:
                      "speaker_id": "unknown", "confidence": "unknown"}
         # Candidate metadata stays server-side. Never send candidate identity to
         # the S3 or allow it to authorize person-scoped memory.
+        if candidate == "person:shana":
+            self.candidate_hint = (item, candidate)
         if candidate == "person:shana" and callable(self.on_candidate):
             try:
                 await self.on_candidate(item, candidate)
@@ -132,4 +136,5 @@ class KittySpeakerObserver:
 
     def close(self):
         self.gate.invalidate()
+        self.candidate_hint = None
         self.session.close()
