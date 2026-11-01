@@ -35,6 +35,7 @@ static QueueHandle_t consolidatedFacts=nullptr;
 struct SummaryCandidate {char turns[768]; uint8_t ownerVerified=0; uint32_t conversation=0;};
 struct SummaryResult {char text[256]; uint8_t ownerVerified=0; uint32_t conversation=0;};
 static QueueHandle_t summaryCandidates=nullptr, summaryResults=nullptr;
+static volatile uint32_t summaryBackpressure=0;
 static String latestSummary;
 static volatile uint32_t summaryRevision=0;
 static uint32_t latestSummaryAt=0;
@@ -1173,8 +1174,10 @@ inline void task(void*){
    batch.conversation=summaryBatchConversation;
    summaryBatch.toCharArray(batch.turns,sizeof(batch.turns));
    if(xQueueSend(summaryCandidates,&batch,0)!=pdTRUE){
-    SummaryCandidate old={};(void)xQueueReceive(summaryCandidates,&old,0);
-    (void)xQueueSend(summaryCandidates,&batch,0);
+    // Preserve the oldest queued context: it is needed for chronological
+    // conversation continuity. The complete turns remain archived on SD.
+    summaryBackpressure++;
+    Serial.println("[MEMORY V6] summary queue full; archived turns retained on SD");
    }
   }
   summaryBatch="";summaryTurnCount=0;summaryBatchConversation=0;
@@ -1532,8 +1535,8 @@ inline void init(){
  }
  if(!consolidatedFacts)consolidatedFacts=xQueueCreate(8,sizeof(ConsolidatedFact));
  if(!summaryCandidates){
-  summaryStorage=(uint8_t*)heap_caps_malloc(2*sizeof(SummaryCandidate),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  if(summaryStorage)summaryCandidates=xQueueCreateStatic(2,sizeof(SummaryCandidate),summaryStorage,&summaryQueueCtrl);
+  summaryStorage=(uint8_t*)heap_caps_malloc(8*sizeof(SummaryCandidate),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(summaryStorage)summaryCandidates=xQueueCreateStatic(8,sizeof(SummaryCandidate),summaryStorage,&summaryQueueCtrl);
  }
  if(!summaryResults)summaryResults=xQueueCreate(2,sizeof(SummaryResult));
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
