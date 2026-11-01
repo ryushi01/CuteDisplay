@@ -1185,8 +1185,8 @@ inline void task(void*){
    turns=sanitize(turns,740);
    File jobs=SD_MMC.open("/kitty/summary_jobs_v6.tsv",FILE_APPEND);
    if(jobs){
-    String line=String(summaryBatchOwnerVerified?1:0)+"\\t"+
-      String(summaryBatchConversation)+"\\t"+turns+"\\n";
+    String line=String(summaryBatchOwnerVerified?1:0)+"\t"+
+      String(summaryBatchConversation)+"\t"+turns+"\n";
     size_t written=jobs.print(line);
     jobs.close();
     if(written!=line.length()){
@@ -1315,15 +1315,15 @@ inline void task(void*){
      File f=SD_MMC.open(summary.ownerVerified?"/kitty/summaries.tsv":"/kitty/unverified_summaries_v6.tsv",FILE_APPEND);
      if(f){
       size_t written=summary.ownerVerified?
-       f.printf("%lu\\t%s\\n",(unsigned long)time(nullptr),item.c_str()):
-       f.printf("%lu\\t%lu\\t%s\\n",(unsigned long)time(nullptr),(unsigned long)summary.conversation,item.c_str());
+       f.printf("%lu\t%s\n",(unsigned long)time(nullptr),item.c_str()):
+       f.printf("%lu\t%lu\t%s\n",(unsigned long)time(nullptr),(unsigned long)summary.conversation,item.c_str());
       savedSummary=written>0;f.close();
      }
     }
     if(savedSummary){
      File ack=SD_MMC.open("/kitty/summary_jobs_ack_v6.tsv",FILE_APPEND);
      if(ack){
-      size_t written=ack.printf("%lu\\n",(unsigned long)summary.jobEnd);
+      size_t written=ack.printf("%lu\n",(unsigned long)summary.jobEnd);
       ack.close();
       if(written>0){
        summaryAckEnd=summary.jobEnd;summaryJobAwaiting=false;
