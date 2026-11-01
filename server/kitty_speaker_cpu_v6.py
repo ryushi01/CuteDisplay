@@ -117,6 +117,14 @@ def identify(wav_b64):
     if not isinstance(wav_b64, str) or len(wav_b64) > 410000:
         raise ValueError("invalid_audio_size")
     raw = base64.b64decode(wav_b64, validate=True)
+    # Explicit experimental opt-in. This returns an identity used downstream for
+    # speaker-scoped recall; enable only with acceptance of voice spoofing risk.
+    if os.environ.get("KITTY_XVECTOR_EXPERIMENTAL_IDENTITY") == "1":
+        try:
+            from kitty_xvector_shadow_worker_v6 import recognize_candidate
+            return recognize_candidate(raw)
+        except (ImportError, OSError, RuntimeError, ValueError):
+            return {"speaker_id":"unknown","confidence":"unknown","score":None}
     # Shadow diagnostics never affect the returned identity or block the
     # existing recognizer. Background work is bounded and explicitly opt-in.
     if os.environ.get("KITTY_XVECTOR_SHADOW_ENABLED") == "1":
