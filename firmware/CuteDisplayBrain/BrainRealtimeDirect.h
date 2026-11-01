@@ -330,6 +330,7 @@ inline void diagnose(bool audioBusy){
 inline void flushSpeakerTurns(bool all);
 inline void stop(){
  flushSpeakerTurns(true);
+ KittyMemory::endConversation();
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
  requested=false;ready=false;connected=false;started=false;
  clearSemanticTurn();waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
@@ -343,6 +344,7 @@ inline void stop(){
 }
 inline void fail(const char *why){
  flushSpeakerTurns(true);
+ KittyMemory::endConversation();
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
  const bool localAudio=(strcmp(why,"I2S_RUNTIME")==0 ||
    strcmp(why,"AUDIO_TASK_ALLOC")==0 ||
@@ -884,8 +886,10 @@ inline bool toggle(bool audioBusy){
   Serial.printf("[CALL] PREFLIGHT REFUSED: %s\n",reason);
   status("CALL_ERROR");return false;
  }
+ KittyMemory::beginConversation();
  requested=true;
  if(!reason && !connect()){
+  KittyMemory::endConversation();
   requested=false; // Permanent validation failure is OFF, not a hidden session.
   status("CALL_ERROR");
   return false;
@@ -917,7 +921,7 @@ inline void tick(bool audioBusy){
  if(!started){
   if(audioBusy)return; // Do not contend with legacy manual I2S.
   if(millis()-lastAttempt<RECONNECT_DELAY)return;
-  if(!connect()){requested=false;status("CALL_ERROR");}
+  if(!connect()){KittyMemory::endConversation();requested=false;status("CALL_ERROR");}
   return;
  }
  ws.loop();
