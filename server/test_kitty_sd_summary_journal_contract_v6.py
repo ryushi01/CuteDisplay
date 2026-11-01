@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""Source contract for the S3-only durable, private summary journal."""
+from pathlib import Path
+
+root = Path(__file__).resolve().parents[1]
+memory = (root / "firmware/CuteDisplayBrain/KittyMemory.h").read_text()
+worker = (root / "firmware/CuteDisplayBrain/BrainMemoryAI.h").read_text()
+realtime = (root / "firmware/CuteDisplayBrain/BrainRealtimeDirect.h").read_text()
+
+def check(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+check('SD_MMC.open("/kitty/summary_jobs_v6.tsv",FILE_APPEND)' in memory, "job journal")
+check('SD_MMC.open("/kitty/summary_jobs_ack_v6.tsv",FILE_READ)' in memory, "ack recovery")
+check('if(!jobs.seek(summaryAckEnd))' in memory, "cursor replay")
+check('if(xQueueSend(summaryCandidates,&batch,0)==pdTRUE)summaryJobAwaiting=true;' in memory, "in-flight guard")
+check('summaryAckEnd=summary.jobEnd;summaryJobAwaiting=false;' in memory, "ack after persistence")
+check('summaryJobAwaiting && summary.jobEnd>summaryAckEnd' in memory, "no stale ack")
+check('if(!e.ownerVerified){' in memory, "owner fact write gate")
+check('"/kitty/unverified_summaries_v6.tsv"' in memory, "unverified output isolation")
+check('if(summary.ownerVerified && !item.isEmpty() && cacheMutex' in memory, "owner context isolation")
+check('if(!summarize && cJSON_IsArray(facts)' in worker, "no summary-to-owner-facts promotion")
+check('pendingSummaryJobEnd' in worker, "job identity carried across inference")
+check('KittyMemory::endConversation();' in realtime, "call boundary")
+files = memory.split("static constexpr const char* EXPORT_NAMES[]=", 1)[1].split("};", 1)[0]
+check("summary_jobs_v6" not in files and "unverified_summaries_v6" not in files, "journals absent from public sync")
+
+# Ensure journal text includes actual delimiter escapes, not literal backslash sequences.
+journal = memory.split("auto submitSummaryBatch=", 1)[1].split("auto dispatchSummaryJob=", 1)[0]
+check('+"\\t"+' in journal and '+"\\n";' in journal, "actual TSV delimiter escapes")
+check('+"\\\\t"+' not in journal and '+"\\\\n";' not in journal, "double-escaped TSV delimiters")
+print("Kitty V6 SD summary journal source contract: OK")
