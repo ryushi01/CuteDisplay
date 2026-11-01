@@ -2,6 +2,7 @@
 """Patch the already deployed Kitty realtime gateway in place, without touching audio paths."""
 import argparse
 import ast
+import re
 from pathlib import Path
 
 def patch(source):
@@ -19,7 +20,7 @@ def patch(source):
             "            scoped = observer.complete_recall(epoch, turn_id, speaker_id, result)\n            if scoped:\n                await ws.send_json({",
         ),
         ("'context': result[:1800],", "'context': scoped[:640],"),
-        ("        kitty_server_verified_speaker_turn = False  # fail closed\n", ""),
+
         (
             "                    if not kitty_server_verified_speaker_turn:\n                        continue",
             "                    observer = kitty_speaker_observer\n                    if observer is None:\n                        continue\n                    epoch = observer.authorized_recall(turn_id, speaker_id, provenance)\n                    if epoch is None:\n                        continue",
@@ -34,6 +35,14 @@ def patch(source):
         if count != 1:
             raise ValueError(f"Source mismatch, expected one match, found {count}: {before[:64]!r}")
         source = source.replace(before, after, 1)
+    # Older deployments differ in indentation/comment spelling on this flag.
+    # The real enforcement is the exact observer authorization in the branch.
+    source = re.sub(
+        r"(?m)^[ \\t]*kitty_server_verified_speaker_turn[ \\t]*=[ \\t]*False[^\\n]*\\n",
+        "", source,
+    )
+    if "kitty_server_verified_speaker_turn" in source:
+        raise ValueError("Legacy memory flag remains; gateway not modified")
     ast.parse(source)
     return source
 
