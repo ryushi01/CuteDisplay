@@ -23,6 +23,16 @@ class LiveSyncContract(unittest.TestCase):
         self.assertIn("return saved!=KittyMemory::saved",code)
         self.assertIn("archiveChanged(savedBefore,factsBefore,summariesBefore)",code)
         self.assertIn("WiFiClientSecure client;client.setCACert",code)
+    def test_mic_jitter_queue_and_adaptive_catchup(self):
+        audio=(ROOT/"firmware/CuteDisplayBrain/BrainRealtimeAudio.h").read_text()
+        direct=(ROOT/"firmware/CuteDisplayBrain/BrainRealtimeDirect.h").read_text()
+        self.assertIn("MIC_FRAMES=48",audio)
+        self.assertIn("MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT",audio)
+        self.assertIn("queuedMicFrames()",audio)
+        self.assertIn("queuedMicFrames()>=8?4:2",direct)
+        self.assertIn("for(int n=0;n<micBudget;n++)",direct)
+        self.assertIn("BrainRealtimeAudio::takeMic(frame)",direct)
+        self.assertIn("ws.sendTXT(payload)",direct)
     def test_archive_revision_guard_and_audio_safe_diagnostics(self):
         sync=(ROOT/"firmware/CuteDisplayBrain/KittyMemorySyncV6.h").read_text()
         self.assertIn("ARCHIVE_QUIET_MS=3000UL",sync)
