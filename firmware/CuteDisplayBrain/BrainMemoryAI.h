@@ -15,6 +15,7 @@ static String pending;
 static bool pendingSummary=false;
 static bool pendingSummaryOwnerVerified=false;
 static uint32_t pendingSummaryConversation=0;
+static uint32_t pendingSummaryJobEnd=0;
 // No more than one inference at once. Model is shared with live conversation.
 inline void tick(bool busy){
  uint32_t now=millis();
@@ -25,7 +26,7 @@ inline void tick(bool busy){
     (uint32_t)(now-lastAttempt)<RETRY_GAP_MS)return;
  if(pending.isEmpty()){
   // Summaries only run after conversational work is idle, never during calls.
-  pendingSummary=KittyMemory::takeSummaryCandidate(pending,pendingSummaryOwnerVerified,pendingSummaryConversation);
+  pendingSummary=KittyMemory::takeSummaryCandidate(pending,pendingSummaryOwnerVerified,pendingSummaryConversation,pendingSummaryJobEnd);
   if(!pendingSummary && !KittyMemory::takeConsolidationCandidate(pending))return;
  }
  lastAttempt=now;abortRequested=false;
@@ -36,11 +37,12 @@ inline void tick(bool busy){
    bool summarize=pendingSummary;
    bool summaryOwnerVerified=pendingSummaryOwnerVerified;
    uint32_t summaryConversation=pendingSummaryConversation;
+   uint32_t summaryJobEnd=pendingSummaryJobEnd;
    // Keep the pending candidate until the model returns an accepted result.
    // Interrupted network/model work must be retried, not silently lost.
    auto finish=[](bool accepted=false){
     if(accepted){pending="";pendingSummary=false;
-     pendingSummaryOwnerVerified=false;pendingSummaryConversation=0;}
+     pendingSummaryOwnerVerified=false;pendingSummaryConversation=0;pendingSummaryJobEnd=0;}
     running=false;worker=nullptr;vTaskDelete(nullptr);
    };
    if(abortRequested || interactive){finish();return;}
@@ -136,8 +138,7 @@ inline void tick(bool busy){
         cJSON *sentence=cJSON_GetObjectItem(parsed,"summary");
         if(cJSON_IsString(sentence) && sentence->valuestring &&
            !abortRequested && !interactive)
-          accepted=String(sentence->valuestring).isEmpty() ||
-            KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified,summaryConversation);
+          accepted=KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified,summaryConversation,summaryJobEnd);
        }
        cJSON *facts=cJSON_GetObjectItem(parsed,"facts");
        if(!summarize && cJSON_IsArray(facts) && cJSON_GetArraySize(facts)<=3){
