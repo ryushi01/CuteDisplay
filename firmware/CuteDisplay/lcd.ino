@@ -155,6 +155,14 @@ Preferences displayPrefs;
 static BLECharacteristic *appControlCharacteristic = nullptr;
 static volatile bool appEncryptedReadSeen = false;
 static bool appBLEReady = false;
+static bool appCommandPending = false;
+static uint16_t appCommandSeq = 0;
+static uint32_t appCommandSent = 0;
+static void appNotify(const String &value) {
+ if(!bleConnected || !appBLEReady || !appControlCharacteristic) return;
+ appControlCharacteristic->setValue(value.c_str());
+ appControlCharacteristic->notify();
+}
 BLECharacteristic *batteryCharacteristic = nullptr;
 BLECharacteristic *powerCharacteristic = nullptr;
 bool lcdReady = false;
@@ -197,7 +205,13 @@ static bool brainRadioFresh(){
  return brainLinkConnected() && brainRadioSeen &&
         (uint32_t)(millis()-brainRadioSeen)<5500UL;
 }
-static bool displayBleConnected(){return brainRadioFresh() && brainBleClient;}
+static bool displayBleConnected(){
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ return bleConnected && appBLEReady;
+#else
+ return brainRadioFresh() && brainBleClient;
+#endif
+}
 static bool displayWiFiConnected(){return brainRadioFresh() && brainWifiConnected;}
 unsigned long nextNetworkTelemetry=0;
 bool wifiOnline();
@@ -2901,6 +2915,25 @@ static void serviceBrain() {
     Serial.printf("[C5 OTA] Post-boot app health confirmed: %d\n",(int)result);
    }
   }
+  if(f.type=="APP_REPLY"){
+   String response;
+   if(appCommandPending && f.seq==appCommandSeq &&
+      KittyAppLink::readReply(f,response)){
+     appCommandPending=false;
+     appNotify(response);
+   }
+   continue;
+  }
+  if(f.type=="APP_EVENT"){
+   String event;
+   if(KittyAppLink::decode(f.payload,event,KittyAppLink::MAX_EVENT)){
+     if(event.startsWith("N:") && networkCharacteristic && bleConnected && appBLEReady){
+       networkCharacteristic->setValue(event.c_str());
+       networkCharacteristic->notify();
+     }else appNotify(event);
+   }
+   continue;
+  }
   if(f.type.startsWith("OTA_")){
    C5UARTOTA::onFrame(Serial1,f);
    continue;
@@ -3135,6 +3168,9 @@ void loop(){
   appControlCharacteristic->setValue("PROXY_READY");
   appControlCharacteristic->notify();
  }
+ if(appCommandPending && (uint32_t)(millis()-appCommandSent)>4500UL){
+  appCommandPending=false;appNotify("ERR:UART_TIMEOUT");
+ }
  if(!brainLinkConnected() && appBLEReady){
   appBLEReady=false;
   appControlCharacteristic->setValue("PROXY_DISABLED");
@@ -3149,7 +3185,18 @@ void loop(){
  }
  char input[MAX_CMD+1]={0};
  for(int q=0;q<8&&commandQueue&&xQueueReceive(commandQueue,input,0)==pdTRUE;q++){
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+  if(appBLEReady){
+   if(appCommandPending){appNotify("ERR:BUSY");continue;}
+   appCommandSeq=++c5Seq;
+   if(!appCommandSeq)appCommandSeq=++c5Seq;
+   if(KittyAppLink::sendCommand(Serial1,appCommandSeq,String(input))){
+     appCommandPending=true;appCommandSent=millis();
+   }else appNotify("ERR:UART_SEND");
+  }else processCommand(String(input));
+#else
   processCommand(String(input));
+#endif
  }
  // Finish pending ordinary Wi-Fi shutdown.
  completeWiFiShutdown();
