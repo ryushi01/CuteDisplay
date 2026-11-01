@@ -3,7 +3,9 @@
 This does not identify the current speaker, grant memory access, or read the SD
 memory index. Caller must append it to the existing system instructions only.
 """
-import os\nimport json\nfrom pathlib import Path
+import os
+import json
+from pathlib import Path
 
 DEFAULT_NAME = "Shana"
 
