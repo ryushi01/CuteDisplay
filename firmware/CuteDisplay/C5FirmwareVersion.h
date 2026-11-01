@@ -26,4 +26,5 @@
 // v34: SD usage percentage, used KB/MB and capacity on right-button info card.
 // v35: transient FACT MEMORIZED toast next to Call Mode status (3.5s).
 // v36: full-screen scrolling conversation text, including preceding turn.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 36;
+// v37: C5-hosted iPhone BLE with S3 UART command relay (pending CI/hardware validation).
+static constexpr uint32_t C5_FIRMWARE_VERSION = 37;
