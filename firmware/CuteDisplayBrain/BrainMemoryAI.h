@@ -35,7 +35,7 @@ inline void tick(bool busy){
  }
  if(running || !operatorEnabled || pausedAfterHttpFailure || WiFi.status()!=WL_CONNECTED ||
     (uint32_t)(now-lastInteractiveAt)<IDLE_MS ||
-    (uint32_t)(now-lastAttempt)<RETRY_GAP_MS)return;
+    (lastAttempt && (uint32_t)(now-lastAttempt)<RETRY_GAP_MS))return;
  if(pending.isEmpty()){
   // Summaries only run after conversational work is idle, never during calls.
   pendingSummary=KittyMemory::takeSummaryCandidate(pending,pendingSummaryOwnerVerified,pendingSummaryConversation,pendingSummaryJobEnd);
