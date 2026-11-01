@@ -80,7 +80,22 @@ class KittySpeakerObserver:
                 return
             event = {"type": "kitty.speaker.result", "item_id": item,
                      "speaker_id": "unknown", "confidence": "unknown"}
-        await self.send_to_s3(event)
+        # Candidate metadata stays server-side. Never send candidate identity to
+        # the S3 or allow it to authorize person-scoped memory.
+        candidate = event.get("candidate_speaker_id")
+        if isinstance(candidate, str) and candidate.startswith("person:"):
+            print("[KITTY_CANDIDATE_CONTEXT] candidate_present=true memory_authorization=disabled", flush=True)
+        safe_event = {
+            "type": "kitty.speaker.result",
+            "item_id": item,
+            "speaker_id": event.get("speaker_id", "unknown"),
+            "confidence": event.get("confidence", "unknown"),
+        }
+        try:
+            await self.send_to_s3(safe_event)
+        except Exception as exc:
+            # Optional metadata delivery must never terminate the live call.
+            print("[KITTY_SPEAKER_DELIVERY] error=%s" % type(exc).__name__, flush=True)
 
     def authorized_recall(self, turn_id, speaker_id, provenance):
         """Return a turn token only for a matching CPU-observed voice identity.
