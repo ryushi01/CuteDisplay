@@ -41,6 +41,18 @@ class CrossCallRecallContract(unittest.TestCase):
         gate.invalidate()
         self.assertFalse(gate.allow_recall(epoch,"turn_one","person:shana"))
 
+    def test_recall_diagnostics_do_not_log_memory_or_identity(self):
+        source=(Path(__file__).resolve().parents[1] /
+                "server/kitty_realtime_gateway_observer_v6.py").read_text()
+        self.assertIn("request=skipped reason=no_authorized_turn", source)
+        self.assertIn("request=skipped reason=turn_gate", source)
+        self.assertIn("request=accepted provenance=voice_probable", source)
+        for line in source.splitlines():
+            if "[KITTY_RECALL_DIAG]" in line:
+                self.assertNotIn("speaker_id", line)
+                self.assertNotIn("query", line)
+                self.assertNotIn("context", line)
+
     def test_sd_remains_permanent_memory_authority(self):
         code=(Path(__file__).resolve().parents[1] /
               "server/kitty_memory_context_v6.py").read_text()
