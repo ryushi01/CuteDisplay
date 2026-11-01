@@ -125,16 +125,33 @@ def identify(wav_b64):
     for sid, profile in speakers.items():
         if not ID_PATTERN.fullmatch(sid) or not isinstance(profile, dict):
             continue
-        samples = profile.get("embeddings", [])
-        if len(samples) < 3:
+        # Legacy anchors remain immutable. Recent samples are an optional,
+        # separately verified cohort; never dilute the anchor median.
+        anchors = profile.get("anchor_embeddings", profile.get("embeddings", []))
+        if len(anchors) < 3:
             continue
+        cohorts = [anchors]
+        if profile.get("adaptive_embeddings"):
+            try:
+                from kitty_voice_adaptation_policy_v6 import prune_adaptive
+                from datetime import datetime, timezone
+                valid = prune_adaptive(profile["adaptive_embeddings"],
+                    now=datetime.now(timezone.utc).isoformat())
+                if len(valid) >= 3:
+                    cohorts.append([entry["embedding"] for entry in valid])
+            except (ImportError, KeyError, TypeError, ValueError):
+                pass
         try:
-            matches = [float(np.dot(vector, np.array(v, dtype="float64")))
-                       for v in samples if len(v) == len(vector)]
+            medians = []
+            for samples in cohorts:
+                matches = [float(np.dot(vector, np.array(v, dtype="float64")))
+                           for v in samples if len(v) == len(vector)]
+                if len(matches) >= 3:
+                    medians.append(float(np.median(matches)))
+            if medians:
+                scores.append((max(medians), sid))
         except (TypeError, ValueError):
             continue
-        if len(matches) >= 3:
-            scores.append((float(np.median(matches)), sid))
     scores.sort(reverse=True)
     best = scores[0] if scores else (0., "unknown")
     second = scores[1][0] if len(scores) > 1 else -1.
