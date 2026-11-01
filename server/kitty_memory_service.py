@@ -213,6 +213,21 @@ class Handler(BaseHTTPRequestHandler):
                 zone=str(data.get("timezone","Asia/Tokyo"))[:64]
                 now=datetime.now(ZoneInfo(zone))
                 return self._reply(200,interpret(str(data.get("text",""))[:300],now,zone))
+            if self.path=="/shared/context":
+                # Only finalized S3 snapshots, never live/unknown speaker archives.
+                root=os.environ.get("KITTY_SD_SNAPSHOT_ROOT","")
+                context=""
+                if root and os.path.isdir(root):
+                    from pathlib import Path
+                    from kitty_shareable_memory_v6 import shareable_context
+                    snapshots=sorted(
+                        (p for p in Path(root).glob("snapshot-*")
+                         if p.is_dir() and not p.is_symlink()
+                         and (p/"kitty"/"shareable_memories_v6.tsv").is_file()),
+                        key=lambda p: p.stat().st_mtime,reverse=True)
+                    if snapshots:
+                        context=shareable_context(snapshots[0],max_chars=520)
+                return self._reply(200,{"context":context[:640]})
             if self.path=="/semantic/context":
                 index=os.environ.get("KITTY_SEMANTIC_DB","")
                 if not index or not os.path.isfile(index):
