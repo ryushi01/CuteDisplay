@@ -57,6 +57,24 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(emitted), 1)
         obj.close()
 
+    async def test_server_observed_turn_only_and_one_shot_recall(self):
+        async def send(event):
+            return None
+        obj = KittySpeakerObserver(send, enabled=True, token="test")
+        epoch = obj.gate.begin("item_123")
+        obj.epoch = epoch
+        obj.gate.accept_speaker(epoch, "item_123", "person:camille", "probable")
+        self.assertIsNone(obj.authorized_recall("item_123", "person:camille", "explicit_introduction"))
+        self.assertIsNone(obj.authorized_recall("other", "person:camille", "voice_probable"))
+        self.assertIsNone(obj.authorized_recall("item_123", "person:aki", "voice_probable"))
+        token = obj.authorized_recall("item_123", "person:camille", "voice_probable")
+        self.assertEqual(token, epoch)
+        self.assertEqual(obj.complete_recall(token, "item_123", "person:camille", "private context"), "private context")
+        self.assertEqual(obj.complete_recall(token, "item_123", "person:camille", "duplicate"), "")
+        obj.gate.invalidate()
+        self.assertIsNone(obj.authorized_recall("item_123", "person:camille", "voice_probable"))
+        obj.close()
+
     async def test_disabled_by_default(self):
         emitted=[]
         async def send(ev): emitted.append(ev)
