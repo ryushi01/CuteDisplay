@@ -11,6 +11,9 @@ static volatile bool interactive=true;
 static constexpr uint32_t IDLE_MS=20000UL;
 static constexpr uint32_t RETRY_GAP_MS=10000UL;
 static uint32_t lastAttempt=0;
+// Circuit breaker: one failed idle HTTP request pauses inference until reboot.
+// Original summary jobs stay in the SD journal, with no new Mac requests.
+static volatile bool pausedAfterHttpFailure=false;
 static String pending;
 static bool pendingSummary=false;
 static bool pendingSummaryOwnerVerified=false;
@@ -21,7 +24,7 @@ inline void tick(bool busy){
  uint32_t now=millis();
  if(busy){interactive=true;lastInteractiveAt=now;abortRequested=true;return;}
  if(interactive){interactive=false;lastInteractiveAt=now;}
- if(running || WiFi.status()!=WL_CONNECTED ||
+ if(running || pausedAfterHttpFailure || WiFi.status()!=WL_CONNECTED ||
     (uint32_t)(now-lastInteractiveAt)<IDLE_MS ||
     (uint32_t)(now-lastAttempt)<RETRY_GAP_MS)return;
  if(pending.isEmpty()){
@@ -166,7 +169,10 @@ inline void tick(bool busy){
       }
      }
      if(outer)cJSON_Delete(outer);
-    }else if(!abortRequested)Serial.printf("[MEMORY AI] skipped HTTP=%d err=%d elapsed_ms=%lu connected=%d first_data=%d rx_bytes=%lu\\n",status,(int)rc,(unsigned long)elapsed,response.connected?1:0,response.firstDataAt?1:0,(unsigned long)response.bytes);
+    }else if(!abortRequested && !interactive){
+     pausedAfterHttpFailure=true;
+     Serial.printf("[MEMORY AI] skipped HTTP=%d err=%d elapsed_ms=%lu connected=%d first_data=%d rx_bytes=%lu; idle AI paused until reboot\\n",status,(int)rc,(unsigned long)elapsed,response.connected?1:0,response.firstDataAt?1:0,(unsigned long)response.bytes);
+    }
    }
    if(http)esp_http_client_cleanup(http);
    free(payload);
