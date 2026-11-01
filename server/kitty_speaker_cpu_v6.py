@@ -123,7 +123,7 @@ def identify(wav_b64):
     if os.environ.get("KITTY_XVECTOR_CANDIDATE_ONLY") == "1":
         try:
             from kitty_xvector_shadow_worker_v6 import recognize_candidate
-            guess = recognize_candidate(raw, threshold=0.965)
+            guess = recognize_candidate(raw, threshold=0.960, conversational_hint=True)
             candidate = guess.get("speaker_id", "unknown")
             print("[KITTY_XVECTOR_CANDIDATE] candidate=%s score=%s memory_authorization=disabled" %
                   (candidate, guess.get("score")), flush=True)
