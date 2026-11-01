@@ -20,10 +20,15 @@ READY_INSERT = """            _kitty_base_instructions = (
 CALLBACK = """        # KITTY_CANDIDATE_SESSION_CALLBACK_V6
         _kitty_base_instructions = ((event.get('session') or {}).get('instructions') or '')
         _kitty_candidate_active = False
+        _kitty_candidate_generation = 0
 
         async def kitty_candidate_hint(item_id, speaker_id):
-            nonlocal _kitty_candidate_active
-            if speaker_id != 'person:shana' or _kitty_candidate_active:
+            nonlocal _kitty_candidate_active, _kitty_candidate_generation
+            if speaker_id != 'person:shana':
+                return
+            _kitty_candidate_generation += 1
+            generation = _kitty_candidate_generation
+            if _kitty_candidate_active:
                 return
             if not _kitty_base_instructions:
                 return
@@ -40,6 +45,11 @@ CALLBACK = """        # KITTY_CANDIDATE_SESSION_CALLBACK_V6
                     'session': {'instructions': _kitty_base_instructions + note},
                 })
                 _kitty_candidate_active = True
+                async def expire():
+                    await asyncio.sleep(20)
+                    if generation == _kitty_candidate_generation:
+                        await kitty_candidate_clear()
+                asyncio.create_task(expire())
                 print('[KITTY_CANDIDATE_SESSION] hint_sent=true memory_authorization=disabled', flush=True)
             except Exception as exc:
                 print('[KITTY_CANDIDATE_SESSION] error=%s' % type(exc).__name__, flush=True)
@@ -68,8 +78,8 @@ def patch(src):
     src = src.replace(ANCHOR,
         "                kitty_speaker_observer = KittySpeakerObserver(\n"
         "                    kitty_speaker_sink, enabled=True,\n"
-        "                    on_candidate=kitty_candidate_hint,\n"
-        "                    on_candidate_clear=kitty_candidate_clear)", 1)
+        "                    on_candidate=kitty_candidate_hint)\n"
+        "                    # Candidate hint expires after 20 seconds", 1)
     ast.parse(src)
     return src
 
