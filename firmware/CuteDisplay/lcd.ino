@@ -3167,12 +3167,14 @@ void loop(){
   appBLEReady=true;
   appControlCharacteristic->setValue("PROXY_READY");
   appControlCharacteristic->notify();
+  CuteLink::send(Serial1,++c5Seq,"APP_SESSION","ON");
  }
  if(appCommandPending && (uint32_t)(millis()-appCommandSent)>4500UL){
   appCommandPending=false;appNotify("ERR:UART_TIMEOUT");
  }
  if(!brainLinkConnected() && appBLEReady){
   appBLEReady=false;
+  CuteLink::send(Serial1,++c5Seq,"APP_SESSION","OFF");
   appControlCharacteristic->setValue("PROXY_DISABLED");
  }
 #endif
