@@ -7,6 +7,7 @@ Strict source anchors, AST check, idempotent, backup before write.
 import argparse
 import ast
 import shutil
+import re
 from pathlib import Path
 
 MARKER = "# KITTY_INITIAL_PUBLIC_PROFILE_V6"
@@ -41,10 +42,36 @@ def patch(src):
     if MARKER in src:
         ast.parse(src)
         return src
-    if src.count(ANCHOR) != 1 or src.count(EXPRESSION) != 1:
-        raise ValueError('Initial realtime session layout differs; refuse patch')
-    src = src.replace(ANCHOR, INSERT + ANCHOR, 1)
-    src = src.replace(EXPRESSION, EXPRESSION + "\n                                + _kitty_initial_profile", 1)
+    # Locate a unique upstream initial session update followed by its initial
+    # prompt template. Ignore differences in indentation and whitespace.
+    update = re.search(
+        r"(?m)^(?P<indent>[ ]*)await upstream[.]send_json[(]\\s*"
+        r"\\{\\s*['\\\"]type['\\\"]\\s*:\\s*['\\\"]session[.]update['\\\"]",
+        src,
+    )
+    expression = re.search(
+        r"(?m)^(?P<indent>[ ]*)[(]config[.]get[(]"
+        r"['\\\"]audio[.]realtime[.]prompt_template['\\\"]"
+        r"[)]\\s+or\\s+DEFAULT_REALTIME_CALL_PROMPT_TEMPLATE[)]",
+        src,
+    )
+    if (not update or not expression or
+            len(re.findall(r"['\\\"]type['\\\"]\\s*:\\s*['\\\"]session[.]update['\\\"]", src)) != 1 or
+            len(re.findall(r"DEFAULT_REALTIME_CALL_PROMPT_TEMPLATE[)]", src)) != 1 or
+            update.start() >= expression.start() or
+            expression.start() - update.start() > 2500):
+        raise ValueError("Initial session update not uniquely located; unchanged")
+    indent = update.group("indent")
+    block = "".join(indent + line + "\\n" if line else "\\n"
+                    for line in INSERT.strip("\\n").splitlines())
+    src = src[:update.start()] + block + src[update.start():]
+    # Match fresh expression after insertion; insert immediately after it.
+    expression = re.search(
+        r"(?m)^(?P<indent>[ ]*)[(]config[.]get[(]"
+        r"['\\\"]audio[.]realtime[.]prompt_template['\\\"]"
+        r"[)]\\s+or\\s+DEFAULT_REALTIME_CALL_PROMPT_TEMPLATE[)]", src)
+    pos = expression.end()
+    src = src[:pos] + "\\n" + expression.group("indent") + "+ _kitty_initial_profile" + src[pos:]
     ast.parse(src)
     return src
 
