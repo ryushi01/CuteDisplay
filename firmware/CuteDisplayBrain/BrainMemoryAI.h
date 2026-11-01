@@ -107,7 +107,10 @@ inline void tick(bool busy){
    cJSON_AddItemToArray(messages,system);
    cJSON *user=cJSON_CreateObject();
    cJSON_AddStringToObject(user,"role","user");
-   cJSON_AddStringToObject(user,"content",utterance.c_str());
+   // Bound model input for predictable Mac-side compute. Original full turns
+   // remain in the SD journal; this is only the ephemeral inference prompt.
+   String inferenceInput=summarize?KittyMemory::clipUTF8(utterance,440):KittyMemory::clipUTF8(utterance,220);
+   cJSON_AddStringToObject(user,"content",inferenceInput.c_str());
    cJSON_AddItemToArray(messages,user);
    char *payload=cJSON_PrintUnformatted(root);cJSON_Delete(root);
    if(!payload){finish();return;}
