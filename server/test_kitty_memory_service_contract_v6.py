@@ -46,7 +46,10 @@ class ServiceContextContract(unittest.TestCase):
                 service.queue_semantic_refresh("second")
                 self.assertEqual(q.qsize(), 1)
                 self.assertEqual(q.get_nowait(), "first")
-        self.assertGreaterEqual(service.SEMANTIC_REFRESH_QUIET_SECONDS, 60)
+        self.assertGreater(service.SEMANTIC_REFRESH_QUIET_SECONDS, 0)
+        self.assertLessEqual(service.SEMANTIC_REFRESH_QUIET_SECONDS, 30)
+        self.assertGreaterEqual(service.SEMANTIC_REFRESH_MAX_WAIT_SECONDS, 60)
+        self.assertLessEqual(service.SEMANTIC_REFRESH_MAX_WAIT_SECONDS, 120)
 
     def test_unknown_speaker_refused_before_search(self):
         with tempfile.TemporaryDirectory() as temp:
