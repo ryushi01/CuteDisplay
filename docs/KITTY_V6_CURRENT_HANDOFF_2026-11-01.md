@@ -84,3 +84,7 @@ GitHub `main` now includes the initial S3 summarization safety patch (commits `5
 ## Fast privacy hardening follow-up — 2026-11-01 (source only)
 
 Commit `f67bd78` guards the idle AI parser: a model response to a **summary** request can never propose personal `facts` into the verified owner catalog, even if the model unexpectedly returns a `facts` array alongside its summary. Eight focused source invariants checked on GitHub `main`; no firmware compile, flash, active-call retrieval or hardware test was performed. **Active-call summary reinjection remains disabled**: there is no trustworthy mechanism to distinguish two unknown human voices inside the same open call, so exposing unverified prior speech to a new speaker would risk private-memory leakage. Next safe path is a speaker-transition-boundary mechanism with session-scoped retrieval and strict reset, verified on hardware.
+
+## Summary flush backpressure fix — 2026-11-01 (source only)
+
+Commit `11d5a3c3` adds a fallback to the existing end-of-call marker: if the bounded write queue is full, the SD worker records the pending end and flushes the matching summary batch after the queue drains. It never drops archived turns to enqueue a marker. This is a best-effort, single-pending-boundary fallback, not a guarantee across multiple overlapping queued call endings or resets. No SD formatting, live deployment changes, or gateway modification. Same-call injection of unverified summaries remains disabled for speaker privacy. Compilation and physical testing are still required before flashing.
