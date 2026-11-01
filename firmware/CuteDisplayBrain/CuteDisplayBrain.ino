@@ -709,6 +709,15 @@ static void pollFace(){
  recoverFreshBootUART(now);
  if(faceOnline&&(uint32_t)(now-lastFace)>10000UL){
   faceOnline=false;
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+  // A dead C5 cannot be allowed to leave a remote app session authorized.
+  c5AppSession=false;
+  c5AppCommandPending=false;
+  clientConnected=false;
+  bleAuthenticated=false;
+  proxyEnabled=false;
+  if(incomingCommands)xQueueReset(incomingCommands);
+#endif
   Serial.printf("[S3] Face UART timed out: silence=%lums bad_frames=%lu queued=%u\n",
      (unsigned long)(now-lastFace),(unsigned long)frameReader.invalid,
      incomingCommands?(unsigned)uxQueueMessagesWaiting(incomingCommands):0);
