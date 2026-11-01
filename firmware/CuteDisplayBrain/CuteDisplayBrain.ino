@@ -1417,6 +1417,12 @@ void setup(){
   return BrainRealtimeDirect::active() || BrainRealtimeAudio::active() ||
          BrainAI::busy || BrainVoiceSTT::running || BrainTTS::running;
  });
+ KittyMemorySyncV6::setSpeechActive([]()->bool {
+  // Still synchronize in CALL_LISTENING, but pause transport during playback.
+  return BrainRealtimeDirect::state=="CALL_SPEAKING" ||
+         BrainRealtimeDirect::state=="CALL_THINKING" ||
+         BrainTTS::running;
+ });
  BrainRealtimeDirect::init();
  BrainTTS::init();
  BrainVoiceSTT::init();
