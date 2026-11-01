@@ -9,7 +9,10 @@ BRAIN = ROOT / "firmware/CuteDisplayBrain/CuteDisplayBrain.ino"
 class SyncSchedulerContract(unittest.TestCase):
     def test_fast_idle_retry_not_ten_minute_poll(self):
         source = SYNC.read_text()
-        self.assertIn("IDLE_QUIET_MS=3000UL", source)
+        self.assertIn("IDLE_QUIET_MS=500UL", source)
+        self.assertIn("PERIODIC_REFRESH_MS=60000UL", source)
+        self.assertIn("pauseForSpeech()", source)
+        self.assertIn("callActive && callActive()?750:12", source)
         self.assertIn("FAILURE_RETRY_MS=15000UL", source)
         self.assertIn("pdMS_TO_TICKS(500)", source)
         self.assertNotIn("pdMS_TO_TICKS(600000)", source)
