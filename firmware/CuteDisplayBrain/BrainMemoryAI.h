@@ -182,6 +182,8 @@ inline void tick(bool busy){
        cJSON *event=cJSON_Parse(data.c_str());
        if(event){
         cJSON *choice=cJSON_GetArrayItem(cJSON_GetObjectItem(event,"choices"),0);
+        cJSON *finish=cJSON_GetObjectItem(choice,"finish_reason");
+        if(cJSON_IsString(finish) && finish->valuestring && strlen(finish->valuestring))streamDone=true;
         cJSON *delta=cJSON_GetObjectItem(choice,"delta");
         cJSON *part=cJSON_GetObjectItem(delta,"content");
         if(cJSON_IsString(part) && part->valuestring &&
@@ -223,9 +225,9 @@ inline void tick(bool busy){
       }
      }
      // Report metadata only: never print response text or private memory.
-     Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu truncated=%d format=%d json=%d choices=%d content=%d accepted=%d\\n",
+     Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu truncated=%d format=%d json=%d choices=%d content=%d stream_done=%d stream_chars=%u accepted=%d\\n",
        status,(unsigned long)elapsed,(unsigned long)response.bytes,response.truncated?1:0,format,
-       outer?1:0,cJSON_IsArray(choices)?1:0,cJSON_IsString(content)?1:0,accepted?1:0);
+       outer?1:0,cJSON_IsArray(choices)?1:0,cJSON_IsString(content)?1:0,streamDone?1:0,(unsigned)streamedContent.length(),accepted?1:0);
      if(outer)cJSON_Delete(outer);
     }else if(abortRequested || interactive || !operatorEnabled){
      Serial.printf("[MEMORY AI] interrupted HTTP=%d err=%d elapsed_ms=%lu connected=%d rx_bytes=%lu\\n",
