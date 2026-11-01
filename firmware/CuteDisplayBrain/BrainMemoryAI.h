@@ -114,8 +114,8 @@ inline void tick(bool busy){
    cJSON_AddItemToArray(messages,user);
    char *payload=cJSON_PrintUnformatted(root);cJSON_Delete(root);
    if(!payload){finish();return;}
-   String reply;reply.reserve(512);
-   struct Response {String *text; uint32_t firstDataAt=0; uint32_t bytes=0; int status=0; bool connected=false;};
+   String reply;reply.reserve(12288);
+   struct Response {String *text; uint32_t firstDataAt=0; uint32_t bytes=0; int status=0; bool connected=false; bool truncated=false;};
    Response response={&reply};
    esp_http_client_config_t cfg={};
    cfg.url=url.c_str();
@@ -131,8 +131,9 @@ inline void tick(bool busy){
     if(e->event_id==HTTP_EVENT_ON_DATA && e->data_len>0){
      if(!res->firstDataAt)res->firstDataAt=millis();
      res->bytes+=(uint32_t)e->data_len;
-     if(res->text && res->text->length()+e->data_len<=2048)
+     if(res->text && res->text->length()+(size_t)e->data_len<=16384)
       res->text->concat((const char*)e->data,(unsigned int)e->data_len);
+     else if(res->text)res->truncated=true;
     }
     return ESP_OK;
    };
@@ -186,8 +187,8 @@ inline void tick(bool busy){
       }
      }
      // Report metadata only: never print response text or private memory.
-     Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu json=%d choices=%d content=%d accepted=%d\\n",
-       status,(unsigned long)elapsed,(unsigned long)response.bytes,
+     Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu truncated=%d json=%d choices=%d content=%d accepted=%d\\n",
+       status,(unsigned long)elapsed,(unsigned long)response.bytes,response.truncated?1:0,
        outer?1:0,cJSON_IsArray(choices)?1:0,cJSON_IsString(content)?1:0,accepted?1:0);
      if(outer)cJSON_Delete(outer);
     }else if(abortRequested || interactive || !operatorEnabled){
