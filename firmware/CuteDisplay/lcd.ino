@@ -158,6 +158,7 @@ static bool appBLEReady = false;
 static bool appCommandPending = false;
 static uint16_t appCommandSeq = 0;
 static uint32_t appCommandSent = 0;
+extern volatile bool bleConnected;
 static void appNotify(const String &value) {
  if(!bleConnected || !appBLEReady || !appControlCharacteristic) return;
  appControlCharacteristic->setValue(value.c_str());
@@ -3163,17 +3164,17 @@ void loop(){
  serviceBrain();
 #if KITTY_C5_BLE_MIGRATION_ENABLED
  static bool lastAppSessionSignaled=false;
- if(lastAppSessionSignaled && (!bleConnected || !brainLinkConnected())){
+ if(lastAppSessionSignaled && (!bleConnected || !brainLinkConnected() || C5UARTOTA::active())){
   CuteLink::send(Serial1,++c5Seq,"APP_SESSION","OFF");
   lastAppSessionSignaled=false;
   appCommandPending=false;
   appBLEReady=false;
  }
- if(bleConnected && appBLEReady && !lastAppSessionSignaled){
+ if(bleConnected && appBLEReady && brainLinkConnected() && !C5UARTOTA::active() && !lastAppSessionSignaled){
   CuteLink::send(Serial1,++c5Seq,"APP_SESSION","ON");
   lastAppSessionSignaled=true;
  }
- if(bleConnected && appEncryptedReadSeen && !appBLEReady && brainLinkConnected()){
+ if(bleConnected && appEncryptedReadSeen && !appBLEReady && brainLinkConnected() && !C5UARTOTA::active()){
   appEncryptedReadSeen=false;
   appBLEReady=true;
   appControlCharacteristic->setValue("PROXY_READY");
@@ -3197,14 +3198,14 @@ void loop(){
  char input[MAX_CMD+1]={0};
  for(int q=0;q<8&&commandQueue&&xQueueReceive(commandQueue,input,0)==pdTRUE;q++){
 #if KITTY_C5_BLE_MIGRATION_ENABLED
-  if(appBLEReady){
+  if(appBLEReady && !C5UARTOTA::active()){
    if(appCommandPending){appNotify("ERR:BUSY");continue;}
    appCommandSeq=++c5Seq;
    if(!appCommandSeq)appCommandSeq=++c5Seq;
    if(KittyAppLink::sendCommand(Serial1,appCommandSeq,String(input))){
      appCommandPending=true;appCommandSent=millis();
    }else appNotify("ERR:UART_SEND");
-  }else processCommand(String(input));
+  }else appNotify("ERR:NOT_READY");
 #else
   processCommand(String(input));
 #endif
