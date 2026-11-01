@@ -14,8 +14,9 @@ except ImportError:
 
 class KittySpeakerObserver:
     def __init__(self, send_to_s3, *, session=None, enabled=False,
-                 url=None, token=None):
+                 url=None, token=None, on_candidate=None):
         self.enabled = enabled is True
+        self.on_candidate = on_candidate
         self.url = url if url is not None else os.environ.get("KITTY_SEMANTIC_SERVICE_URL", "")
         self.token = token if token is not None else os.environ.get("KITTY_MEMORY_TOKEN", "")
         self.session = session or SpeakerSession()
@@ -74,6 +75,7 @@ class KittySpeakerObserver:
         sid = event.get("speaker_id", "unknown")
         item = event.get("item_id")
         confidence = event.get("confidence")
+        candidate = event.get("candidate_speaker_id")
         if not self.gate.accept_speaker(self.epoch, item, sid, confidence):
             # Unknown is a legitimate negative response for a matching turn.
             if not self.gate._valid(self.epoch, item):
@@ -82,9 +84,12 @@ class KittySpeakerObserver:
                      "speaker_id": "unknown", "confidence": "unknown"}
         # Candidate metadata stays server-side. Never send candidate identity to
         # the S3 or allow it to authorize person-scoped memory.
-        candidate = event.get("candidate_speaker_id")
-        if isinstance(candidate, str) and candidate.startswith("person:"):
-            print("[KITTY_CANDIDATE_CONTEXT] candidate_present=true memory_authorization=disabled", flush=True)
+        if candidate == "person:shana" and callable(self.on_candidate):
+            try:
+                await self.on_candidate(item, candidate)
+                print("[KITTY_CANDIDATE_CONTEXT] hinted=true memory_authorization=disabled", flush=True)
+            except Exception as exc:
+                print("[KITTY_CANDIDATE_CONTEXT] error=%s" % type(exc).__name__, flush=True)
         safe_event = {
             "type": "kitty.speaker.result",
             "item_id": item,
