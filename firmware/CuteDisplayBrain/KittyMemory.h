@@ -15,13 +15,16 @@ struct Entry { char question[256]; char answer[512]; uint8_t ownerVerified=0;
 static QueueHandle_t writes=nullptr;
 static volatile uint32_t activeConversation=0;
 static uint32_t nextConversation=0;
+// A dropped boundary marker must not strand a short final batch.
+static volatile uint32_t pendingEndConversation=0;
 inline void beginConversation(){activeConversation=++nextConversation;if(!activeConversation)activeConversation=++nextConversation;}
 inline void endConversation(){
  uint32_t ended=activeConversation;activeConversation=0;
  if(!ended || !writes)return;
  Entry marker={};marker.conversation=ended;marker.flushSummary=1;
  // Do not evict archived turns to make room for a boundary marker.
- (void)xQueueSend(writes,&marker,0);
+ // When the queue is full, the SD worker flushes after its queued turns drain.
+ if(xQueueSend(writes,&marker,0)!=pdTRUE)pendingEndConversation=ended;
 }
 // Bounded RAM handoff to the optional idle-only AI consolidator.
 // Never waits on inference, and never touches SD in a network task.
@@ -1349,6 +1352,7 @@ inline void task(void*){
     indexCount=0;finishedSerial=0;nextSerial=0;searchReply="";
     latestSummary="";latestSummaryAt=0;summaryBatch="";summaryTurnCount=0;
     summaryBatchOwnerVerified=false;summaryBatchConversation=0;
+    pendingEndConversation=0;
     saved=0;failed=0;updateStorage();cardState=1;
     Serial.println("[MEMORY] FORMAT COMPLETE: card mounted, memory cache cleared");
    }else{
@@ -1358,7 +1362,14 @@ inline void task(void*){
    continue;
   }
   if(searches && xQueueReceive(searches,&query,0)==pdTRUE && mounted)searchOnSD(query);
-  if(xQueueReceive(writes,&e,pdMS_TO_TICKS(15))!=pdTRUE)continue;
+  if(xQueueReceive(writes,&e,pdMS_TO_TICKS(15))!=pdTRUE){
+   uint32_t ended=pendingEndConversation;
+   if(ended && summaryBatchConversation==ended){
+    pendingEndConversation=0;
+    submitSummaryBatch();
+   }else if(ended)pendingEndConversation=0;
+   continue;
+  }
   if(e.flushSummary){
    if(summaryTurnCount && summaryBatchConversation==e.conversation)submitSummaryBatch();
    continue;
