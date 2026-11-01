@@ -165,8 +165,34 @@ inline void tick(bool busy){
      cJSON *first=cJSON_GetArrayItem(choices,0);
      cJSON *message=cJSON_GetObjectItem(first,"message");
      cJSON *content=cJSON_GetObjectItem(message,"content");
-     if(cJSON_IsString(content)){
-      const char *raw=content->valuestring;
+     String streamedContent;
+     bool streamDone=false;
+     if(format==3 && !response.truncated){
+      size_t offset=0;
+      while(offset<reply.length()){
+       int newline=reply.indexOf('\\n',offset);
+       if(newline<0)newline=reply.length();
+       String line=reply.substring(offset,newline);
+       line.trim();
+       offset=(size_t)newline+1;
+       if(!line.startsWith("data:"))continue;
+       String data=line.substring(5);
+       data.trim();
+       if(data=="[DONE]"){streamDone=true;break;}
+       cJSON *event=cJSON_Parse(data.c_str());
+       if(event){
+        cJSON *choice=cJSON_GetArrayItem(cJSON_GetObjectItem(event,"choices"),0);
+        cJSON *delta=cJSON_GetObjectItem(choice,"delta");
+        cJSON *part=cJSON_GetObjectItem(delta,"content");
+        if(cJSON_IsString(part) && part->valuestring &&
+           streamedContent.length()+strlen(part->valuestring)<=2048)
+          streamedContent+=part->valuestring;
+        cJSON_Delete(event);
+       }
+      }
+     }
+     if(cJSON_IsString(content) || (format==3 && streamDone && !streamedContent.isEmpty())){
+      const char *raw=cJSON_IsString(content)?content->valuestring:streamedContent.c_str();
       // Some chat models wrap JSON in a markdown fence; parse first object.
       String body(raw);int start=body.indexOf('{'),end=body.lastIndexOf('}');
       if(start>=0 && end>start){
