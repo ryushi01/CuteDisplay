@@ -2347,7 +2347,7 @@ void initBLE(){
  if(!BLEDevice::init("CuteDisplay-Kitty")){Serial.println("[BLE] Failed");return;}
  BLEDevice::setMTU(185);
  // Persistent BLE bonding (Just Works; no physical passkey input on this board).
- // FFF1 writes remain compatible with unencrypted iOS connections; system accessory authorization alone does not ensure link encryption.
+ // C5 must require encrypted GATT read and write; Just Works does not provide MITM authentication.
  BLESecurity *security = new BLESecurity();
  security->setCapability(ESP_IO_CAP_NONE);
  security->setAuthenticationMode(true,false,false);
@@ -2355,8 +2355,15 @@ void initBLE(){
  server->setCallbacks(new ServerEvents());server->advertiseOnDisconnect(true);
  BLEService *control=server->createService("FFF0");
  BLECharacteristic *cmd=control->createCharacteristic("FFF1",
-  BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_WRITE);
- cmd->setValue("HELLO!");cmd->setCallbacks(new CommandEvents());control->start();
+  BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_WRITE|
+  BLECharacteristic::PROPERTY_NOTIFY|
+  BLECharacteristic::PROPERTY_READ_ENC|BLECharacteristic::PROPERTY_WRITE_ENC);
+ cmd->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED|ESP_GATT_PERM_WRITE_ENCRYPTED);
+#if defined(CONFIG_BLUEDROID_ENABLED)
+ cmd->addDescriptor(new BLE2902());
+#endif
+ appControlCharacteristic=cmd;
+ cmd->setValue("PAIRING_PENDING");cmd->setCallbacks(new CommandEvents());control->start();
  BLEService *batteryService=server->createService("180F");
  batteryCharacteristic=batteryService->createCharacteristic("2A19",
   BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_NOTIFY);
@@ -2367,7 +2374,10 @@ void initBLE(){
  powerCharacteristic->setValue("0,0,0,0,0,0,0");
  powerService->start();
  BLEService *networkService=server->createService("FFF5");
- networkCharacteristic=networkService->createCharacteristic("FFF6",BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_NOTIFY);
+ networkCharacteristic=networkService->createCharacteristic("FFF6",
+  BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_NOTIFY|
+  BLECharacteristic::PROPERTY_READ_ENC);
+ networkCharacteristic->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED);
  networkCharacteristic->setValue("N:LINK:0");
  networkService->start();
  BLEAdvertising *ad=BLEDevice::getAdvertising();
