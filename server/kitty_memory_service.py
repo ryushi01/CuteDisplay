@@ -13,19 +13,29 @@ OWNER_PROOF = None
 # Optional, isolated CPU index refresh. Snapshot upload acknowledgement never
 # waits for embedding; a single worker coalesces bursts of completed snapshots.
 SEMANTIC_REFRESH_Q = queue.Queue(maxsize=1)
+# Coalesce bursts from frequent snapshot finalization without blocking HTTP.
+# One quiet period leads to one refresh; voice and SD writes remain independent.
+SEMANTIC_REFRESH_QUIET_SECONDS = 90
 
 def semantic_refresh_worker():
     while True:
         snapshot = SEMANTIC_REFRESH_Q.get()
         try:
+            # Drain repeated finalize notifications and wait for the latest.
+            while True:
+                try:
+                    snapshot = SEMANTIC_REFRESH_Q.get(timeout=SEMANTIC_REFRESH_QUIET_SECONDS)
+                    SEMANTIC_REFRESH_Q.task_done()
+                except queue.Empty:
+                    break
             root = os.environ.get("KITTY_SD_SNAPSHOT_ROOT", "")
             db = os.environ.get("KITTY_SEMANTIC_DB", "")
             if root and db:
                 from kitty_refresh_finalized_v6 import refresh
                 result = refresh(root, db, dry_run=False)
+                # Metadata only; never log queries or memory contents.
                 print("Kitty semantic index refreshed:", result.get("indexed", 0), flush=True)
         except Exception as exc:
-            # Preserve the previous complete index generation on failure.
             print("Kitty semantic refresh failed:", type(exc).__name__, flush=True)
         finally:
             SEMANTIC_REFRESH_Q.task_done()
@@ -36,7 +46,7 @@ def queue_semantic_refresh(snapshot):
     try:
         SEMANTIC_REFRESH_Q.put_nowait(snapshot)
     except queue.Full:
-        # A later refresh reads the newest finalized snapshot.
+        # A queued refresh reads the newest finalized snapshot.
         pass
 
 def legacy_memory_enabled():
