@@ -1409,9 +1409,13 @@ void setup(){
  BrainAI::init();
  KittyMemory::init();
  KittyMemorySyncV6::init([]()->bool {
-  return !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active() &&
-         !BrainAI::busy && !BrainVoiceSTT::running && !BrainTTS::running &&
-         !BrainC5OTA::updating();
+  // The low-priority sync task uses the existing SD worker and is safe to
+  // schedule during calls. Do not stall long conversations waiting for idle.
+  return !BrainC5OTA::updating();
+ });
+ KittyMemorySyncV6::setCallActive([]()->bool {
+  return BrainRealtimeDirect::active() || BrainRealtimeAudio::active() ||
+         BrainAI::busy || BrainVoiceSTT::running || BrainTTS::running;
  });
  BrainRealtimeDirect::init();
  BrainTTS::init();
