@@ -102,6 +102,15 @@ class SpeakerSession:
         if captured is None:
             return False
         gen, verified_item, pcm = captured
+        # Optional operator-controlled enrollment from the verified Kitty mic.
+        # Run encoding/file I/O off the realtime WebSocket event loop.
+        async def capture_enrollment():
+            try:
+                from .kitty_enrollment_capture_v6 import capture
+                await asyncio.to_thread(capture, pcm)
+            except (ImportError, OSError, ValueError, RuntimeError):
+                pass
+        asyncio.create_task(capture_enrollment())
         if self._task and not self._task.done():
             self._task.cancel()
         async def job():
