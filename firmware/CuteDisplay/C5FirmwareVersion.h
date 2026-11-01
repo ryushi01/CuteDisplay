@@ -27,4 +27,5 @@
 // v35: transient FACT MEMORIZED toast next to Call Mode status (3.5s).
 // v36: full-screen scrolling conversation text, including preceding turn.
 // v37: C5-hosted iPhone BLE with S3 UART command relay (pending CI/hardware validation).
-static constexpr uint32_t C5_FIRMWARE_VERSION = 37;
+// v38: keep expressive Kitty face visible behind compact call caption overlay.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 38;
