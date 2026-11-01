@@ -170,7 +170,7 @@ inline void tick(bool busy){
      if(format==3 && !response.truncated){
       size_t offset=0;
       while(offset<reply.length()){
-       int newline=reply.indexOf('\\n',offset);
+       int newline=reply.indexOf((char)10,offset);
        if(newline<0)newline=reply.length();
        String line=reply.substring(offset,newline);
        line.trim();
