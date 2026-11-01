@@ -1,8 +1,8 @@
 """Kitty V6 voice adaptation policy. Offline-only, fail-closed.
 
 This module never authenticates a speaker and never updates a profile by itself.
-External verification is required before an embedding can enter a candidate pool.
-A human-approved candidate may replace an *adaptive* slot but not an anchor.
+Explicit local enrollment approval is required before a candidate is added.
+Approved candidates may replace *adaptive* slots but never protected anchors.
 """
 from datetime import datetime, timezone
 from math import isfinite, sqrt
@@ -45,7 +45,7 @@ def propose(profile, embedding, *, now, score, verified, explicit_approval):
 
     Never update from voice recognition alone: a bad match could poison memory
     access. "verified" must come from a separate trusted verification mechanism,
-    not a speaker ID, self-introduction, or semantic memory response.
+    not a self-introduction, remote device presence, or semantic memory response.
     """
     if verified is not True or explicit_approval is not True:
         raise PermissionError("independent_verification_and_approval_required")
