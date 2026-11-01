@@ -32,21 +32,24 @@ struct ConsolidationCandidate { char utterance[256]; };
 static QueueHandle_t consolidationCandidates=nullptr;
 struct ConsolidatedFact { char key[32]; char value[128]; };
 static QueueHandle_t consolidatedFacts=nullptr;
-struct SummaryCandidate {char turns[768]; uint8_t ownerVerified=0; uint32_t conversation=0;};
-struct SummaryResult {char text[256]; uint8_t ownerVerified=0; uint32_t conversation=0;};
+struct SummaryCandidate {char turns[768]; uint8_t ownerVerified=0; uint32_t conversation=0; uint32_t jobEnd=0;};
+struct SummaryResult {char text[256]; uint8_t ownerVerified=0; uint32_t conversation=0; uint32_t jobEnd=0;};
 static QueueHandle_t summaryCandidates=nullptr, summaryResults=nullptr;
 static volatile uint32_t summaryBackpressure=0;
+static volatile uint32_t summaryJobEnd=0;
+static uint32_t summaryAckEnd=0;
+static bool summaryJobAwaiting=false;
 static String latestSummary;
 static volatile uint32_t summaryRevision=0;
 static uint32_t latestSummaryAt=0;
-inline bool takeSummaryCandidate(String &out,bool &ownerVerified,uint32_t &conversation){
+inline bool takeSummaryCandidate(String &out,bool &ownerVerified,uint32_t &conversation,uint32_t &jobEnd){
  SummaryCandidate c={};
  if(!summaryCandidates || xQueueReceive(summaryCandidates,&c,0)!=pdTRUE)return false;
- out=String(c.turns);ownerVerified=c.ownerVerified!=0;conversation=c.conversation;return !out.isEmpty();
+ out=String(c.turns);ownerVerified=c.ownerVerified!=0;conversation=c.conversation;jobEnd=c.jobEnd;return !out.isEmpty();
 }
-inline bool proposeSummary(const String &text,bool ownerVerified,uint32_t conversation){
- if(!summaryResults || text.length()<12 || text.length()>220)return false;
- SummaryResult r={};r.ownerVerified=ownerVerified?1:0;r.conversation=conversation;text.toCharArray(r.text,sizeof(r.text));
+inline bool proposeSummary(const String &text,bool ownerVerified,uint32_t conversation,uint32_t jobEnd){
+ if(!summaryResults || (text.length()>0 && text.length()<12) || text.length()>220 || !jobEnd)return false;
+ SummaryResult r={};r.ownerVerified=ownerVerified?1:0;r.conversation=conversation;r.jobEnd=jobEnd;text.toCharArray(r.text,sizeof(r.text));
  return xQueueSend(summaryResults,&r,0)==pdTRUE;
 }
 inline bool takeConsolidationCandidate(String &value){
@@ -1097,6 +1100,13 @@ inline void task(void*){
   Serial.println("[MEMORY] SD mount failed: card may need FAT formatting, be damaged, or be missing; no auto erase");
  }else{
   SD_MMC.mkdir("/kitty");
+  // Journal cursor: append-only acknowledgements survive power loss.
+  File ack=SD_MMC.open("/kitty/summary_jobs_ack_v6.tsv",FILE_READ);
+  if(ack){while(ack.available()){
+   String line=ack.readStringUntil('\n');
+   uint32_t offset=(uint32_t)line.toInt();
+   if(offset)summaryAckEnd=offset;
+  }ack.close();}
   updateStorage();
   if(facts)restoreFactSnapshots();
   if(pruneInvalidPreferences()){
@@ -1169,20 +1179,51 @@ inline void task(void*){
  bool summaryBatchOwnerVerified=false;
  uint32_t summaryBatchConversation=0;
  auto submitSummaryBatch=[&](){
-  if(summaryTurnCount && summaryCandidates){
-   SummaryCandidate batch={};batch.ownerVerified=summaryBatchOwnerVerified?1:0;
-   batch.conversation=summaryBatchConversation;
-   summaryBatch.toCharArray(batch.turns,sizeof(batch.turns));
-   if(xQueueSend(summaryCandidates,&batch,0)!=pdTRUE){
-    // Preserve the oldest queued context: it is needed for chronological
-    // conversation continuity. The complete turns remain archived on SD.
+  if(summaryTurnCount && mounted){
+   // A job is durable before it is eligible for idle inference.
+   String turns=summaryBatch;turns.replace("\n"," | ");
+   turns=sanitize(turns,740);
+   File jobs=SD_MMC.open("/kitty/summary_jobs_v6.tsv",FILE_APPEND);
+   if(jobs){
+    String line=String(summaryBatchOwnerVerified?1:0)+"\\t"+
+      String(summaryBatchConversation)+"\\t"+turns+"\\n";
+    size_t written=jobs.print(line);
+    jobs.close();
+    if(written!=line.length()){
+     summaryBackpressure++;
+     Serial.println("[MEMORY V6] summary journal write incomplete; original turns remain on SD");
+    }
+   }else{
     summaryBackpressure++;
-    Serial.println("[MEMORY V6] summary queue full; archived turns retained on SD");
+    Serial.println("[MEMORY V6] summary journal unavailable; original turns remain on SD");
    }
   }
   summaryBatch="";summaryTurnCount=0;summaryBatchConversation=0;
  };
+ auto dispatchSummaryJob=[&](){
+  if(!mounted || summaryJobAwaiting || !summaryCandidates)return;
+  File jobs=SD_MMC.open("/kitty/summary_jobs_v6.tsv",FILE_READ);
+  if(!jobs)return;
+  if(summaryAckEnd>=jobs.size()){jobs.close();return;}
+  if(!jobs.seek(summaryAckEnd)){jobs.close();return;}
+  String line=jobs.readStringUntil('\n');
+  uint32_t next=(uint32_t)jobs.position();jobs.close();
+  int a=line.indexOf('\t'),b=line.indexOf('\t',a+1);
+  if(a<0 || b<=a || line.length()-b-1<12 || line.length()-b-1>740 ||
+     (line[0]!='0' && line[0]!='1')){
+   // Never discard malformed or partially written jobs automatically.
+   Serial.println("[MEMORY V6] summary journal entry invalid; replay paused");
+   summaryJobAwaiting=true;return;
+  }
+  SummaryCandidate batch={};
+  batch.ownerVerified=line[0]=='1'?1:0;
+  batch.conversation=(uint32_t)line.substring(a+1,b).toInt();
+  batch.jobEnd=next;
+  line.substring(b+1).toCharArray(batch.turns,sizeof(batch.turns));
+  if(xQueueSend(summaryCandidates,&batch,0)==pdTRUE)summaryJobAwaiting=true;
+ };
  while(true){
+  dispatchSummaryJob();
   // Serve at most one bounded export block per pass, on the SD-owning task.
   ExportRequest exportReq={};
   if(mounted && exportRequests && exportBlocks &&
@@ -1268,13 +1309,31 @@ inline void task(void*){
   SummaryResult summary={};
   if(mounted && summaryResults && xQueueReceive(summaryResults,&summary,0)==pdTRUE){
    String item=sanitize(String(summary.text),220);
-   File f=SD_MMC.open(summary.ownerVerified?"/kitty/summaries.tsv":"/kitty/unverified_summaries_v6.tsv",FILE_APPEND);
-   if(f){
-    if(summary.ownerVerified)f.printf("%lu\\t%s\\n",(unsigned long)time(nullptr),item.c_str());
-    else f.printf("%lu\\t%lu\\t%s\\n",(unsigned long)time(nullptr),(unsigned long)summary.conversation,item.c_str());
-    f.close();
-    if(summary.ownerVerified && cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
-     latestSummary=item;latestSummaryAt=(uint32_t)time(nullptr);summaryRevision++;xSemaphoreGive(cacheMutex);
+   if(summaryJobAwaiting && summary.jobEnd>summaryAckEnd){
+    bool savedSummary=item.isEmpty();
+    if(!item.isEmpty()){
+     File f=SD_MMC.open(summary.ownerVerified?"/kitty/summaries.tsv":"/kitty/unverified_summaries_v6.tsv",FILE_APPEND);
+     if(f){
+      size_t written=summary.ownerVerified?
+       f.printf("%lu\\t%s\\n",(unsigned long)time(nullptr),item.c_str()):
+       f.printf("%lu\\t%lu\\t%s\\n",(unsigned long)time(nullptr),(unsigned long)summary.conversation,item.c_str());
+      savedSummary=written>0;f.close();
+     }
+    }
+    if(savedSummary){
+     File ack=SD_MMC.open("/kitty/summary_jobs_ack_v6.tsv",FILE_APPEND);
+     if(ack){
+      size_t written=ack.printf("%lu\\n",(unsigned long)summary.jobEnd);
+      ack.close();
+      if(written>0){
+       summaryAckEnd=summary.jobEnd;summaryJobAwaiting=false;
+       if(summary.ownerVerified && !item.isEmpty() && cacheMutex &&
+          xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
+        latestSummary=item;latestSummaryAt=(uint32_t)time(nullptr);
+        summaryRevision++;xSemaphoreGive(cacheMutex);
+       }
+      }
+     }
     }
    }
   }
@@ -1355,7 +1414,7 @@ inline void task(void*){
     indexCount=0;finishedSerial=0;nextSerial=0;searchReply="";
     latestSummary="";latestSummaryAt=0;summaryBatch="";summaryTurnCount=0;
     summaryBatchOwnerVerified=false;summaryBatchConversation=0;
-    pendingEndConversation=0;
+    pendingEndConversation=0;summaryJobAwaiting=false;summaryAckEnd=0;
     saved=0;failed=0;updateStorage();cardState=1;
     Serial.println("[MEMORY] FORMAT COMPLETE: card mounted, memory cache cleared");
    }else{
