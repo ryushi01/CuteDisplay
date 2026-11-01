@@ -101,4 +101,6 @@ def submit(audio):
     except Exception:
         _GATE.release()
         return False
-\n# Import occurs during memory-service startup when its speaker handler is loaded.\nwarm_async()\n
+
+# Optional warmup during service startup; harmless if already started.
+warm_async()
