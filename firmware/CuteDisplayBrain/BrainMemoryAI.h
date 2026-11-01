@@ -101,7 +101,7 @@ inline void tick(bool busy){
    esp_http_client_config_t cfg={};
    cfg.url=url.c_str();
    cfg.crt_bundle_attach=esp_crt_bundle_attach; // Verified HTTPS to remote Open WebUI.
-   cfg.timeout_ms=2500; // Short network read timeout; never on audio task.
+   cfg.timeout_ms=10000; // Idle-only model generation may exceed 2.5s; never on audio task.
    cfg.user_data=&response;
    cfg.event_handler=[](esp_http_client_event_t *e)->esp_err_t {
     if(abortRequested || interactive)return ESP_FAIL;
