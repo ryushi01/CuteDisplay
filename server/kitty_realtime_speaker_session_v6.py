@@ -106,7 +106,10 @@ class SpeakerSession:
         # Run encoding/file I/O off the realtime WebSocket event loop.
         async def capture_enrollment():
             try:
-                from .kitty_enrollment_capture_v6 import capture
+                try:
+                    from .kitty_enrollment_capture_v6 import capture
+                except ImportError:
+                    from kitty_enrollment_capture_v6 import capture
                 await asyncio.to_thread(capture, pcm)
             except (ImportError, OSError, ValueError, RuntimeError):
                 pass
