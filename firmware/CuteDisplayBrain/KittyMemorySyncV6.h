@@ -133,18 +133,48 @@ inline bool exportAndSend(const String &snapshot){
  return status==200 && (reply.indexOf("\"finalized\": true")>=0 ||
                          reply.indexOf("\"finalized\":true")>=0);
 }
+// Small idle window prevents an upload from starting between speech turns.
+// Polling is lightweight; actual SD reads remain on the memory worker.
+static constexpr uint32_t IDLE_QUIET_MS=3000UL;
+static constexpr uint32_t FAILURE_RETRY_MS=15000UL;
+static constexpr uint32_t PERIODIC_REFRESH_MS=300000UL;
 inline void task(void*){
- vTaskDelay(pdMS_TO_TICKS(45000));
+ uint32_t idleSince=0,lastSuccess=0,lastFailure=0;
+ uint32_t syncedSaved=UINT32_MAX,syncedFacts=UINT32_MAX,syncedSummaries=UINT32_MAX;
  while(true){
-  if(allowed()){
-   // Unique session per attempt. Replayed chunks can resume within the same
-   // attempt, but no stale data is imported when SD contents have changed.
+  uint32_t now=millis();
+  if(!allowed()){
+   idleSince=0;
+   vTaskDelay(pdMS_TO_TICKS(500));
+   continue;
+  }
+  if(idleSince==0)idleSince=now;
+  bool quiet=(uint32_t)(now-idleSince)>=IDLE_QUIET_MS;
+  bool changed=syncedSaved!=KittyMemory::saved ||
+               syncedFacts!=KittyMemory::factRevision ||
+               syncedSummaries!=KittyMemory::summaryRevision;
+  bool periodic=lastSuccess && (uint32_t)(now-lastSuccess)>=PERIODIC_REFRESH_MS;
+  bool mayRetry=!lastFailure || (uint32_t)(now-lastFailure)>=FAILURE_RETRY_MS;
+  if(quiet && mayRetry && (changed || periodic)){
+   const uint32_t startSaved=KittyMemory::saved;
+   const uint32_t startFacts=KittyMemory::factRevision;
+   const uint32_t startSummaries=KittyMemory::summaryRevision;
    String snapshot=String("s3_")+String((unsigned long)time(nullptr))+
       "_"+String((unsigned long)esp_random(),HEX);
-   if(exportAndSend(snapshot)){completed++;Serial.println("[MEMSYNC] snapshot finalized");}
-   else{failures++;Serial.printf("[MEMSYNC] upload deferred/failed stage=%u file=%u http=%d (SD authoritative)\n",(unsigned)failureStage,(unsigned)lastFileIndex,(int)lastHttpStatus);}
+   if(exportAndSend(snapshot)){
+    completed++;
+    syncedSaved=startSaved;syncedFacts=startFacts;syncedSummaries=startSummaries;
+    lastSuccess=millis();lastFailure=0;
+    Serial.println("[MEMSYNC] snapshot finalized");
+   }else{
+    // Calls or an in-flight write may interrupt transfer; retry after idle.
+    failures++;lastFailure=millis();
+    Serial.printf("[MEMSYNC] upload deferred/failed stage=%u file=%u http=%d (SD authoritative)\n",
+      (unsigned)failureStage,(unsigned)lastFileIndex,(int)lastHttpStatus);
+   }
+   idleSince=0;
   }
-  vTaskDelay(pdMS_TO_TICKS(600000));
+  vTaskDelay(pdMS_TO_TICKS(500));
  }
 }
 inline void init(bool (*isIdle)()){
