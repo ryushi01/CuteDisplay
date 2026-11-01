@@ -185,7 +185,14 @@ inline void tick(bool busy){
        if(parsed)cJSON_Delete(parsed);
       }
      }
+     // Report metadata only: never print response text or private memory.
+     Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu json=%d choices=%d content=%d accepted=%d\\n",
+       status,(unsigned long)elapsed,(unsigned long)response.bytes,
+       outer?1:0,cJSON_IsArray(choices)?1:0,cJSON_IsString(content)?1:0,accepted?1:0);
      if(outer)cJSON_Delete(outer);
+    }else if(abortRequested || interactive || !operatorEnabled){
+     Serial.printf("[MEMORY AI] interrupted HTTP=%d err=%d elapsed_ms=%lu connected=%d rx_bytes=%lu\\n",
+       status,(int)rc,(unsigned long)elapsed,response.connected?1:0,(unsigned long)response.bytes);
     }else if(!abortRequested && !interactive){
      pausedAfterHttpFailure=true;
      Serial.printf("[MEMORY AI] skipped HTTP=%d err=%d elapsed_ms=%lu connected=%d first_data=%d rx_bytes=%lu; idle AI paused until reboot\\n",status,(int)rc,(unsigned long)elapsed,response.connected?1:0,response.firstDataAt?1:0,(unsigned long)response.bytes);
