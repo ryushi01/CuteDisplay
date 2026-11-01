@@ -29,6 +29,9 @@ static TaskHandle_t worker=nullptr;
 static bool (*idleCheck)()=nullptr;
 static volatile uint32_t completed=0,failures=0;
 static volatile uint32_t bytesSent=0;
+static volatile int lastHttpStatus=0;
+static volatile uint8_t lastFileIndex=0;
+static volatile uint8_t failureStage=0; // 1=export, 2=chunk, 3=finalize, 4=concurrent-change
 inline bool configured(){
  return String(KITTY_SYNC_V6_URL)=="https://ragnarok-project.com/kitty-v6/sync" &&
         strlen(KITTY_SYNC_V6_DEVICE_TOKEN)>=32 &&
@@ -62,6 +65,7 @@ inline int send(const char* route,const String &json,String &response){
  http.addHeader("Authorization",String("Bearer ")+KITTY_SYNC_V6_DEVICE_TOKEN);
  http.addHeader("Content-Type","application/json");
  int status=http.POST((uint8_t*)json.c_str(),json.length());
+ lastHttpStatus=status;
  if(status==200)response=http.getString();
  http.end();return status;
 }
@@ -78,8 +82,10 @@ inline bool exportAndSend(const String &snapshot){
  const uint32_t factsBefore=KittyMemory::factRevision;
  const uint32_t summariesBefore=KittyMemory::summaryRevision;
  String manifest="{";
+ failureStage=0;lastHttpStatus=0;
  for(uint8_t i=0;i<KittyMemory::EXPORT_COUNT;i++){
-  if(!allowed())return false;
+  lastFileIndex=i;
+  if(!allowed()){failureStage=1;return false;}
   mbedtls_sha256_context sha;mbedtls_sha256_init(&sha);
   if(mbedtls_sha256_starts(&sha,0)!=0){mbedtls_sha256_free(&sha);return false;}
   uint32_t offset=0,total=0;bool ok=true;
@@ -100,7 +106,7 @@ inline bool exportAndSend(const String &snapshot){
       "\",\"offset\":"+String(offset)+",\"data\":\""+payload+"\"}";
     String reply;
     uint32_t next=offset+block.length;
-    if(send("/snapshot/chunk",req,reply)!=200 || !ackOffset(reply,next)){ok=false;break;}
+    if(send("/snapshot/chunk",req,reply)!=200 || !ackOffset(reply,next)){failureStage=2;ok=false;break;}
     if(mbedtls_sha256_update(&sha,block.data,block.length)!=0){ok=false;break;}
     offset=next;
     bytesSent+=block.length;
@@ -109,7 +115,7 @@ inline bool exportAndSend(const String &snapshot){
    if(block.length==0){ok=false;break;}
    vTaskDelay(pdMS_TO_TICKS(12));
   }
-  if(!ok){mbedtls_sha256_free(&sha);return false;}
+  if(!ok){failureStage=lastHttpStatus==200?1:2;mbedtls_sha256_free(&sha);return false;}
   unsigned char hash[32]={0};
   if(mbedtls_sha256_finish(&sha,hash)!=0){mbedtls_sha256_free(&sha);return false;}
   mbedtls_sha256_free(&sha);
@@ -119,9 +125,10 @@ inline bool exportAndSend(const String &snapshot){
  }
  manifest+="}";
  if(savedBefore!=KittyMemory::saved || factsBefore!=KittyMemory::factRevision ||
-    summariesBefore!=KittyMemory::summaryRevision)return false;
+    summariesBefore!=KittyMemory::summaryRevision){failureStage=4;return false;}
  String reply;
  String body=String("{\"snapshot\":\"")+snapshot+"\",\"manifest\":"+manifest+"}";
+ failureStage=3;
  const int status=send("/snapshot/finalize",body,reply);
  return status==200 && (reply.indexOf("\"finalized\": true")>=0 ||
                          reply.indexOf("\"finalized\":true")>=0);
@@ -135,7 +142,7 @@ inline void task(void*){
    String snapshot=String("s3_")+String((unsigned long)time(nullptr))+
       "_"+String((unsigned long)esp_random(),HEX);
    if(exportAndSend(snapshot)){completed++;Serial.println("[MEMSYNC] snapshot finalized");}
-   else{failures++;Serial.println("[MEMSYNC] upload deferred/failed (SD remains authoritative)");}
+   else{failures++;Serial.printf("[MEMSYNC] upload deferred/failed stage=%u file=%u http=%d (SD authoritative)\\n",(unsigned)failureStage,(unsigned)lastFileIndex,(int)lastHttpStatus);}
   }
   vTaskDelay(pdMS_TO_TICKS(600000));
  }
