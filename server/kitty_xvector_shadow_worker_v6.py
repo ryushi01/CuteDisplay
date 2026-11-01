@@ -1,0 +1,78 @@
+"""Optional, bounded X-vector shadow diagnostics. NO authentication output.
+
+The worker only logs aggregate cosine similarity. It never sends IDs to Kitty,
+updates a profile, stores audio, or permits memory access. At most one job is
+pending/running; no additional tasks can queue in the live audio path.
+"""
+import io
+import json
+import os
+import statistics
+import threading
+import time
+import wave
+from pathlib import Path
+
+_GATE = threading.BoundedSemaphore(1)
+_LOCK = threading.Lock()
+_MODEL = None
+_ANCHORS = None
+
+def _init():
+    global _MODEL, _ANCHORS
+    if _MODEL is not None:
+        return
+    model_dir=Path(os.environ["KITTY_XVECTOR_MODEL_DIR"])
+    profile_path=Path(os.environ["KITTY_XVECTOR_SHADOW_PROFILE"])
+    if not model_dir.is_dir() or profile_path.is_symlink():
+        raise ValueError("invalid_shadow_configuration")
+    if profile_path.stat().st_mode & 0o077:
+        raise ValueError("shadow_profile_permissions")
+    profile=json.loads(profile_path.read_text())
+    if profile.get("mode")!="shadow_only" or profile.get("memory_authorization") is not False:
+        raise ValueError("not_shadow_only")
+    import numpy as np
+    anchors=profile.get("anchor_embeddings",[])
+    if len(anchors)<3: raise ValueError("missing_anchors")
+    anchors=[np.asarray(v,dtype="float64") for v in anchors]
+    from speechbrain.inference.speaker import EncoderClassifier
+    model=EncoderClassifier.from_hparams(source=str(model_dir),savedir=str(model_dir),
+                                        run_opts={"device":"cpu"})
+    _ANCHORS=anchors
+    _MODEL=model
+
+def _run(audio):
+    try:
+        with _LOCK:
+            _init()
+            with wave.open(io.BytesIO(audio),"rb") as wav:
+                if (wav.getframerate(),wav.getnchannels(),wav.getsampwidth())!=(16000,1,2):
+                    return
+                import numpy as np
+                import torch
+                samples=np.frombuffer(wav.readframes(wav.getnframes()),dtype="<i2").astype("float32")/32768.
+            if not 1.5<=len(samples)/16000<=8: return
+            started=time.monotonic()
+            with torch.inference_mode():
+                v=_MODEL.encode_batch(torch.from_numpy(samples).unsqueeze(0))
+            v=v.detach().cpu().numpy().reshape(-1).astype("float64")
+            v/=np.linalg.norm(v)
+            score=statistics.median(float(np.dot(v,a)) for a in _ANCHORS)
+            ms=round(1000*(time.monotonic()-started))
+            print("[KITTY_XVECTOR_SHADOW] score=%.4f inference_ms=%d memory_authorization=disabled"%(score,ms),flush=True)
+    except Exception as e:
+        print("[KITTY_XVECTOR_SHADOW] error=%s"%type(e).__name__,flush=True)
+    finally:
+        _GATE.release()
+
+def submit(audio):
+    if os.environ.get("KITTY_XVECTOR_SHADOW_ENABLED")!="1":
+        return False
+    if not isinstance(audio,bytes) or len(audio)>300000 or not _GATE.acquire(blocking=False):
+        return False
+    try:
+        threading.Thread(target=_run,args=(audio,),daemon=True,name="kitty-xvector-shadow").start()
+        return True
+    except Exception:
+        _GATE.release()
+        return False
