@@ -56,6 +56,9 @@ inline void tick(bool busy){
    auto finish=[](bool accepted=false){
     if(accepted){pending="";pendingSummary=false;
      pendingSummaryOwnerVerified=false;pendingSummaryConversation=0;pendingSummaryJobEnd=0;}
+    // One USB opt-in authorizes at most one inference request, even on success.
+    // Pending durable jobs are left for the next deliberate session.
+    operatorEnabled=false;
     running=false;requestStartedAt=0;worker=nullptr;vTaskDelete(nullptr);
    };
    if(abortRequested || interactive || !operatorEnabled){finish();return;}
