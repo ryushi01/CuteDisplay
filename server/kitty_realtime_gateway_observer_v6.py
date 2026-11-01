@@ -5,6 +5,7 @@ copies to observe_client/observe_upstream and do not await recognition.
 Unknown or mismatched items never unlock semantic memory. Never log PCM.
 """
 import os
+import asyncio
 try:
     from .kitty_realtime_speaker_session_v6 import SpeakerSession
     from .kitty_realtime_turn_gate_v6 import MemoryTurnGate
@@ -14,9 +15,10 @@ except ImportError:
 
 class KittySpeakerObserver:
     def __init__(self, send_to_s3, *, session=None, enabled=False,
-                 url=None, token=None, on_candidate=None):
+                 url=None, token=None, on_candidate=None, on_candidate_clear=None):
         self.enabled = enabled is True
         self.on_candidate = on_candidate
+        self.on_candidate_clear = on_candidate_clear
         self.url = url if url is not None else os.environ.get("KITTY_SEMANTIC_SERVICE_URL", "")
         self.token = token if token is not None else os.environ.get("KITTY_MEMORY_TOKEN", "")
         self.session = session or SpeakerSession()
@@ -43,6 +45,11 @@ class KittySpeakerObserver:
             return
         kind = event.get("type")
         if kind == "input_audio_buffer.speech_started":
+            if callable(self.on_candidate_clear):
+                try:
+                    asyncio.create_task(self.on_candidate_clear())
+                except RuntimeError:
+                    pass
             self.session.speech_started()
             self.gate.invalidate()
             self.pending_stopped_item = None
