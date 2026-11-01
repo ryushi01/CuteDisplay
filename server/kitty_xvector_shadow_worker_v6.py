@@ -65,12 +65,20 @@ def warm_async():
     return True
 
 
-def recognize_candidate(audio, *, threshold=0.970):
+def recognize_candidate(audio, *, threshold=None):
     """Opt-in experimental identity match. Caller controls any authorization.
 
     Higher threshold than the diagnostic shadow 0.957; this is NOT calibrated
     security-grade voice authentication. Safe failure returns unknown.
     """
+    if threshold is None:
+        try:
+            threshold = float(os.environ.get("KITTY_XVECTOR_EXPERIMENTAL_THRESHOLD", "0.970"))
+        except ValueError:
+            threshold = 0.970
+    # Reject unsafe or invalid configuration; never weaken automatically.
+    if not 0.965 <= threshold <= 1.0:
+        return {"speaker_id":"unknown","confidence":"unknown","score":None}
     if not _GATE.acquire(blocking=False):
         return {"speaker_id":"unknown","confidence":"unknown","score":None}
     try:
@@ -92,8 +100,8 @@ def recognize_candidate(audio, *, threshold=0.970):
             score=statistics.median(float(np.dot(v,a)) for a in _ANCHORS)
             ms=round((time.monotonic()-started)*1000)
             accepted=score >= threshold
-            print("[KITTY_XVECTOR_EXPERIMENTAL] match=%s score=%.4f inference_ms=%d" %
-                  (accepted,score,ms),flush=True)
+            print("[KITTY_XVECTOR_EXPERIMENTAL] match=%s score=%.4f threshold=%.3f inference_ms=%d" %
+                  (accepted,score,threshold,ms),flush=True)
             return {"speaker_id":"person:shana" if accepted else "unknown",
                     "confidence":"probable" if accepted else "unknown",
                     "score":round(score,3) if accepted else None}
