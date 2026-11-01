@@ -64,3 +64,9 @@ This audit confirms **what is deployed versus what is tracked**. It does not est
 
 ## Minimal safety checklist
 Do not erase all flash or format SD; do not flash C5 sketch to S3; do not merge credentials or memory snapshots into public Git; do not claim a successful GitHub build proves deployed firmware parity; distinguish **source** from separately patched **live runtime**.
+
+## Incremental source patch — 2026-11-01 (not deployed)
+
+GitHub `main` now includes the initial S3 summarization safety patch (commits `5082a958`, `d048a289`). The SD worker submits **both verified and unverified** archived turn batches to the existing idle-only AI summarizer, with a trust flag propagated to the result. The SD worker writes unverified results to `/kitty/unverified_summaries_v6.tsv`, **not** the globally injected `/kitty/summaries.tsv`. The owner-fact and AI consolidation gates remain restricted to `ownerVerified`. Mixed verification-status batches reset at the boundary instead of combining identities.
+
+**Limitations:** This is only the first safe increment. The new unverified summary file is local to S3 and is **not** one of the nine exported snapshot files; its entries are **not** injected into conversation context or used for cross-call recall. The existing summary/owner-fact context injection policy also needs a separate end-to-end security review before exposing more unverified content. Durable call/session identifiers, same-call rolling retrieval, partial-batch flushing, and a hardware build/flash remain to be implemented/validated. No deployed Ubuntu files, private secrets, C5 v38, or existing SD contents were changed. Do not describe the full long-conversation reliability goal as complete.
