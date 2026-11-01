@@ -56,6 +56,14 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(call("/health", b"", method="GET")[0], (200, {"ok": True}))
         self.assertEqual(call("/secret", b"", method="GET")[0][0], 404)
 
+    def test_durable_ack_timeout_budget(self):
+        self.assertEqual(gateway.UPSTREAM_TIMEOUT_SECONDS, 8)
+        from pathlib import Path
+        source = Path(gateway.__file__).read_text()
+        self.assertIn("timeout=UPSTREAM_TIMEOUT_SECONDS", source)
+        firmware = Path(__file__).resolve().parents[1] / "firmware/CuteDisplayBrain/KittyMemorySyncV6.h"
+        self.assertIn("http.setTimeout(12000)", firmware.read_text())
+
     def test_fails_closed_on_same_token(self):
         with patch.object(gateway, "MEMORY_TOKEN", gateway.DEVICE_TOKEN):
             self.assertEqual(call("/snapshot/chunk", b"{}")[0][0], 401)
