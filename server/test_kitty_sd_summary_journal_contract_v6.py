@@ -30,4 +30,9 @@ check("summary_jobs_v6" not in files and "unverified_summaries_v6" not in files,
 journal = memory.split("auto submitSummaryBatch=", 1)[1].split("auto dispatchSummaryJob=", 1)[0]
 check(r'+"\t"+' in journal and r'+turns+"\n";' in journal, "actual TSV delimiter escapes")
 check(r'+"\\t"+' not in journal and r'+turns+"\\n";' not in journal, "double-escaped TSV delimiters")
+check('static volatile bool operatorEnabled=false;' in worker, "idle AI defaults off")
+check('if(running || !operatorEnabled || pausedAfterHttpFailure' in worker, "idle AI enable gate")
+check('operatorEnabled=false;\n    running=false;requestStartedAt=0;' in worker, "one request per opt-in")
+check('operatorEnabled=false;running=false;requestStartedAt=0;worker=nullptr;' in worker, "allocation failure clears opt-in")
+check('static constexpr uint32_t TOTAL_BUDGET_MS=30000UL;' in worker, "cooperative elapsed budget")
 print("Kitty V6 SD summary journal source contract: OK")
