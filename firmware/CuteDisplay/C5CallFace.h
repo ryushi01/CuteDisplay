@@ -267,32 +267,31 @@ static void drawFullScreenKittyFace(){
  oval(x+8,160,8,8,CF_INK);oval(x+width-8,160,8,8,CF_INK);
  rect(x+8,152,width-16,17,CF_INK);
  textAt(label,x+12,155,1,CF_WHITE);
- // Full-screen rolling conversation text, retaining the previous turn.
+ // Compact caption overlay: the animated mascot stays visible behind and
+ // above the lower text panel. Show only the active reply, not the prior one.
  if(!callCaption.isEmpty()){
-  rect(0,0,320,170,CF_WHITE);
-  String rows[11];String current="";int used=0;
-  String transcript=callCaptionPrevious;
-  if(!transcript.isEmpty())transcript+='\n';
-  transcript+=callCaption;
+  const int panelY=176;
+  const int panelH=64;
+  rect(0,panelY,320,panelH,CF_INK);
+  String rows[4];String current="";int used=0;
   auto appendRow=[&](const String &value){
-   for(int i=0;i<10;i++)rows[i]=rows[i+1];
-   rows[10]=value;
+   for(int i=0;i<3;i++)rows[i]=rows[i+1];
+   rows[3]=value;
   };
-  for(int pos=0;pos<(int)transcript.length();){
+  for(int pos=0;pos<(int)callCaption.length();){
    const int begin=pos;
-   uint32_t cp=decodeUTF8(transcript,pos);
-   if(cp=='\r')continue;
-   if(cp=='\n'){appendRow(current);current="";used=0;continue;}
+   uint32_t cp=decodeUTF8(callCaption,pos);
+   if(cp=='\\r')continue;
+   if(cp=='\\n'){appendRow(current);current="";used=0;continue;}
    const int glyph=utfWidth(cp,1,1);
-   if(used+glyph>306 && !current.isEmpty()){
+   if(used+glyph>304 && !current.isEmpty()){
     appendRow(current);current="";used=0;
    }
-   current+=transcript.substring(begin,pos);used+=glyph;
+   current+=callCaption.substring(begin,pos);used+=glyph;
   }
   if(!current.isEmpty())appendRow(current);
-  for(int i=0;i<11;i++)if(!rows[i].isEmpty())
-   richText(rows[i],6,4+i*13,1,1,CF_INK,316);
-  rect(0,150,320,20,CF_INK);
-  textAt(label,8,155,1,CF_WHITE);
+  for(int i=0;i<4;i++)if(!rows[i].isEmpty())
+   richText(rows[i],6,panelY+5+i*14,1,1,CF_WHITE,316);
  }
+
 }
