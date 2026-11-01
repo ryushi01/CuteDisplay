@@ -270,13 +270,13 @@ static void drawFullScreenKittyFace(){
  // Compact caption overlay: the animated mascot stays visible behind and
  // above the lower text panel. Show only the active reply, not the prior one.
  if(!callCaption.isEmpty()){
-  const int panelY=176;
-  const int panelH=64;
+  const int panelY=136;
+  const int panelH=34;
   rect(0,panelY,320,panelH,CF_INK);
-  String rows[4];String current="";int used=0;
+  String rows[2];String current="";int used=0;
   auto appendRow=[&](const String &value){
-   for(int i=0;i<3;i++)rows[i]=rows[i+1];
-   rows[3]=value;
+   rows[0]=rows[1];
+   rows[1]=value;
   };
   for(int pos=0;pos<(int)callCaption.length();){
    const int begin=pos;
@@ -290,7 +290,7 @@ static void drawFullScreenKittyFace(){
    current+=callCaption.substring(begin,pos);used+=glyph;
   }
   if(!current.isEmpty())appendRow(current);
-  for(int i=0;i<4;i++)if(!rows[i].isEmpty())
+  for(int i=0;i<2;i++)if(!rows[i].isEmpty())
    richText(rows[i],6,panelY+5+i*14,1,1,CF_WHITE,316);
  }
 
