@@ -19,7 +19,7 @@ class AsyncSemanticTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_speaker_never_queries(self):
         def forbidden(*args):
             raise AssertionError("must not run")
-        for speaker in ("unknown", "", "person:\nother"):
+        for speaker in ("unknown", "", "person:\nother", "owner", "speaker-1", "person:日本", "person:" + "x" * 49):
             result = await semantic_context(
                 "http://127.0.0.1:8766", "token", "name", speaker,
                 request_fn=forbidden)
