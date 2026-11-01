@@ -1041,7 +1041,7 @@ static void consoleCommand(String cmd){
  }
  if(cmd=="memory summary status"){
   // Read-only diagnostics: no SD file I/O, no private text or credentials.
-  Serial.printf("[MEMORY V6] sd=%d active_call=%lu job_ack_offset=%lu awaiting=%d summary_queue=%u results_queue=%u backpressure=%lu ai_running=%d ai_pending=%d\\n",
+  Serial.printf("[MEMORY V6] sd=%d active_call=%lu job_ack_offset=%lu awaiting=%d summary_queue=%u results_queue=%u backpressure=%lu ai_running=%d ai_pending=%d ai_http_paused=%d\\n",
     KittyMemory::ready()?1:0,
     (unsigned long)KittyMemory::activeConversation,
     (unsigned long)KittyMemory::summaryAckEnd,
@@ -1049,7 +1049,8 @@ static void consoleCommand(String cmd){
     (unsigned)(KittyMemory::summaryCandidates?uxQueueMessagesWaiting(KittyMemory::summaryCandidates):0),
     (unsigned)(KittyMemory::summaryResults?uxQueueMessagesWaiting(KittyMemory::summaryResults):0),
     (unsigned long)KittyMemory::summaryBackpressure,
-    BrainMemoryAI::running?1:0,!BrainMemoryAI::pending.isEmpty()?1:0);
+    BrainMemoryAI::running?1:0,!BrainMemoryAI::pending.isEmpty()?1:0,
+    BrainMemoryAI::pausedAfterHttpFailure?1:0);
   return;
  }
  if(cmd=="c5 ota status"){
