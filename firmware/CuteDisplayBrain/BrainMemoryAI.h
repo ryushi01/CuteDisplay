@@ -198,7 +198,7 @@ inline void tick(bool busy){
      }
      // Report metadata only: never print response text or private memory.
      Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu truncated=%d format=%d json=%d choices=%d content=%d accepted=%d\\n",
-       status,(unsigned long)elapsed,(unsigned long)response.bytes,response.truncated?1:0,
+       status,(unsigned long)elapsed,(unsigned long)response.bytes,response.truncated?1:0,format,
        outer?1:0,cJSON_IsArray(choices)?1:0,cJSON_IsString(content)?1:0,accepted?1:0);
      if(outer)cJSON_Delete(outer);
     }else if(abortRequested || interactive || !operatorEnabled){
