@@ -22,5 +22,19 @@ class LiveSyncContract(unittest.TestCase):
         self.assertIn("pauseForSpeech()",code)
         self.assertIn("savedBefore!=KittyMemory::saved",code)
         self.assertIn("WiFiClientSecure client;client.setCACert",code)
+    def test_archive_revision_guard_and_audio_safe_diagnostics(self):
+        sync=(ROOT/"firmware/CuteDisplayBrain/KittyMemorySyncV6.h").read_text()
+        self.assertIn("ARCHIVE_QUIET_MS=3000UL",sync)
+        self.assertIn("archiveChanged(savedBefore,factsBefore,summariesBefore)",sync)
+        self.assertIn("failureStage=4;changedDuringExport++;ok=false;break;",sync)
+        self.assertIn("if(failureStage!=4)",sync)
+        self.assertIn("lastArchiveChange=now",sync)
+        self.assertIn("inCallPosts++",sync)
+        self.assertIn("speechOverlapPosts++",sync)
+        self.assertIn("slowestPostMs=elapsed",sync)
+        self.assertIn('send("/snapshot/finalize",body,reply)',sync)
+        self.assertIn('client.setCACert(KITTY_SYNC_V6_CA_PEM)',sync)
+        self.assertNotIn("setInsecure(",sync)
+
 if __name__=="__main__":
     unittest.main()
