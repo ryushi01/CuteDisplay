@@ -17,7 +17,7 @@ HOOK = """
                 if kitty_speaker_observer is not None:
                     try:
                         _kh = kitty_speaker_observer.candidate_hint
-                        if _kh is not None and _kh[1] == 'person:shana':
+                        if (_kh is not None and _kh[1] == 'person:shana'\n                                and __import__('time').monotonic() < kitty_speaker_observer.candidate_expires):
                             # Only annotate a response the client was already
                             # authorized to create. Never emit a new response.
                             _kit_items = command if isinstance(command, list) else [command]
@@ -34,7 +34,7 @@ HOOK = """
                                             'You may say it sounds like Shana if directly asked, but do not '
                                             'claim certainty, mention biometric scores, or reveal personal '
                                             'memories based on this hint. Keep your tone natural.')
-                                        _kit_response['instructions'] = (_kit_old + '\\n' + _kit_note)[:1800]
+                                        _kit_response['instructions'] = (_kit_old + '\\n' + _kit_note)[:1800]\n                                        print('[KITTY_CANDIDATE_RESPONSE] hint_attached=true memory_authorization=disabled', flush=True)
                     except Exception:
                         pass  # Optional hint must never interrupt voice
 """
