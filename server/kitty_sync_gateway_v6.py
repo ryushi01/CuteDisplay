@@ -19,6 +19,8 @@ DEVICE_TOKEN = os.environ.get("KITTY_SYNC_DEVICE_TOKEN", "")
 MEMORY_TOKEN = os.environ.get("KITTY_MEMORY_TOKEN", "")
 UPSTREAM_HOST = "127.0.0.1"
 UPSTREAM_PORT = 8766
+# Durable chunk writes fsync before ACK. Allow for occasional storage latency.
+UPSTREAM_TIMEOUT_SECONDS = 8
 
 
 def valid_config():
@@ -62,7 +64,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("expected JSON object")
         except (UnicodeDecodeError, ValueError):
             return self.reply(400, {"error": "invalid_json"})
-        conn = http.client.HTTPConnection(UPSTREAM_HOST, UPSTREAM_PORT, timeout=3)
+        conn = http.client.HTTPConnection(UPSTREAM_HOST, UPSTREAM_PORT, timeout=UPSTREAM_TIMEOUT_SECONDS)
         try:
             conn.request("POST", self.path, body, {
                 "Authorization": "Bearer " + MEMORY_TOKEN,
