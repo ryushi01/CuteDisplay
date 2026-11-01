@@ -78,7 +78,7 @@ inline int send(const char* route,const String &json,String &response){
  if(!allowed())return -1;
  WiFiClientSecure client;client.setCACert(KITTY_SYNC_V6_CA_PEM);
  client.setTimeout(3);
- HTTPClient http;http.setConnectTimeout(2500);http.setTimeout(3500);
+ HTTPClient http;http.setConnectTimeout(2500);http.setTimeout(12000); // 8s gateway upstream + HTTPS margin
  String url=String(KITTY_SYNC_V6_URL)+route;
  if(!http.begin(client,url))return -1;
  http.addHeader("Authorization",String("Bearer ")+KITTY_SYNC_V6_DEVICE_TOKEN);
