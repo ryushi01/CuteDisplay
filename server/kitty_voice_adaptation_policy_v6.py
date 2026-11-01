@@ -70,7 +70,7 @@ def propose(profile, embedding, *, now, score, verified, explicit_approval):
 
 def effective_embeddings(profile, *, now):
     """Use stable anchors and recent vetted samples; no silent learning."""
-    anchors = [_unit(x) for x in profile.get("anchor_embeddings", ())]
+    anchors = [_unit(x) for x in profile.get("anchor_embeddings", profile.get("embeddings", ()))]
     if len(anchors) < 3:
         raise ValueError("profile_has_no_protected_anchors")
     adaptive = prune_adaptive(profile.get("adaptive_embeddings", []), now=now)
