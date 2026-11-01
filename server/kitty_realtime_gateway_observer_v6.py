@@ -118,6 +118,8 @@ class KittySpeakerObserver:
             safe_event["candidate_provenance"] = "voice_probable"
         try:
             await self.send_to_s3(safe_event)
+            if "candidate_speaker_id" in safe_event:
+                print("[KITTY_CANDIDATE_TRANSPORT] sent=true authorization=disabled", flush=True)
         except Exception as exc:
             # Optional metadata delivery must never terminate the live call.
             print("[KITTY_SPEAKER_DELIVERY] error=%s" % type(exc).__name__, flush=True)
