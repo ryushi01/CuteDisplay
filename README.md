@@ -15,7 +15,7 @@
 | Recall an **explicitly approved shareable** memory across calls | **Verified** with Mochi Planet |
 | Familiar-sounding voice hint (“sounds like Shana”) | **Experimental**; voice similarity varies |
 | Verified owner identity, private cross-call recall | **Not yet validated**; candidate-only matching never authorizes access |
-| Reliable long-conversation summaries for unknown/unverified speakers | **Known gap**; next work item |
+| Reliable long-conversation summaries for unknown/unverified speakers | **Initial source patch**; unverified batches now reach an isolated idle summary path, but call-scoped recall is not yet implemented or hardware-validated |
 | iPhone companion app for setup/settings | **Configuration role only**, not everyday conversation |
 | S3-to-C5 firmware delivery via existing UART | **Implemented**; protect validated C5 build |
 
@@ -47,7 +47,7 @@ The **microSD in the S3** is the durable source of truth for Kitty's archived me
 1. **Conversation archive:** completed conversation turns are appended to the S3 SD archive, even if the current voice is unknown.
 2. **Approved shared notes:** only explicitly approved non-secret entries in `/kitty/shareable_memories_v6.tsv` become global cross-call conversational context. Test entry: “Kitty's favorite imaginary planet is Mochi Planet.”
 3. **Speaker-scoped data:** user-specific claims and semantic recall are kept separate. A *voice candidate* or spoken self-introduction is **not** an authenticated owner identity.
-4. **Current limitation:** in `KittyMemory.h`, unverified turns are archived but return early before the summary/consolidation work. Thus long conversations may be preserved on SD without producing sufficient useful recall context. **This is the next fix**, not a completed capability.
+4. **Current limitation:** in `KittyMemory.h`, unverified turns are archived but return early before the summary/consolidation work. Thus long conversations may be preserved on SD without producing sufficient useful recall context. **The first source patch now allows unverified summary batches, isolated from owner facts and global context.** Same-call recall remains unfinished and hardware-unvalidated.
 
 ## Hardware at a glance
 
@@ -82,7 +82,7 @@ The **microSD in the S3** is the durable source of truth for Kitty's archived me
 
 ## Next improvement
 
-Make **long conversations reliable regardless of voice identity**: always preserve complete turns, create bounded **conversation-scoped** summaries even when speaker is unverified, retrieve those summaries during the same call, and keep private owner facts protected. Scope/context must not leak to other callers or calls. Avoid disruptions to the validated realtime audio path.
+Continue making **long conversations reliable regardless of voice identity** (the initial isolated-summary source patch is merged, but end-to-end recall remains unfinished): always preserve complete turns, create bounded **conversation-scoped** summaries even when speaker is unverified, retrieve those summaries during the same call, and keep private owner facts protected. Scope/context must not leak to other callers or calls. Avoid disruptions to the validated realtime audio path.
 
 **Start here:** [Kitty V6 current status + next-chat handoff](docs/KITTY_V6_CURRENT_HANDOFF_2026-11-01.md).
 
