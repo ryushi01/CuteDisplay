@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FW = ROOT / "firmware/CuteDisplayBrain/BrainRealtimeDirect.h"
 OBS = ROOT / "server/kitty_realtime_gateway_observer_v6.py"
 CPU = ROOT / "server/kitty_speaker_cpu_v6.py"
+REALTIME = ROOT / "server/kitty_realtime_speaker_v6.py"
 ATTR = ROOT / "server/kitty_semantic_attribution_v6.py"
 INDEX = ROOT / "server/kitty_sd_semantic_index.py"
 
@@ -25,6 +26,8 @@ class AttributionContract(unittest.TestCase):
         cpu = CPU.read_text()
         self.assertIn('"candidate_speaker_id": candidate', cpu)
         self.assertIn('"speaker_id":"unknown"', cpu)
+        realtime = REALTIME.read_text()
+        self.assertIn('"candidate_speaker_id":candidate', realtime)
         observer = OBS.read_text()
         self.assertIn('candidate = event.get("candidate_speaker_id")', observer)
         self.assertIn('self.gate.accept_speaker(self.epoch, item, sid, confidence)', observer)
