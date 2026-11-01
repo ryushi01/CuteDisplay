@@ -15,7 +15,7 @@ import urllib.request
 MAX_QUERY = 300
 MAX_CONTEXT = 1800
 ALLOWED_TIMEOUT = 0.35
-SPEAKER_ID = re.compile(r"person:[A-Za-z0-9_-]{1,48}\\Z")
+SPEAKER_ID = re.compile(r"person:[A-Za-z0-9_-]{1,48}\Z")
 
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
