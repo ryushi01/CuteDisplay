@@ -96,18 +96,22 @@ inline void tick(bool busy){
    char *payload=cJSON_PrintUnformatted(root);cJSON_Delete(root);
    if(!payload){finish();return;}
    String reply;reply.reserve(512);
-   struct Response {String *text;};
+   struct Response {String *text; uint32_t firstDataAt=0; uint32_t bytes=0; int status=0; bool connected=false;};
    Response response={&reply};
    esp_http_client_config_t cfg={};
    cfg.url=url.c_str();
    cfg.crt_bundle_attach=esp_crt_bundle_attach; // Verified HTTPS to remote Open WebUI.
-   cfg.timeout_ms=10000; // Idle-only model generation may exceed 2.5s; never on audio task.
+   cfg.timeout_ms=15000; // Idle-only inference, never on realtime/audio task.
    cfg.user_data=&response;
    cfg.event_handler=[](esp_http_client_event_t *e)->esp_err_t {
     if(abortRequested || interactive)return ESP_FAIL;
+    auto *res=(Response*)e->user_data;
+    if(!res)return ESP_OK;
+    if(e->event_id==HTTP_EVENT_ON_CONNECTED)res->connected=true;
     if(e->event_id==HTTP_EVENT_ON_DATA && e->data_len>0){
-     auto *res=(Response*)e->user_data;
-     if(res && res->text && res->text->length()+e->data_len<=2048)
+     if(!res->firstDataAt)res->firstDataAt=millis();
+     res->bytes+=(uint32_t)e->data_len;
+     if(res->text && res->text->length()+e->data_len<=2048)
       res->text->concat((const char*)e->data,(unsigned int)e->data_len);
     }
     return ESP_OK;
@@ -120,7 +124,9 @@ inline void tick(bool busy){
     esp_http_client_set_header(http,"Authorization",auth.c_str());
     esp_http_client_set_header(http,"Content-Type","application/json");
     esp_http_client_set_post_field(http,payload,strlen(payload));
+    uint32_t startedAt=millis();
     esp_err_t rc=esp_http_client_perform(http);
+    uint32_t elapsed=(uint32_t)(millis()-startedAt);
     int status=esp_http_client_get_status_code(http);
     if(rc==ESP_OK && status==200 && !abortRequested && !interactive){
      cJSON *outer=cJSON_Parse(reply.c_str());
@@ -160,7 +166,7 @@ inline void tick(bool busy){
       }
      }
      if(outer)cJSON_Delete(outer);
-    }else if(!abortRequested)Serial.printf("[MEMORY AI] skipped HTTP=%d err=%d\\n",status,(int)rc);
+    }else if(!abortRequested)Serial.printf("[MEMORY AI] skipped HTTP=%d err=%d elapsed_ms=%lu connected=%d first_data=%d rx_bytes=%lu\\n",status,(int)rc,(unsigned long)elapsed,response.connected?1:0,response.firstDataAt?1:0,(unsigned long)response.bytes);
    }
    if(http)esp_http_client_cleanup(http);
    free(payload);
