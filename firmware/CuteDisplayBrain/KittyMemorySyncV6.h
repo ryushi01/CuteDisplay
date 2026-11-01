@@ -28,6 +28,17 @@ namespace KittyMemorySyncV6 {
 static TaskHandle_t worker=nullptr;
 static bool (*idleCheck)()=nullptr;
 static bool (*callActive)()=nullptr;
+static bool (*speechActive)()=nullptr;
+inline void setSpeechActive(bool (*check)()){speechActive=check;}
+inline bool pauseForSpeech(){
+ // Pause *between* chunks, never from an audio thread. Avoid prolonged
+ // network contention while Kitty is generating/playback speech.
+ while(speechActive && speechActive()){
+  if(!allowed())return false;
+  vTaskDelay(pdMS_TO_TICKS(100));
+ }
+ return allowed();
+}
 inline void setCallActive(bool (*check)()){callActive=check;}
 static volatile uint32_t completed=0,failures=0;
 static volatile uint32_t bytesSent=0;
@@ -92,7 +103,7 @@ inline bool exportAndSend(const String &snapshot){
   if(mbedtls_sha256_starts(&sha,0)!=0){mbedtls_sha256_free(&sha);return false;}
   uint32_t offset=0,total=0;bool ok=true;
   while(ok){
-   if(!allowed() || !KittyMemory::requestExport(i,offset)){ok=false;break;}
+   if(!pauseForSpeech() || !KittyMemory::requestExport(i,offset)){ok=false;break;}
    KittyMemory::ExportBlock block={};
    if(!KittyMemory::takeExport(block,1200) || !block.ok ||
       block.file!=i || block.offset!=offset || block.total>256UL*1024UL*1024UL){
@@ -108,7 +119,7 @@ inline bool exportAndSend(const String &snapshot){
       "\",\"offset\":"+String(offset)+",\"data\":\""+payload+"\"}";
     String reply;
     uint32_t next=offset+block.length;
-    if(send("/snapshot/chunk",req,reply)!=200 || !ackOffset(reply,next)){failureStage=2;ok=false;break;}
+    if(!pauseForSpeech() || send("/snapshot/chunk",req,reply)!=200 || !ackOffset(reply,next)){failureStage=2;ok=false;break;}
     if(mbedtls_sha256_update(&sha,block.data,block.length)!=0){ok=false;break;}
     offset=next;
     bytesSent+=block.length;
@@ -116,7 +127,7 @@ inline bool exportAndSend(const String &snapshot){
    if(offset==total)break;
    if(block.length==0){ok=false;break;}
    // Yield between chunks; use gentler pacing when sharing Wi-Fi with voice.
-   vTaskDelay(pdMS_TO_TICKS(callActive && callActive()?200:12));
+   vTaskDelay(pdMS_TO_TICKS(callActive && callActive()?750:12));
   }
   if(!ok){failureStage=lastHttpStatus==200?1:2;mbedtls_sha256_free(&sha);return false;}
   unsigned char hash[32]={0};
@@ -139,7 +150,7 @@ inline bool exportAndSend(const String &snapshot){
 // Short eligibility debounce, not a restriction on ongoing calls.
 // Polling is lightweight; actual SD reads remain on the memory worker.
 static constexpr uint32_t IDLE_QUIET_MS=500UL;
-static constexpr uint32_t FAILURE_RETRY_MS=5000UL;
+static constexpr uint32_t FAILURE_RETRY_MS=15000UL;
 static constexpr uint32_t PERIODIC_REFRESH_MS=60000UL;
 inline void task(void*){
  uint32_t idleSince=0,lastSuccess=0,lastFailure=0;
