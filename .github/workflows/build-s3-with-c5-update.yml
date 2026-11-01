@@ -39,6 +39,11 @@ jobs:
           PYTHONPATH=server python3 -m unittest server.test_kitty_memory_service server.test_kitty_memory_context_v6 server.test_kitty_semantic_async_client_v6
           python3 server/test_patch_openwebui_memory_refresh.py
 
+      - name: Check speaker attribution and display contracts
+        run: |
+          python3 -m unittest discover -s server -p 'test_kitty_attribution_pipeline_contract_v6.py' -v
+          python3 -m unittest discover -s server -p 'test_kitty_display_contract_v6.py' -v
+
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
