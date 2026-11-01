@@ -1,6 +1,6 @@
 """Optional, bounded X-vector shadow diagnostics. NO authentication output.
 
-The worker only logs aggregate cosine similarity. It never sends IDs to Kitty,
+The worker logs a provisional match/unknown verdict and cosine similarity. It never sends IDs to Kitty,
 updates a profile, stores audio, or permits memory access. At most one job is
 pending/running; no additional tasks can queue in the live audio path.
 """
@@ -17,6 +17,8 @@ _GATE = threading.BoundedSemaphore(1)
 _LOCK = threading.Lock()
 _MODEL = None
 _ANCHORS = None
+# Provisional, calibrated from only one other speaker. Never an auth threshold.
+SHADOW_THRESHOLD = 0.957
 
 def _init():
     global _MODEL, _ANCHORS
@@ -59,7 +61,8 @@ def _run(audio):
             v/=np.linalg.norm(v)
             score=statistics.median(float(np.dot(v,a)) for a in _ANCHORS)
             ms=round(1000*(time.monotonic()-started))
-            print("[KITTY_XVECTOR_SHADOW] score=%.4f inference_ms=%d memory_authorization=disabled"%(score,ms),flush=True)
+            verdict = "candidate_match" if score >= SHADOW_THRESHOLD else "unknown"
+            print("[KITTY_XVECTOR_SHADOW] verdict=%s score=%.4f threshold=%.3f inference_ms=%d memory_authorization=disabled" % (verdict,score,SHADOW_THRESHOLD,ms),flush=True)
     except Exception as e:
         print("[KITTY_XVECTOR_SHADOW] error=%s"%type(e).__name__,flush=True)
     finally:
