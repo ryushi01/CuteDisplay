@@ -44,6 +44,9 @@ jobs:
           python3 -m unittest discover -s server -p 'test_kitty_attribution_pipeline_contract_v6.py' -v
           python3 -m unittest discover -s server -p 'test_kitty_display_contract_v6.py' -v
 
+      - name: Check durable S3 summary journal and privacy contracts
+        run: python3 server/test_kitty_sd_summary_journal_contract_v6.py
+
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
