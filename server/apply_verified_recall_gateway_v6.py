@@ -23,7 +23,7 @@ def patch(source):
 
         (
             "kitty_semantic_reply(request_id, turn_id, speaker_id, query))",
-            "kitty_semantic_reply(request_id, turn_id, speaker_id, query,\n                                             observer, epoch))",
+            "kitty_semantic_reply(request_id, turn_id, speaker_id, query,\n                                             kitty_speaker_observer, epoch))",
         ),
     ]
     for before, after in edits:
@@ -31,33 +31,25 @@ def patch(source):
         if count != 1:
             raise ValueError(f"Source mismatch, expected one match, found {count}: {before[:64]!r}")
         source = source.replace(before, after, 1)
-    # Replace the legacy fail-closed branch independently of its indentation.
-    # A single observed, authorized turn is mandatory before recalling memory.
-    branch = re.compile(
-        r"(?m)^(?P<indent>[ \\t]*)if[ \\t]+not[ \\t]+kitty_server_verified_speaker_turn[ \\t]*:[ \\t]*\\n"
-        r"(?P=indent)[ \\t]+continue[ \\t]*\\n"
-    )
-    def verified_branch(match):
-        indent = match.group("indent")
-        return (
-            indent + "observer = kitty_speaker_observer\\n"
-            + indent + "if observer is None:\\n"
-            + indent + "    continue\\n"
-            + indent + "epoch = observer.authorized_recall(turn_id, speaker_id, provenance)\\n"
-            + indent + "if epoch is None:\\n"
-            + indent + "    continue\\n"
-        )
-    source, replacements = branch.subn(verified_branch, source)
-    if replacements != 1:
-        raise ValueError(f"Expected one legacy memory guard, found {replacements}")
-    # Older deployments differ in indentation/comment spelling on this flag.
-    # The real enforcement is the exact observer authorization in the branch.
-    source = re.sub(
-        r"(?m)^[ \\t]*kitty_server_verified_speaker_turn[ \\t]*=[ \\t]*False[^\\n]*\\n",
-        "", source,
-    )
-    if "kitty_server_verified_speaker_turn" in source:
-        raise ValueError("Legacy memory flag remains; gateway not modified")
+    guard = "                    # Schedule CPU/HTTP recall separately: never pause the"
+    if source.count(guard) != 1:
+        raise ValueError("Semantic request handler differs from inspected gateway")
+    source = source.replace(
+        guard,
+        "                    observer = kitty_speaker_observer\\n"
+        "                    if observer is None:\\n"
+        "                        continue\\n"
+        "                    epoch = observer.authorized_recall(turn_id, speaker_id, provenance)\\n"
+        "                    if epoch is None:\\n"
+        "                        continue\\n"
+        + guard, 1)
+    sink = "                ), flush=True)\\n        kitty_speaker_observer = None"
+    if source.count(sink) != 1:
+        raise ValueError("Speaker-result callback differs from inspected gateway")
+    source = source.replace(sink,
+        "                ), flush=True)\\n"
+        "                await ws.send_json(event)\\n"
+        "        kitty_speaker_observer = None", 1)
     ast.parse(source)
     return source
 
