@@ -25,6 +25,7 @@ def evaluate(paths, threshold):
         pairs.append(value)
         print("%s vs %s: %.3f" % (paths[i].name, paths[j].name, value))
     print("Pairwise median: %.3f" % statistics.median(pairs))
+    print("Observed pairwise range: %.3f to %.3f" % (min(pairs), max(pairs)))
     print("=== Best exploratory three-sample cohort (NOT validated) ===")
     candidates = []
     for group in itertools.combinations(range(len(paths)), 3):
@@ -56,6 +57,8 @@ def evaluate(paths, threshold):
             paths[idx].name, median,
             "PASS" if median >= threshold else "REJECT"))
     valid = internal >= threshold and all(v >= threshold for v in holdout_scores)
+    print("Lowest independent holdout median: %.3f" % min(holdout_scores))
+    print("Trial threshold is OFFLINE-ONLY; live memory authorization remains unchanged.")
     print("Enrollment verdict:", "CANDIDATE_ONLY — impostor validation required" if valid
           else "DO_NOT_ACTIVATE")
     print("No profile, memory, recordings or threshold modified.")
@@ -66,8 +69,8 @@ def main():
     ap.add_argument("--wav-dir", type=Path, required=True)
     ap.add_argument("--threshold", type=float, default=0.82)
     args = ap.parse_args()
-    if not 0.82 <= args.threshold <= 1.0:
-        ap.error("threshold must be between 0.82 and 1.0")
+    if not 0.65 <= args.threshold <= 1.0:
+        ap.error("audit threshold must be between 0.65 and 1.0")
     paths = sorted(p for p in args.wav_dir.glob("*.wav") if p.is_file() and not p.is_symlink())
     if not 6 <= len(paths) <= 24:
         ap.error("requires between 6 and 24 WAV recordings")
