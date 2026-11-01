@@ -20,6 +20,12 @@ class ShareableAiIntegrationContract(unittest.TestCase):
         self.assertIn("Explicitly shared, non-secret Kitty SD notes",source)
         self.assertNotIn("queueApprovedSharedMemory(",source)
 
+    def test_usb_only_explicit_approval(self):
+        source=(ROOT/"CuteDisplayBrain.ino").read_text()
+        self.assertIn('if(cmd.startsWith("memory share "))',source)
+        self.assertIn("queueApprovedSharedMemory(id,note,true)",source)
+        self.assertIn("BrainRealtimeDirect::active()",source)
+
     def test_no_auto_approval_from_speech(self):
         source=(ROOT/"BrainRealtimeDirect.h").read_text()
         self.assertNotIn("queueApprovedSharedMemory(",source)
