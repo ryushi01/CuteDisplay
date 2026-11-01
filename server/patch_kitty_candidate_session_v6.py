@@ -26,10 +26,10 @@ CALLBACK = """        # KITTY_CANDIDATE_SESSION_CALLBACK_V6
             nonlocal _kitty_candidate_active, _kitty_candidate_generation
             if speaker_id != 'person:shana':
                 return
-            _kitty_candidate_generation += 1
-            generation = _kitty_candidate_generation
             if _kitty_candidate_active:
                 return
+            _kitty_candidate_generation += 1
+            generation = _kitty_candidate_generation
             if not _kitty_base_instructions:
                 return
             note = (
