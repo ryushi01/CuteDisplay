@@ -542,6 +542,28 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
      if(c<=32 || c==127){speaker="unknown";source="unverified";break;}
     }
    }
+   // Candidate-only voice recognition is attribution, NEVER authentication.
+   // This message comes from the existing gateway speaker-result path.
+   // A self-introduction never overrides a valid same-turn voice candidate.
+   if(speaker=="unknown"){
+    cJSON *candidate=cJSON_GetObjectItem(json,"candidate_speaker_id");
+    cJSON *candidateSource=cJSON_GetObjectItem(json,"candidate_provenance");
+    if(cJSON_IsString(sid) && strcmp(sid->valuestring,"unknown")==0 &&
+       cJSON_IsString(conf) && strcmp(conf->valuestring,"unknown")==0 &&
+       cJSON_IsString(candidate) && candidate->valuestring &&
+       cJSON_IsString(candidateSource) &&
+       strcmp(candidateSource->valuestring,"voice_probable")==0){
+     const char *name=candidate->valuestring;
+     size_t n=strlen(name);
+     bool safe=n>7 && n<=55 && strncmp(name,"person:",7)==0;
+     for(size_t i=7;safe && i<n;++i){
+      char ch=name[i];
+      if(!((ch>='A'&&ch<='Z')||(ch>='a'&&ch<='z')||
+           (ch>='0'&&ch<='9')||ch=='_'||ch=='-'))safe=false;
+     }
+     if(safe){speaker=String(name);source="voice_probable";}
+    }
+   }
    if(speaker=="unknown" && !introducedSpeaker.isEmpty()){
     speaker=introducedSpeaker;source="explicit_introduction";
    }
@@ -553,7 +575,9 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
     introducedSpeaker="";introducedClaimContext="";
    }
    // Self-claimed identity must not unlock semantic private-memory lookup.
-   if(source=="voice_probable")
+   // Candidate metadata never permits private semantic recall.
+   if(source=="voice_probable" && cJSON_IsString(sid) &&
+      strcmp(sid->valuestring,speaker.c_str())==0)
     requestSemanticTurn(pendingSpeakerItem,speaker,source,pendingSpeakerTranscript);
    pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
   }
