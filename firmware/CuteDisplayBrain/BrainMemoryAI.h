@@ -196,7 +196,9 @@ inline void tick(bool busy){
    free(payload);
    finish(accepted || !summarize);
   },"kitty_memory_ai",12288,nullptr,1,&worker,0)!=pdPASS){
-   running=false;worker=nullptr;
+   // A failed task allocation must not silently reattempt or consume GPU later.
+   operatorEnabled=false;running=false;requestStartedAt=0;worker=nullptr;
+   Serial.println("[MEMORY AI] worker allocation failed; USB opt-in cleared");
  }
 }
 } // namespace BrainMemoryAI
