@@ -25,8 +25,9 @@ class VoiceIntegrationSafety(unittest.TestCase):
     def test_exact_transcript_and_one_shot(self):
         self.assertIn("prompt==semanticTranscript", self.voice)
         # Both immediate and delayed delegation must consume the context once.
-        self.assertIn("clearSemanticTurn();\n      if(!delegatedCallId.isEmpty()", self.voice)
-        self.assertIn("clearSemanticTurn();\n  if(!delegatedCallId.isEmpty()", self.voice)
+        # Both immediate and delayed paths consume the scoped context exactly once.
+        self.assertIn("scoped=semanticContext;\n      clearSemanticTurn();", self.voice)
+        self.assertIn("scoped=semanticContext;\n  clearSemanticTurn();", self.voice)
         self.assertIn('cJSON_AddStringToObject(m,"turn_id",turnId.c_str())', self.voice)
 
     def test_delegated_chat_excludes_unscoped_memory(self):
