@@ -3162,19 +3162,28 @@ void setup(){
 void loop(){
  serviceBrain();
 #if KITTY_C5_BLE_MIGRATION_ENABLED
+ static bool lastAppSessionSignaled=false;
+ if(lastAppSessionSignaled && (!bleConnected || !brainLinkConnected())){
+  CuteLink::send(Serial1,++c5Seq,"APP_SESSION","OFF");
+  lastAppSessionSignaled=false;
+  appCommandPending=false;
+  appBLEReady=false;
+ }
+ if(bleConnected && appBLEReady && !lastAppSessionSignaled){
+  CuteLink::send(Serial1,++c5Seq,"APP_SESSION","ON");
+  lastAppSessionSignaled=true;
+ }
  if(bleConnected && appEncryptedReadSeen && !appBLEReady && brainLinkConnected()){
   appEncryptedReadSeen=false;
   appBLEReady=true;
   appControlCharacteristic->setValue("PROXY_READY");
   appControlCharacteristic->notify();
-  CuteLink::send(Serial1,++c5Seq,"APP_SESSION","ON");
  }
  if(appCommandPending && (uint32_t)(millis()-appCommandSent)>4500UL){
   appCommandPending=false;appNotify("ERR:UART_TIMEOUT");
  }
  if(!brainLinkConnected() && appBLEReady){
   appBLEReady=false;
-  CuteLink::send(Serial1,++c5Seq,"APP_SESSION","OFF");
   appControlCharacteristic->setValue("PROXY_DISABLED");
  }
 #endif
