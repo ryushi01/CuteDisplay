@@ -8,12 +8,14 @@ import asyncio
 import http.client
 import socket
 import json
+import re
 import urllib.error
 import urllib.request
 
 MAX_QUERY = 300
 MAX_CONTEXT = 1800
 ALLOWED_TIMEOUT = 0.35
+SPEAKER_ID = re.compile(r"person:[A-Za-z0-9_-]{1,48}\\Z")
 
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
@@ -72,9 +74,7 @@ async def semantic_context(url, token, query, speaker_id, *, timeout=ALLOWED_TIM
     Unknown speaker identity, lack of configuration or timeout means no memory.
     Caller must never treat a claimed name as authenticated owner identity.
     """
-    if (not isinstance(speaker_id, str) or speaker_id in ("", "unknown")
-            or not speaker_id.strip() or len(speaker_id) > 128
-            or any(ord(char) < 32 for char in speaker_id)):
+    if not isinstance(speaker_id, str) or not SPEAKER_ID.fullmatch(speaker_id):
         return ""
     if not isinstance(query, str) or not query.strip():
         return ""
