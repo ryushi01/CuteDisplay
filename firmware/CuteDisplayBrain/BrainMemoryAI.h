@@ -9,14 +9,13 @@ static volatile bool running=false, abortRequested=false;
 static volatile uint32_t lastInteractiveAt=0;
 static volatile bool interactive=true;
 static constexpr uint32_t IDLE_MS=20000UL;
-static constexpr uint32_t RETRY_GAP_MS=10000UL;
+static constexpr uint32_t RETRY_GAP_MS=300000UL; // One idle request at most every 5 minutes.
 static uint32_t lastAttempt=0;
 // Circuit breaker: one failed idle HTTP request pauses inference until reboot.
 // Original summary jobs stay in the SD journal, with no new Mac requests.
 static volatile bool pausedAfterHttpFailure=false;
-// Default OFF: background inference must be explicitly enabled from physical USB.
-// Volatile by design: a reboot cannot accidentally resume Mac GPU work.
-static volatile bool operatorEnabled=false;
+// Automatic after calls, idle-only. Physical USB can still pause it.
+static volatile bool operatorEnabled=true;
 static volatile uint32_t requestStartedAt=0;
 static constexpr uint32_t TOTAL_BUDGET_MS=30000UL;
 inline void setEnabled(bool enabled){operatorEnabled=enabled;if(!enabled)abortRequested=true;}
@@ -56,9 +55,10 @@ inline void tick(bool busy){
    auto finish=[](bool accepted=false){
     if(accepted){pending="";pendingSummary=false;
      pendingSummaryOwnerVerified=false;pendingSummaryConversation=0;pendingSummaryJobEnd=0;}
-    // One USB opt-in authorizes at most one inference request, even on success.
-    // Pending durable jobs are left for the next deliberate session.
-    operatorEnabled=false;
+    // Do not hammer the Mac if a completed response cannot be accepted.
+    // Interrupted calls retain their pending job for a later idle window.
+    if(!accepted && !abortRequested && !interactive){pausedAfterHttpFailure=true;
+     Serial.println("[MEMORY AI] no accepted result; paused for this boot");}
     running=false;requestStartedAt=0;worker=nullptr;vTaskDelete(nullptr);
    };
    if(abortRequested || interactive || !operatorEnabled){finish();return;}
@@ -239,15 +239,15 @@ inline void tick(bool busy){
    }
    if(requestStartedAt && (uint32_t)(millis()-requestStartedAt)>TOTAL_BUDGET_MS){
     pausedAfterHttpFailure=true;operatorEnabled=false;
-    Serial.println("[MEMORY AI] total budget exceeded; idle AI disabled until USB opt-in");
+    Serial.println("[MEMORY AI] total budget exceeded; idle AI paused for this boot");
    }
    if(http)esp_http_client_cleanup(http);
    free(payload);
    finish(accepted || !summarize);
   },"kitty_memory_ai",12288,nullptr,1,&worker,0)!=pdPASS){
    // A failed task allocation must not silently reattempt or consume GPU later.
-   operatorEnabled=false;running=false;requestStartedAt=0;worker=nullptr;
-   Serial.println("[MEMORY AI] worker allocation failed; USB opt-in cleared");
+   pausedAfterHttpFailure=true;running=false;requestStartedAt=0;worker=nullptr;
+   Serial.println("[MEMORY AI] worker allocation failed; idle AI paused for this boot");
  }
 }
 } // namespace BrainMemoryAI
