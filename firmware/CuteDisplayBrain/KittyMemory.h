@@ -19,20 +19,20 @@ struct ConsolidationCandidate { char utterance[256]; };
 static QueueHandle_t consolidationCandidates=nullptr;
 struct ConsolidatedFact { char key[32]; char value[128]; };
 static QueueHandle_t consolidatedFacts=nullptr;
-struct SummaryCandidate {char turns[768];};
-struct SummaryResult {char text[256];};
+struct SummaryCandidate {char turns[768]; uint8_t ownerVerified=0;};
+struct SummaryResult {char text[256]; uint8_t ownerVerified=0;};
 static QueueHandle_t summaryCandidates=nullptr, summaryResults=nullptr;
 static String latestSummary;
 static volatile uint32_t summaryRevision=0;
 static uint32_t latestSummaryAt=0;
-inline bool takeSummaryCandidate(String &out){
+inline bool takeSummaryCandidate(String &out,bool &ownerVerified){
  SummaryCandidate c={};
  if(!summaryCandidates || xQueueReceive(summaryCandidates,&c,0)!=pdTRUE)return false;
- out=String(c.turns);return !out.isEmpty();
+ out=String(c.turns);ownerVerified=c.ownerVerified!=0;return !out.isEmpty();
 }
-inline bool proposeSummary(const String &text){
+inline bool proposeSummary(const String &text,bool ownerVerified){
  if(!summaryResults || text.length()<12 || text.length()>220)return false;
- SummaryResult r={};text.toCharArray(r.text,sizeof(r.text));
+ SummaryResult r={};r.ownerVerified=ownerVerified?1:0;text.toCharArray(r.text,sizeof(r.text));
  return xQueueSend(summaryResults,&r,0)==pdTRUE;
 }
 inline bool takeConsolidationCandidate(String &value){
@@ -1152,6 +1152,7 @@ inline void task(void*){
  SearchRequest query={};
  String summaryBatch;
  uint8_t summaryTurnCount=0;
+ bool summaryBatchOwnerVerified=false;
  while(true){
   // Serve at most one bounded export block per pass, on the SD-owning task.
   ExportRequest exportReq={};
@@ -1238,9 +1239,9 @@ inline void task(void*){
   SummaryResult summary={};
   if(mounted && summaryResults && xQueueReceive(summaryResults,&summary,0)==pdTRUE){
    String item=sanitize(String(summary.text),220);
-   File f=SD_MMC.open("/kitty/summaries.tsv",FILE_APPEND);
+   File f=SD_MMC.open(summary.ownerVerified?"/kitty/summaries.tsv":"/kitty/unverified_summaries_v6.tsv",FILE_APPEND);
    if(f){f.printf("%lu\\t%s\\n",(unsigned long)time(nullptr),item.c_str());f.close();
-    if(cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
+    if(summary.ownerVerified && cacheMutex && xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
      latestSummary=item;latestSummaryAt=(uint32_t)time(nullptr);summaryRevision++;xSemaphoreGive(cacheMutex);
     }
    }
@@ -1321,6 +1322,7 @@ inline void task(void*){
     }
     indexCount=0;finishedSerial=0;nextSerial=0;searchReply="";
     latestSummary="";latestSummaryAt=0;summaryBatch="";summaryTurnCount=0;
+    summaryBatchOwnerVerified=false;
     saved=0;failed=0;updateStorage();cardState=1;
     Serial.println("[MEMORY] FORMAT COMPLETE: card mounted, memory cache cleared");
    }else{
@@ -1402,23 +1404,32 @@ inline void task(void*){
    // cannot become a verified owner profile/preference/correction. No
    // trustworthy human identity issuer is connected yet, so ownerVerified
    // stays false. The trusted-session integration must set it only at enqueue.
-   if(!e.ownerVerified){
-     Serial.println("[MEMORY V6] unverified turn archived; owner fact writes skipped");
-     updateStorage();
-     continue;
-   }
+   // Every archived turn can contribute to a summary, but unverified
+   // summaries must never enter the globally injected owner summary cache.
+   // The owner fact/consolidation gate remains below this summary step.
    // Batch user statements for an idle-only model summary. No model call or SD
    // summary write occurs on the websocket or I2S execution path.
    String snippet=sanitize(String(e.question),115);
+   // Never combine owner-verified and unverified statements in one batch.
+   if(summaryTurnCount && summaryBatchOwnerVerified!=(e.ownerVerified!=0)){
+    summaryBatch="";summaryTurnCount=0;
+   }
+   summaryBatchOwnerVerified=(e.ownerVerified!=0);
    if(summaryBatch.length()+snippet.length()+2>740){summaryBatch="";summaryTurnCount=0;}
    if(!summaryBatch.isEmpty())summaryBatch+='\n';
    summaryBatch+=snippet;
    if(++summaryTurnCount>=6){
     if(summaryCandidates){
-     SummaryCandidate batch={};summaryBatch.toCharArray(batch.turns,sizeof(batch.turns));
+     SummaryCandidate batch={};batch.ownerVerified=summaryBatchOwnerVerified?1:0;
+     summaryBatch.toCharArray(batch.turns,sizeof(batch.turns));
      (void)xQueueSend(summaryCandidates,&batch,0);
     }
     summaryBatch="";summaryTurnCount=0;
+   }
+   if(!e.ownerVerified){
+    Serial.println("[MEMORY V6] unverified turn archived; owner fact writes skipped");
+    updateStorage();
+    continue;
    }
    if(consolidationCandidates && strlen(e.question)>=12){
     ConsolidationCandidate c={};strlcpy(c.utterance,e.question,sizeof(c.utterance));
