@@ -1,6 +1,6 @@
 #pragma once
 // V6 private, opt-in SD snapshot sender. No SD calls outside KittyMemory::task.
-// Network runs on a separate low-priority task and is suspended during calls.
+// Network runs on a separate low-priority task; uploads are paced during calls.
 // TLS certificate verification is mandatory; no setInsecure(), no OTA.
 #include <Arduino.h>
 #include <WiFi.h>
@@ -27,6 +27,8 @@
 namespace KittyMemorySyncV6 {
 static TaskHandle_t worker=nullptr;
 static bool (*idleCheck)()=nullptr;
+static bool (*callActive)()=nullptr;
+inline void setCallActive(bool (*check)()){callActive=check;}
 static volatile uint32_t completed=0,failures=0;
 static volatile uint32_t bytesSent=0;
 static volatile int lastHttpStatus=0;
@@ -113,7 +115,8 @@ inline bool exportAndSend(const String &snapshot){
    }
    if(offset==total)break;
    if(block.length==0){ok=false;break;}
-   vTaskDelay(pdMS_TO_TICKS(12));
+   // Yield between chunks; use gentler pacing when sharing Wi-Fi with voice.
+   vTaskDelay(pdMS_TO_TICKS(callActive && callActive()?200:12));
   }
   if(!ok){failureStage=lastHttpStatus==200?1:2;mbedtls_sha256_free(&sha);return false;}
   unsigned char hash[32]={0};
@@ -133,11 +136,11 @@ inline bool exportAndSend(const String &snapshot){
  return status==200 && (reply.indexOf("\"finalized\": true")>=0 ||
                          reply.indexOf("\"finalized\":true")>=0);
 }
-// Small idle window prevents an upload from starting between speech turns.
+// Short eligibility debounce, not a restriction on ongoing calls.
 // Polling is lightweight; actual SD reads remain on the memory worker.
-static constexpr uint32_t IDLE_QUIET_MS=3000UL;
-static constexpr uint32_t FAILURE_RETRY_MS=15000UL;
-static constexpr uint32_t PERIODIC_REFRESH_MS=300000UL;
+static constexpr uint32_t IDLE_QUIET_MS=500UL;
+static constexpr uint32_t FAILURE_RETRY_MS=5000UL;
+static constexpr uint32_t PERIODIC_REFRESH_MS=60000UL;
 inline void task(void*){
  uint32_t idleSince=0,lastSuccess=0,lastFailure=0;
  uint32_t syncedSaved=UINT32_MAX,syncedFacts=UINT32_MAX,syncedSummaries=UINT32_MAX;
@@ -167,7 +170,7 @@ inline void task(void*){
     lastSuccess=millis();lastFailure=0;
     Serial.println("[MEMSYNC] snapshot finalized");
    }else{
-    // Calls or an in-flight write may interrupt transfer; retry after idle.
+    // An in-flight SD write can invalidate a snapshot; retry soon.
     failures++;lastFailure=millis();
     Serial.printf("[MEMSYNC] upload deferred/failed stage=%u file=%u http=%d (SD authoritative)\n",
       (unsigned)failureStage,(unsigned)lastFileIndex,(int)lastHttpStatus);
