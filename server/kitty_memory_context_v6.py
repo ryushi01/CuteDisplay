@@ -4,7 +4,11 @@ Read-only derived Ubuntu cache. The S3 SD card is the sole permanent authority.
 Caller-supplied speaker IDs must come from session identity handling; speech
 self-introductions are claims, never authentication.
 """
+import re
+
 from kitty_sd_semantic_index import search
+
+SPEAKER_ID = re.compile(r"person:[A-Za-z0-9_-]{1,48}\Z")
 
 MAX_QUERY_CHARS = 1000
 MAX_CONTEXT_CHARS = 1800
@@ -16,8 +20,9 @@ def recall_context(db_path, query, speaker_id, *, limit=4, search_fn=search):
     May be invoked outside the realtime audio loop; failures return no context,
     allowing voice streaming to continue without blocking on semantic retrieval.
     """
-    if (not isinstance(speaker_id, str) or not speaker_id.strip()
-            or speaker_id == "unknown" or len(speaker_id) > 128):
+    # Apply the same explicit enrolled-person namespace as the CPU recognizer.
+    # Reject arbitrary labels (including claims typed into a transcript).
+    if not isinstance(speaker_id, str) or not SPEAKER_ID.fullmatch(speaker_id):
         return ""
     if not isinstance(query, str) or not query.strip():
         return ""
