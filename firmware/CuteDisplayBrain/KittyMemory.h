@@ -49,8 +49,29 @@ inline bool proposeConsolidatedFact(const String &key,const String &value){
 static volatile bool mounted=false;
 // Network-free one-slot SD export. Only kitty_sd opens SD_MMC.
 struct ExportRequest { uint8_t file; uint32_t offset; uint32_t limit; };
-struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint32_t boundaries[8]; uint8_t ok; };
+struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint32_t boundaries[9]; uint8_t ok; };
 static QueueHandle_t exportRequests=nullptr,exportBlocks=nullptr;
+struct SharedMemoryWrite {char id[65];char text[321];};
+static QueueHandle_t sharedMemoryWrites=nullptr;
+static volatile uint32_t sharedRevision=0;
+// Explicit approval only: never automatically promote speech to shared.
+inline bool queueApprovedSharedMemory(const String &id,const String &text,bool approved){
+ if(!approved || !mounted || !sharedMemoryWrites ||
+    id.isEmpty() || id.length()>64 || text.isEmpty() || text.length()>320)return false;
+ for(size_t i=0;i<id.length();i++){
+  char c=id[i];
+  if(!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||
+       (c>='0'&&c<='9')||c=='_'||c=='-'))return false;
+ }
+ for(size_t i=0;i<text.length();i++){
+  uint8_t c=(uint8_t)text[i];if(c<32||c==127)return false;
+ }
+ SharedMemoryWrite item={};
+ id.toCharArray(item.id,sizeof(item.id));
+ text.toCharArray(item.text,sizeof(item.text));
+ return xQueueSend(sharedMemoryWrites,&item,0)==pdTRUE;
+}
+
 struct ClaimRequest {char speaker[48];};
 struct ClaimResult {char speaker[48];char context[512];};
 static QueueHandle_t claimRequests=nullptr,claimResults=nullptr;
@@ -66,7 +87,7 @@ inline bool takeClaimContext(const String &speaker,String &out){
  if(speaker!=result.speaker)return false;
  out=String(result.context);return true;
 }
-static constexpr const char* EXPORT_NAMES[]={"facts.tsv","factsmeta.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv","turn_sources.tsv","voice_profiles_v6.json","speaker_claims_v6.tsv"};
+static constexpr const char* EXPORT_NAMES[]={"facts.tsv","factsmeta.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv","turn_sources.tsv","voice_profiles_v6.json","speaker_claims_v6.tsv","shareable_memories_v6.tsv"};
 static constexpr uint8_t EXPORT_COUNT=sizeof(EXPORT_NAMES)/sizeof(EXPORT_NAMES[0]);
 // Sentinel file=EXPORT_COUNT captures all file sizes in one SD-worker pass.
 inline bool requestExport(uint8_t file,uint32_t offset,uint32_t limit=UINT32_MAX){
@@ -1127,6 +1148,17 @@ inline void task(void*){
    }
    (void)xQueueSend(exportBlocks,&block,0);
   }
+  // Only the SD worker persists explicitly approved shared memories.
+  SharedMemoryWrite shared={};
+  if(mounted && sharedMemoryWrites &&
+     xQueueReceive(sharedMemoryWrites,&shared,0)==pdTRUE){
+   File out=SD_MMC.open("/kitty/shareable_memories_v6.tsv",FILE_APPEND);
+   if(out){
+    size_t written=out.printf("%s\tshared\t%s\n",shared.id,shared.text);
+    out.flush();out.close();
+    if(written>0)sharedRevision++;
+   }
+  }
   // Read only explicitly introduced, non-sensitive speaker claims.
   ClaimRequest req={};
   if(mounted&&claimRequests&&claimResults&&xQueueReceive(claimRequests,&req,0)==pdTRUE){
@@ -1420,6 +1452,7 @@ inline void init(){
  if(!searches)searches=xQueueCreate(1,sizeof(SearchRequest));
  if(!exportRequests)exportRequests=xQueueCreate(1,sizeof(ExportRequest));
  if(!claimRequests)claimRequests=xQueueCreate(1,sizeof(ClaimRequest));
+ if(!sharedMemoryWrites)sharedMemoryWrites=xQueueCreate(2,sizeof(SharedMemoryWrite));
  if(!claimResults){
   static StaticQueue_t claimQueueCtrl;
   static uint8_t *claimStorage=nullptr;
