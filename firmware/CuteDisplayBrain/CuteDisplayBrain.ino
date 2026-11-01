@@ -1489,7 +1489,10 @@ void loop(){
   bootChirpDone=true;
   BrainAudioTest::beep(false);
  }
+ // Never start C5 OTA while a phone command or secured phone session is live.
+ // The C5 BLE host must survive until commands have completed, not mid-write.
  BrainC5OTA::permitUpdate=!activeSeq && !lanAwaitingCommand &&
+    !c5AppSession && !c5AppCommandPending &&
     !BrainRealtimeDirect::active() && !BrainRealtimeAudio::active() &&
     incomingCommands && uxQueueMessagesWaiting(incomingCommands)==0;
  pollFace();
