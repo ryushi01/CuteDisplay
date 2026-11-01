@@ -38,4 +38,6 @@ check('static constexpr uint32_t TOTAL_BUDGET_MS=30000UL;' in worker, "cooperati
 check('KittyMemory::clipUTF8(utterance,440)' in worker, "bounded summary prompt")
 check('KittyMemory::clipUTF8(utterance,220)' in worker, "bounded fact prompt")
 check('cJSON_AddStringToObject(user,"content",inferenceInput.c_str());' in worker, "bounded inference used")
+check('[MEMORY AI] result HTTP=' in worker, "non-sensitive successful HTTP parsing diagnostics")
+check('[MEMORY AI] interrupted HTTP=' in worker, "non-sensitive cancellation diagnostics")
 print("Kitty V6 SD summary journal source contract: OK")
