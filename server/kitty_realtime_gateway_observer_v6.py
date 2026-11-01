@@ -78,6 +78,27 @@ class KittySpeakerObserver:
                      "speaker_id": "unknown", "confidence": "unknown"}
         await self.send_to_s3(event)
 
+    def authorized_recall(self, turn_id, speaker_id, provenance):
+        """Return a turn token only for a matching CPU-observed voice identity.
+
+        A self-introduction or device-submitted name cannot authorize recall.
+        The caller must recheck the returned epoch after the async lookup.
+        """
+        if (not self.enabled or provenance != "voice_probable"
+                or not isinstance(turn_id, str)
+                or not isinstance(speaker_id, str)
+                or self.epoch is None):
+            return None
+        if not self.gate.allow_recall(self.epoch, turn_id, speaker_id):
+            return None
+        return self.epoch
+
+    def complete_recall(self, epoch, turn_id, speaker_id, context):
+        """Consume a single result for the exact same speaker and turn."""
+        if not self.enabled:
+            return ""
+        return self.gate.consume_context(epoch, turn_id, speaker_id, context)
+
     def close(self):
         self.gate.invalidate()
         self.session.close()
