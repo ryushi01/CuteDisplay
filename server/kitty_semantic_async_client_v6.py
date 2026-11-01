@@ -92,3 +92,43 @@ async def semantic_context(url, token, query, speaker_id, *, timeout=ALLOWED_TIM
     except (TimeoutError, OSError, ValueError, TypeError, KeyError,
             json.JSONDecodeError, urllib.error.URLError):
         return ""
+
+def _read_shared_context(url, token, timeout):
+    body=b"{}"
+    headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"}
+    if url.startswith("unix:///run/kitty-semantic/"):
+        conn=_UnixHTTPConnection(url[len("unix://"):],timeout)
+        try:
+            conn.request("POST","/shared/context",body=body,headers=headers)
+            response=conn.getresponse()
+            if response.status!=200:
+                return ""
+            obj=json.loads(response.read(2048))
+        finally:
+            conn.close()
+    else:
+        request=urllib.request.Request(url.rstrip("/")+"/shared/context",
+                                      data=body,method="POST",headers=headers)
+        with urllib.request.urlopen(request,timeout=timeout) as response:
+            if response.status!=200:
+                return ""
+            obj=json.loads(response.read(2048))
+    value=obj.get("context","") if isinstance(obj,dict) else ""
+    return value[:640] if isinstance(value,str) else ""
+
+
+async def shared_context(url, token, *, timeout=0.35,
+                         request_fn=_read_shared_context):
+    """Read only explicitly approved public snapshot notes; fail closed."""
+    if not isinstance(url,str) or not (
+        url.startswith("http://127.0.0.1:") or
+        url.startswith("unix:///run/kitty-semantic/")
+    ) or not isinstance(token,str) or not token:
+        return ""
+    try:
+        limit=min(max(float(timeout),0.05),ALLOWED_TIMEOUT)
+        return await asyncio.wait_for(
+            asyncio.to_thread(request_fn,url,token,limit),timeout=limit)
+    except (TimeoutError,OSError,ValueError,TypeError,KeyError,
+            json.JSONDecodeError,urllib.error.URLError):
+        return ""
