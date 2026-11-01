@@ -1033,7 +1033,7 @@ static void consoleCommand(String cmd){
   // Suppress the authority altogether if credentials appear in the URL.
   if(authority.indexOf('@')>=0)authority="[redacted-userinfo]";
   if(authority.length()>96)authority="[invalid-length]";
-  Serial.printf("[MEMORY AI CONFIG] stored=%d scheme=%s host_port=%s model=%s key_present=%d\\n",
+  Serial.printf("[MEMORY AI CONFIG] stored=%d scheme=%s host_port=%s model=%s key_present=%d\n",
     opened?1:0,https?"https":(http?"http":"other"),
     authority.isEmpty()?"(not set)":authority.c_str(),
     model.isEmpty()?"(not set)":model.c_str(),hasKey?1:0);
