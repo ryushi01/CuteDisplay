@@ -30,8 +30,22 @@ Working gateway source was patched on host using tracked scripts:
 
 Each script patches an existing mounted route and keeps a backup. **Do not blindly reapply** scripts to a different route or assume GitHub contains the mutated runtime `realtime.py`.
 
-### Local-only change needing future source synchronization
-On Ubuntu, `~/kitty-v6/CuteDisplay/server/kitty_speaker_cpu_v6.py` was manually edited to request `recognize_candidate(raw, threshold=0.960)`; `~/kitty-v6/CuteDisplay/server/kitty_xvector_shadow_worker_v6.py` had the permitted lower bound changed from 0.965 to 0.960. Python compilation and service restart succeeded, but this pairing is **not present in tracked GitHub source** at checkpoint time. The relaxed floor also permits a reduced experimental identity threshold, so future code should split candidate vs identity validation rather than blindly copying the current edit. Never turn on experimental identity authorization for private recall without a separate security decision.
+### Ubuntu deployment audit — 2026-11-01
+
+User ran a **read-only audit** of the working Ubuntu machine. Observed:
+- `kitty-memory-v6.service`: `active`; Open WebUI container: `healthy`.
+- Deployed `kitty_memory_service.py`, `kitty_sd_snapshot_v6.py`, `kitty_shareable_memory_v6.py` matched the then-checked-out feature-branch source.
+- The active `kitty_speaker_cpu_v6.py` had **one line** different: `recognize_candidate(raw, threshold=0.960)` instead of 0.965.
+- The active `kitty_xvector_shadow_worker_v6.py` also had **one line** different: minimum accepted threshold 0.960 instead of 0.965. This **local-only** change couples the conversational and experimental-identity minimums.
+- GitHub **main source is safer and already contains the equivalent conversational behavior**: `recognize_candidate(raw, threshold=0.960, conversational_hint=True)`, with `minimum = 0.960 if conversational_hint is True else 0.965`. Do **not** copy the live worker's globally relaxed validation into GitHub or automatically deploy from GitHub to the live Ubuntu instance. Future Ubuntu alignment should be explicit, one small code update with tests, with no change in candidate-only privacy policy.
+- Gateway Open WebUI bind mounts were confirmed:
+  - route: `~/kitty-v6/private/semantic-gateway/realtime.py`
+  - client: `~/kitty-v6/private/semantic-gateway/kitty_semantic_async_client_v6.py`.
+- Active route patch markers (line numbers at the time of audit): `KITTY_APPROVED_SHARED_INITIAL_CONTEXT_V6` (602), `KITTY_CANDIDATE_STABLE_V6` (702), `KITTY_SHARED_CONTEXT_PERSIST_SESSION_V6` (779), `KITTY_SHARED_CONTEXT_PERSIST_RESPONSE_V6` (890), `KITTY_CANDIDATE_RESPONSE_WAIT_V6` (903).
+- GitHub tracks the **sanitized gateway patch scripts**, not the fully mutated host-mount `realtime.py`. The private environment file, voice models/profile, audio samples, API secrets, and SD archive are intentionally excluded. Never publish these.
+- The developer's detached worktree displayed `?? server/__pycache__/`; these Python cache files are ephemeral, **not part of the project**. Their `origin/main` tracking ref was absent despite `git fetch origin main` returning FETCH_HEAD; use `git fetch origin main:refs/remotes/origin/main` if local main tracking is needed. Do not blindly switch this live deployment checkout or run `git add .`.
+
+This audit confirms **what is deployed versus what is tracked**. It does not establish complete byte-for-byte identity across all host files or reproduce private runtime configuration from GitHub alone.
 
 ## Why private identity and long memory still fail
 - Voice candidate-only mode deliberately reports `speaker_id=unknown`, even on a candidate X-vector match; private recall is protected.
@@ -44,7 +58,7 @@ On Ubuntu, `~/kitty-v6/CuteDisplay/server/kitty_speaker_cpu_v6.py` was manually 
 2. Retain strict separation of `ownerVerified` fact writes and voice-candidate claims. Avoid reclassifying unknown turns as Shana and avoid globalizing private summaries.
 3. Use speaker/call scope to avoid leaking summaries to the next speaker or across unrelated sessions; no global session-wide insertion of private notes. Validate actual retrieval and truncation behavior.
 4. Add Python/static tests and compile S3 firmware with existing partition layout; only request flash when a targeted hardware test is needed.
-5. Synchronize local-only relaxed X-vector **candidate** threshold into tracked source with a distinct stricter identity-mode minimum; test safeguards.
+5. GitHub main already separates the 0.960 conversational hint from the 0.965 experimental identity minimum; consider aligning the active Ubuntu worker explicitly later, without changing the working deployment during memory-continuity development.
 6. Preserve S3 microSD archive, working audio, C5 v38, all private settings, and the verified Mochi Planet shared-memory flow.
 7. Avoid repeated diagnostics; user prefers a minimal test plan and direct verified updates.
 
