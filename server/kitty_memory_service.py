@@ -272,6 +272,8 @@ def main():
         if not os.environ.get("KITTY_SD_SNAPSHOT_ROOT") or not os.environ.get("KITTY_SEMANTIC_DB"):
             raise SystemExit("Auto refresh requires KITTY_SD_SNAPSHOT_ROOT and KITTY_SEMANTIC_DB")
         threading.Thread(target=semantic_refresh_worker,daemon=True).start()
+        # On service start, bring an existing finalized SD snapshot into the index.
+        queue_semantic_refresh("startup")
     # Preload optional diagnostics off-thread; never delay HTTP startup or
     # authorize memories based on shadow scores.
     if os.environ.get("KITTY_XVECTOR_SHADOW_ENABLED") == "1":
