@@ -19,6 +19,7 @@ _MODEL = None
 _ANCHORS = None
 # Provisional, calibrated from only one other speaker. Never an auth threshold.
 SHADOW_THRESHOLD = 0.957
+_WARM_STARTED = False
 
 def _init():
     global _MODEL, _ANCHORS
@@ -42,6 +43,27 @@ def _init():
                                         run_opts={"device":"cpu"})
     _ANCHORS=anchors
     _MODEL=model
+
+def warm_async():
+    """Preload the model independently of audio capture; nonblocking."""
+    global _WARM_STARTED
+    if os.environ.get("KITTY_XVECTOR_SHADOW_ENABLED") != "1":
+        return False
+    with _LOCK:
+        if _WARM_STARTED:
+            return True
+        _WARM_STARTED = True
+    def load():
+        try:
+            with _LOCK:
+                started = time.monotonic()
+                _init()
+                print("[KITTY_XVECTOR_SHADOW] warm_ready_ms=%d" % round((time.monotonic()-started)*1000), flush=True)
+        except Exception as exc:
+            print("[KITTY_XVECTOR_SHADOW] warm_error=%s" % type(exc).__name__, flush=True)
+    threading.Thread(target=load, daemon=True, name="kitty-xvector-warm").start()
+    return True
+
 
 def _run(audio):
     try:
@@ -79,3 +101,4 @@ def submit(audio):
     except Exception:
         _GATE.release()
         return False
+\n# Import occurs during memory-service startup when its speaker handler is loaded.\nwarm_async()\n
