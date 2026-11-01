@@ -149,8 +149,18 @@ inline void tick(bool busy){
     esp_err_t rc=esp_http_client_perform(http);
     uint32_t elapsed=(uint32_t)(millis()-startedAt);
     int status=esp_http_client_get_status_code(http);
+    // Classify the COMPLETE HTTP reply without exposing content, tokens or memories.
+    // A 200 status may still contain HTML (reverse proxy/login), SSE, or malformed JSON.
+    size_t first=0;
+    while(first<reply.length() && (reply[first]==' ' || reply[first]=='\\n' ||
+          reply[first]=='\\r' || reply[first]=='\\t'))first++;
+    int format=0; // 0 empty, 1 JSON-like, 2 HTML-like, 3 SSE-like, 4 other
+    if(first<reply.length()){
+     char ch=reply[first];
+     format=(ch=='{' || ch=='[')?1:(ch=='<'?2:(reply.startsWith("data:",first)?3:4));
+    }
     if(rc==ESP_OK && status==200 && !abortRequested && !interactive){
-     cJSON *outer=cJSON_Parse(reply.c_str());
+     cJSON *outer=(format==1 && !response.truncated)?cJSON_Parse(reply.c_str()):nullptr;
      cJSON *choices=cJSON_GetObjectItem(outer,"choices");
      cJSON *first=cJSON_GetArrayItem(choices,0);
      cJSON *message=cJSON_GetObjectItem(first,"message");
@@ -187,7 +197,7 @@ inline void tick(bool busy){
       }
      }
      // Report metadata only: never print response text or private memory.
-     Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu truncated=%d json=%d choices=%d content=%d accepted=%d\\n",
+     Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu truncated=%d format=%d json=%d choices=%d content=%d accepted=%d\\n",
        status,(unsigned long)elapsed,(unsigned long)response.bytes,response.truncated?1:0,
        outer?1:0,cJSON_IsArray(choices)?1:0,cJSON_IsString(content)?1:0,accepted?1:0);
      if(outer)cJSON_Delete(outer);
