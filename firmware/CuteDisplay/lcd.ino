@@ -27,6 +27,7 @@
 #include "axp2602.h"
 #include "CuteLink.h"
 #include "KittyAppLink.h"
+#include <esp_arduino_version.h>
 #include "C5FirmwareVersion.h"
 #include "C5JapaneseFont.h"
 #include "C5LatinUpper.h"
@@ -2366,6 +2367,10 @@ void initBLE(){
  BLESecurity *security = new BLESecurity();
  security->setCapability(ESP_IO_CAP_NONE);
  security->setAuthenticationMode(true,false,false);
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3,3,12)
+ // Reuse the proven S3/iOS on-demand encrypted-read pairing profile.
+ BLESecurity::setForceAuthentication(false);
+#endif
  BLEServer *server=BLEDevice::createServer();
  server->setCallbacks(new ServerEvents());server->advertiseOnDisconnect(true);
  BLEService *control=server->createService("FFF0");
