@@ -72,3 +72,24 @@ python3 -m unittest discover -s server -p 'test_kitty_*contract_v6.py' -v
 test -s ~/kitty-v6/private/kitty-sync-deployment/KittySyncPrivateConfig.h
 ```
 Do not print the private header or include it in a commit. Build from this clean worktree and verify the S3 sketch before the single flash. C5 stays v38.
+
+## Continuation — sync write-churn mitigation (2026-11-01)
+
+Previous Ubuntu validation at `b1c3de97` passed **16/16 static contract tests**, not an Arduino build.
+
+New S3-only source changes:
+- `0e05f5f`: wait for a 3-second quiet archive revision window before starting snapshot upload. Check the saved/fact/summary revisions before each file and chunk; fail with stage=4 before more network traffic if the archive changes. Never finalize a mixed-revision manifest; SD remains authoritative. This is a mitigation, **not** a frozen SD snapshot or resumable upload.
+- `e5e250c` and `457253e`: count HTTPS POSTs made during a call, requests overlapping speech, maximum POST duration, and revision-change aborts in privacy-safe `[MEMSYNC]` logs. These counts do **not** directly measure mic drops or prove causality.
+- `420e880`: add static regression for early abort, quiet-window, TLS, and diagnostics. New baseline has **17 contract tests expected** (previously 16); not executed on Ubuntu yet.
+
+**Unresolved:** continuous conversation writes can still starve full-snapshot completion; true consistency will ultimately require immutable on-SD export versions or a server-verified incremental protocol. Mic-drop root cause unproven. Do not weaken owner memory authentication, change realtime provider events, modify C5 v38, or flash S3 until after Arduino verification. Preserve private header outside GitHub.
+
+One combined next Ubuntu check:
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin feature/kitty-semantic-v6-cpu
+git switch --detach origin/feature/kitty-semantic-v6-cpu
+python3 -m unittest discover -s server -p 'test_kitty_*contract_v6.py' -v
+test -s ~/kitty-v6/private/kitty-sync-deployment/KittySyncPrivateConfig.h
+```
+Run build script from this clean worktree using private environment variables as described earlier in this handoff. Arduino verify S3; one S3 flash only if build succeeds. Collect one synchronized call with `[CALL AUDIO DIAG]` and `[MEMSYNC]` counters. Avoid repeated long tests.
