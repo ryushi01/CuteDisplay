@@ -18,7 +18,10 @@ def capture(pcm24):
         return False
     if not isinstance(pcm24, bytes) or len(pcm24) < 24000 * 2 * 2:
         return False
-    from .kitty_realtime_speaker_v6 import to_16k_wav
+    try:
+        from .kitty_realtime_speaker_v6 import to_16k_wav
+    except ImportError:
+        from kitty_realtime_speaker_v6 import to_16k_wav
     audio = to_16k_wav(pcm24)
     for index in range(1, 4):
         destination = OUTPUT / ("kitty-sample-%d.wav" % index)
