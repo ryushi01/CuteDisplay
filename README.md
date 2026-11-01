@@ -78,7 +78,7 @@ The **microSD in the S3** is the durable source of truth for Kitty's archived me
 
 **Ubuntu:** the user service `kitty-memory-v6.service` runs `~/kitty-v6/CuteDisplay/server/kitty_memory_service.py` with settings in a **private** `~/kitty-v6/private/memory-service.env`. The working realtime Open WebUI route has additional host bind-mounted patches in `~/kitty-v6/private/semantic-gateway/realtime.py`. GitHub tracks patch **scripts**, but it does **not** automatically export those deployed private runtime files. Read the [deployment and handoff guide](docs/KITTY_V6_CURRENT_HANDOFF_2026-11-01.md) before changing them.
 
-**Important:** the locally tested X-vector *candidate* threshold was reduced from 0.965 to 0.960 in Ubuntu's active files; **those local edits are not yet represented in tracked source on GitHub**. Identity authorization remains separate. Do not assume a fresh checkout exactly reproduces that live setting.
+**Voice-candidate threshold:** Ubuntu's active files currently use the locally tested candidate threshold **0.960**. GitHub `main` now represents that conversational threshold using `conversational_hint=True`, while retaining a stricter **0.965 minimum** for experimental identity matching. The two active Ubuntu files still use the older coupled check; see the [deployment audit](docs/KITTY_V6_CURRENT_HANDOFF_2026-11-01.md). Candidate-only matching never authorizes private-memory access. The host's patched gateway route and private environment are intentionally not published.
 
 ## Next improvement
 
