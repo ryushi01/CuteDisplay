@@ -117,6 +117,14 @@ def identify(wav_b64):
     if not isinstance(wav_b64, str) or len(wav_b64) > 410000:
         raise ValueError("invalid_audio_size")
     raw = base64.b64decode(wav_b64, validate=True)
+    # Shadow diagnostics never affect the returned identity or block the
+    # existing recognizer. Background work is bounded and explicitly opt-in.
+    if os.environ.get("KITTY_XVECTOR_SHADOW_ENABLED") == "1":
+        try:
+            from kitty_xvector_shadow_worker_v6 import submit
+            submit(raw)
+        except (ImportError, OSError, RuntimeError):
+            pass
     vector = _embedding(raw)
     import numpy as np
     with MODEL_LOCK:
