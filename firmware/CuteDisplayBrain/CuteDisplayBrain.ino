@@ -45,7 +45,7 @@
 
 // Complete migration must be enabled on both boards in the same release.
 #ifndef KITTY_C5_BLE_MIGRATION_ENABLED
-#define KITTY_C5_BLE_MIGRATION_ENABLED 0
+#define KITTY_C5_BLE_MIGRATION_ENABLED 1
 #endif
 static bool c5AppSession=false;
 static bool c5AppCommandPending=false;
