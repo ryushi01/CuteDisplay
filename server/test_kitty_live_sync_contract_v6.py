@@ -12,12 +12,14 @@ class LiveSyncContract(unittest.TestCase):
         block=main[a:b]
         self.assertIn("return !BrainC5OTA::updating();",block)
         self.assertIn("KittyMemorySyncV6::setCallActive",block)
+        self.assertIn("KittyMemorySyncV6::setSpeechActive",block)
     def test_paced_and_fast_retry(self):
         code=(ROOT/"firmware/CuteDisplayBrain/KittyMemorySyncV6.h").read_text()
-        self.assertIn("callActive && callActive()?200:12",code)
-        self.assertIn("FAILURE_RETRY_MS=5000UL",code)
+        self.assertIn("callActive && callActive()?750:12",code)
+        self.assertIn("FAILURE_RETRY_MS=15000UL",code)
         self.assertIn("IDLE_QUIET_MS=500UL",code)
         self.assertIn("KittyMemory::requestExport(i,offset)",code)
+        self.assertIn("pauseForSpeech()",code)
         self.assertIn("savedBefore!=KittyMemory::saved",code)
         self.assertIn("WiFiClientSecure client;client.setCACert",code)
 if __name__=="__main__":
