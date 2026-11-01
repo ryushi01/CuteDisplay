@@ -37,6 +37,7 @@ static volatile int lastHttpStatus=0;
 static volatile uint8_t lastFileIndex=0;
 static volatile uint8_t failureStage=0; // 1=export, 2=chunk, 3=finalize, 4=concurrent-change
 static volatile uint32_t changedDuringExport=0,abortedBeforeUpload=0;
+static volatile uint32_t inCallPosts=0,speechOverlapPosts=0,slowestPostMs=0;
 inline bool archiveChanged(uint32_t saved,uint32_t facts,uint32_t summaries){
  return saved!=KittyMemory::saved || facts!=KittyMemory::factRevision ||
         summaries!=KittyMemory::summaryRevision;
@@ -82,7 +83,15 @@ inline int send(const char* route,const String &json,String &response){
  if(!http.begin(client,url))return -1;
  http.addHeader("Authorization",String("Bearer ")+KITTY_SYNC_V6_DEVICE_TOKEN);
  http.addHeader("Content-Type","application/json");
+ // Diagnostics are counters only; never log URLs, payloads or credentials.
+ const bool wasCall=callActive && callActive();
+ const bool wasSpeech=speechActive && speechActive();
+ const uint32_t began=millis();
  int status=http.POST((uint8_t*)json.c_str(),json.length());
+ const uint32_t elapsed=millis()-began;
+ if(wasCall)inCallPosts++;
+ if(wasSpeech || (speechActive && speechActive()))speechOverlapPosts++;
+ if(elapsed>slowestPostMs)slowestPostMs=elapsed;
  lastHttpStatus=status;
  if(status==200)response=http.getString();
  http.end();return status;
@@ -208,13 +217,17 @@ inline void task(void*){
     completed++;
     syncedSaved=startSaved;syncedFacts=startFacts;syncedSummaries=startSummaries;
     lastSuccess=millis();lastFailure=0;
-    Serial.println("[MEMSYNC] snapshot finalized");
+    Serial.printf("[MEMSYNC] snapshot finalized call_posts=%lu speech_overlap=%lu max_post_ms=%lu changed=%lu\\n",
+      (unsigned long)inCallPosts,(unsigned long)speechOverlapPosts,
+      (unsigned long)slowestPostMs,(unsigned long)changedDuringExport);
    }else{
     // An in-flight SD write can invalidate a snapshot; retry soon.
     failures++;lastFailure=millis();
     if(failureStage==4)lastArchiveChange=lastFailure;
-    Serial.printf("[MEMSYNC] upload deferred/failed stage=%u file=%u http=%d (SD authoritative)\n",
-      (unsigned)failureStage,(unsigned)lastFileIndex,(int)lastHttpStatus);
+    Serial.printf("[MEMSYNC] upload deferred/failed stage=%u file=%u http=%d changed=%lu call_posts=%lu speech_overlap=%lu max_post_ms=%lu (SD authoritative)\n",
+      (unsigned)failureStage,(unsigned)lastFileIndex,(int)lastHttpStatus,
+      (unsigned long)changedDuringExport,(unsigned long)inCallPosts,
+      (unsigned long)speechOverlapPosts,(unsigned long)slowestPostMs);
    }
    idleSince=0;
   }
