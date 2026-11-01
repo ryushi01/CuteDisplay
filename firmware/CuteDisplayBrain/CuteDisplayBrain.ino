@@ -1010,6 +1010,19 @@ static void consoleCommand(String cmd){
     WiFi.status()==WL_CONNECTED?1:0);
   return;
  }
+ if(cmd=="memory summary status"){
+  // Read-only diagnostics: no SD file I/O, no private text or credentials.
+  Serial.printf("[MEMORY V6] sd=%d active_call=%lu job_ack_offset=%lu awaiting=%d summary_queue=%u results_queue=%u backpressure=%lu ai_running=%d ai_pending=%d\\n",
+    KittyMemory::ready()?1:0,
+    (unsigned long)KittyMemory::activeConversation,
+    (unsigned long)KittyMemory::summaryAckEnd,
+    KittyMemory::summaryJobAwaiting?1:0,
+    (unsigned)(KittyMemory::summaryCandidates?uxQueueMessagesWaiting(KittyMemory::summaryCandidates):0),
+    (unsigned)(KittyMemory::summaryResults?uxQueueMessagesWaiting(KittyMemory::summaryResults):0),
+    (unsigned long)KittyMemory::summaryBackpressure,
+    BrainMemoryAI::running?1:0,!BrainMemoryAI::pending.isEmpty()?1:0);
+  return;
+ }
  if(cmd=="c5 ota status"){
   Serial.printf("[S3 OTA] automatic update enabled; stage=%d target_v=%lu\n",
    (int)BrainC5OTA::stage,(unsigned long)C5Image::version);
