@@ -1023,8 +1023,10 @@ inline void tick(bool audioBusy){
       (unsigned long)BrainRealtimeAudio::overlapCount());
    }
    // 20ms mono little-endian PCM16, encoded as a native Open WebUI event.
-   // Never send more than 2 frames per tick (40ms maximum).
-   for(int n=0;n<2;n++){
+   // Normally send 2 frames per tick; catch up to 4 only if backlog rises.
+   // Keep the extra network work off the I2S task; queue remains bounded.
+   const int micBudget=BrainRealtimeAudio::queuedMicFrames()>=8?4:2;
+   for(int n=0;n<micBudget;n++){
     BrainRealtimeAudio::Frame frame={};
     if(!BrainRealtimeAudio::takeMic(frame))break;
     unsigned char encoded[4*((sizeof(frame.pcm)+2)/3)+4]={0};
