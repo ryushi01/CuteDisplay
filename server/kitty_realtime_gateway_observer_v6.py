@@ -5,8 +5,12 @@ copies to observe_client/observe_upstream and do not await recognition.
 Unknown or mismatched items never unlock semantic memory. Never log PCM.
 """
 import os
-from kitty_realtime_speaker_session_v6 import SpeakerSession
-from kitty_realtime_turn_gate_v6 import MemoryTurnGate
+try:
+    from .kitty_realtime_speaker_session_v6 import SpeakerSession
+    from .kitty_realtime_turn_gate_v6 import MemoryTurnGate
+except ImportError:
+    from kitty_realtime_speaker_session_v6 import SpeakerSession
+    from kitty_realtime_turn_gate_v6 import MemoryTurnGate
 
 class KittySpeakerObserver:
     def __init__(self, send_to_s3, *, session=None, enabled=False,
