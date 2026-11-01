@@ -26,6 +26,7 @@ HOOK = '''\n                # KITTY_PUBLIC_PROFILE_SESSION_V6
                                 session = dict(session)
                                 session["instructions"] = instructions + addition
                                 event["session"] = session
+                                raw = JSONCodec.dumps(event)
                     except Exception:
                         pass  # Public profile must never disrupt a voice call
 '''
