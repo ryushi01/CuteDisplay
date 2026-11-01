@@ -14,6 +14,12 @@ static uint32_t lastAttempt=0;
 // Circuit breaker: one failed idle HTTP request pauses inference until reboot.
 // Original summary jobs stay in the SD journal, with no new Mac requests.
 static volatile bool pausedAfterHttpFailure=false;
+// Default OFF: background inference must be explicitly enabled from physical USB.
+// Volatile by design: a reboot cannot accidentally resume Mac GPU work.
+static volatile bool operatorEnabled=false;
+static volatile uint32_t requestStartedAt=0;
+static constexpr uint32_t TOTAL_BUDGET_MS=30000UL;
+inline void setEnabled(bool enabled){operatorEnabled=enabled;if(!enabled)abortRequested=true;}
 static String pending;
 static bool pendingSummary=false;
 static bool pendingSummaryOwnerVerified=false;
@@ -24,7 +30,11 @@ inline void tick(bool busy){
  uint32_t now=millis();
  if(busy){interactive=true;lastInteractiveAt=now;abortRequested=true;return;}
  if(interactive){interactive=false;lastInteractiveAt=now;}
- if(running || pausedAfterHttpFailure || WiFi.status()!=WL_CONNECTED ||
+ if(running && requestStartedAt && (uint32_t)(now-requestStartedAt)>TOTAL_BUDGET_MS){
+  abortRequested=true;operatorEnabled=false;pausedAfterHttpFailure=true;
+  // Do not free a worker blocked inside TLS; it will exit when the client returns.
+ }
+ if(running || !operatorEnabled || pausedAfterHttpFailure || WiFi.status()!=WL_CONNECTED ||
     (uint32_t)(now-lastInteractiveAt)<IDLE_MS ||
     (uint32_t)(now-lastAttempt)<RETRY_GAP_MS)return;
  if(pending.isEmpty()){
@@ -33,7 +43,7 @@ inline void tick(bool busy){
   if(!pendingSummary && !KittyMemory::takeConsolidationCandidate(pending))return;
  }
  lastAttempt=now;abortRequested=false;
- running=true;
+ requestStartedAt=now;running=true;
  if(xTaskCreatePinnedToCore([](void*){
    // Take only one bounded user utterance from the SD worker's RAM queue.
    String utterance=pending;
@@ -46,9 +56,9 @@ inline void tick(bool busy){
    auto finish=[](bool accepted=false){
     if(accepted){pending="";pendingSummary=false;
      pendingSummaryOwnerVerified=false;pendingSummaryConversation=0;pendingSummaryJobEnd=0;}
-    running=false;worker=nullptr;vTaskDelete(nullptr);
+    running=false;requestStartedAt=0;worker=nullptr;vTaskDelete(nullptr);
    };
-   if(abortRequested || interactive){finish();return;}
+   if(abortRequested || interactive || !operatorEnabled){finish();return;}
    if(utterance.length()<12){finish(true);return;}
    String l=utterance;l.toLowerCase();
    // Conservative candidate filter: avoid Ollama requests for jokes,
@@ -64,7 +74,7 @@ inline void tick(bool busy){
     url=prefs.getString("url","");model=prefs.getString("model","");
     key=prefs.getString("key","");prefs.end();
    }
-   if(!url.startsWith("https://") || url.indexOf('@')>=0 ||
+   if(!operatorEnabled || !url.startsWith("https://") || url.indexOf('@')>=0 ||
       model.isEmpty() || key.isEmpty() || abortRequested){finish();return;}
    if(url.endsWith("/"))url.remove(url.length()-1);
    url+="/api/chat/completions";
@@ -107,7 +117,8 @@ inline void tick(bool busy){
    cfg.timeout_ms=15000; // Idle-only inference, never on realtime/audio task.
    cfg.user_data=&response;
    cfg.event_handler=[](esp_http_client_event_t *e)->esp_err_t {
-    if(abortRequested || interactive)return ESP_FAIL;
+    if(abortRequested || interactive || !operatorEnabled ||
+       (requestStartedAt && (uint32_t)(millis()-requestStartedAt)>TOTAL_BUDGET_MS))return ESP_FAIL;
     auto *res=(Response*)e->user_data;
     if(!res)return ESP_OK;
     if(e->event_id==HTTP_EVENT_ON_CONNECTED)res->connected=true;
@@ -173,6 +184,10 @@ inline void tick(bool busy){
      pausedAfterHttpFailure=true;
      Serial.printf("[MEMORY AI] skipped HTTP=%d err=%d elapsed_ms=%lu connected=%d first_data=%d rx_bytes=%lu; idle AI paused until reboot\\n",status,(int)rc,(unsigned long)elapsed,response.connected?1:0,response.firstDataAt?1:0,(unsigned long)response.bytes);
     }
+   }
+   if(requestStartedAt && (uint32_t)(millis()-requestStartedAt)>TOTAL_BUDGET_MS){
+    pausedAfterHttpFailure=true;operatorEnabled=false;
+    Serial.println("[MEMORY AI] total budget exceeded; idle AI disabled until USB opt-in");
    }
    if(http)esp_http_client_cleanup(http);
    free(payload);
