@@ -22,7 +22,6 @@ SESSION_CODE = """                # KITTY_SHARED_CONTEXT_PERSIST_SESSION_V6
                             _kitty_shared_session = dict(_kitty_shared_session)
                             _kitty_shared_session['instructions'] = _kitty_old + _kitty_initial_shared
                             event['session'] = _kitty_shared_session
-                            raw = JSONCodec.dumps(event)
 """
 RESPONSE_CODE = """                # KITTY_SHARED_CONTEXT_PERSIST_RESPONSE_V6
                 # A response.create may override session instructions. Append
