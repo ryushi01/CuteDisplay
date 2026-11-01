@@ -65,6 +65,16 @@ This audit confirms **what is deployed versus what is tracked**. It does not est
 ## Minimal safety checklist
 Do not erase all flash or format SD; do not flash C5 sketch to S3; do not merge credentials or memory snapshots into public Git; do not claim a successful GitHub build proves deployed firmware parity; distinguish **source** from separately patched **live runtime**.
 
+## Session-scoped summary batching increment — 2026-11-01 (not deployed)
+
+Added to GitHub `main` in commits `8c6393d1`, `92c41d82`, `28f37a64`:
+- S3's realtime call toggle assigns a monotonically increasing in-process conversation identifier, carried by each archived turn into the SD summary batching path. Reconnects during the same requested call keep that scope.
+- Summary batches do not mix different conversation IDs or verified/unverified records. End-of-call queues a non-blocking summary flush marker after any pending turns, allowing fewer than six turns to produce a summary when the queue has capacity.
+- The idle AI summarizer returns the conversation ID with its result. The separate `unverified_summaries_v6.tsv` rows now contain `timestamp<TAB>conversation_id<TAB>summary`. The legacy verified-owner `summaries.tsv` format remains unchanged.
+- No new scope is injected into Open WebUI globally; candidate voice recognition still cannot authorize owner facts, and the microSD remains authoritative.
+
+**Limitations / next steps:** conversation IDs are volatile and reset on S3 reboot; a marker can be dropped when the existing bounded writes queue is full; summary queues can discard old candidates under load; idle inference requires configured service and connectivity. Call-scoped retrieval, safe intra-call speaker changes, persistent call ID semantics, and validation on physical S3 remain outstanding. These changes do **not** prove complete turn delivery when the write queue overflows or when SD writes fail. Preserve microSD, private settings, C5 v38 and gateway bind mounts. Do not flash automatically.
+
 ## Incremental source patch — 2026-11-01 (not deployed)
 
 GitHub `main` now includes the initial S3 summarization safety patch (commits `5082a958`, `d048a289`). The SD worker submits **both verified and unverified** archived turn batches to the existing idle-only AI summarizer, with a trust flag propagated to the result. The SD worker writes unverified results to `/kitty/unverified_summaries_v6.tsv`, **not** the globally injected `/kitty/summaries.tsv`. The owner-fact and AI consolidation gates remain restricted to `ownerVerified`. Mixed verification-status batches reset at the boundary instead of combining identities.
