@@ -75,6 +75,22 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(obj.authorized_recall("item_123", "person:camille", "voice_probable"))
         obj.close()
 
+    async def test_cancelled_turn_rejects_late_recall_result(self):
+        async def send(event):
+            return None
+        observer = KittySpeakerObserver(send, enabled=True, token="test")
+        epoch = observer.gate.begin("turn_one")
+        observer.epoch = epoch
+        self.assertTrue(observer.gate.accept_speaker(
+            epoch, "turn_one", "person:camille", "probable"))
+        self.assertEqual(observer.authorized_recall(
+            "turn_one", "person:camille", "voice_probable"), epoch)
+        # A new utterance begins while the CPU HTTP request is outstanding.
+        observer.observe_upstream({"type": "input_audio_buffer.speech_started"})
+        self.assertEqual(observer.complete_recall(
+            epoch, "turn_one", "person:camille", "late private data"), "")
+        observer.close()
+
     async def test_disabled_by_default(self):
         emitted=[]
         async def send(ev): emitted.append(ev)
