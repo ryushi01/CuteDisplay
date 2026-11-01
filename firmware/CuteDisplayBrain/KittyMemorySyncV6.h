@@ -103,16 +103,25 @@ inline bool ackOffset(const String &response,uint32_t wanted){
  return (uint32_t)response.substring(pos+1).toInt()==wanted;
 }
 inline bool exportAndSend(const String &snapshot){
- // Reject snapshots assembled across a concurrent conversation/fact change.
- // Never block SD writes to force consistency.
- const uint32_t savedBefore=KittyMemory::saved;
+ // Freeze all file lengths on the SD worker, so later append-only
+ // conversation writes do not invalidate the snapshot's byte boundary.
  const uint32_t factsBefore=KittyMemory::factRevision;
  const uint32_t summariesBefore=KittyMemory::summaryRevision;
- String manifest="{";
  failureStage=0;lastHttpStatus=0;
+ if(!KittyMemory::requestExport(KittyMemory::EXPORT_COUNT,0)){
+  failureStage=1;return false;
+ }
+ KittyMemory::ExportBlock boundary={};
+ if(!KittyMemory::takeExport(boundary,2000) || !boundary.ok ||
+    boundary.file!=KittyMemory::EXPORT_COUNT){
+  failureStage=1;return false;
+ }
+ uint32_t frozen[KittyMemory::EXPORT_COUNT]={};
+ for(uint8_t n=0;n<KittyMemory::EXPORT_COUNT;n++)frozen[n]=boundary.boundaries[n];
+ String manifest="{";
  for(uint8_t i=0;i<KittyMemory::EXPORT_COUNT;i++){
   lastFileIndex=i;
-  if(archiveChanged(savedBefore,factsBefore,summariesBefore)){
+  if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision)){
    changedDuringExport++;failureStage=4;return false;
   }
   if(!allowed()){failureStage=1;return false;}
@@ -122,16 +131,16 @@ inline bool exportAndSend(const String &snapshot){
   while(ok){
    // Abort before the next SD read/HTTPS chunk when the live archive grows.
    // A partial staging upload is never finalized as a mixed-revision snapshot.
-   if(archiveChanged(savedBefore,factsBefore,summariesBefore)){
+   if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision)){
     failureStage=4;changedDuringExport++;ok=false;break;
    }
-   if(!pauseForSpeech() || !KittyMemory::requestExport(i,offset)){ok=false;break;}
+   if(!pauseForSpeech() || !KittyMemory::requestExport(i,offset,frozen[i])){ok=false;break;}
    KittyMemory::ExportBlock block={};
    if(!KittyMemory::takeExport(block,1200) || !block.ok ||
       block.file!=i || block.offset!=offset || block.total>256UL*1024UL*1024UL){
      ok=false;break;
    }
-   if(offset==0)total=block.total;
+   if(offset==0)total=frozen[i];
    if(block.total!=total || offset+block.length>total){ok=false;break;}
    if(block.length || (total==0 && offset==0)){
     String payload=encode(block.data,block.length);
@@ -160,7 +169,7 @@ inline bool exportAndSend(const String &snapshot){
     String(total)+",\"sha256\":\""+digestHex(hash)+"\"}";
  }
  manifest+="}";
- if(archiveChanged(savedBefore,factsBefore,summariesBefore)){
+ if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision)){
   changedDuringExport++;failureStage=4;return false;
  }
  String reply;
