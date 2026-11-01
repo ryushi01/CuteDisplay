@@ -32,6 +32,11 @@ class AttributionContract(unittest.TestCase):
         self.assertIn('candidate = event.get("candidate_speaker_id")', observer)
         self.assertIn('self.gate.accept_speaker(self.epoch, item, sid, confidence)', observer)
         self.assertIn('"speaker_id": event.get("speaker_id", "unknown")', observer)
+        self.assertIn('safe_event["candidate_speaker_id"] = candidate', observer)
+        self.assertIn('safe_event["candidate_provenance"] = "voice_probable"', observer)
+        self.assertIn('candidate_provenance', code := FW.read_text())
+        self.assertIn('if(source=="voice_probable" && cJSON_IsString(sid)', code)
+        self.assertIn('strcmp(sid->valuestring,speaker.c_str())==0', code)
 
     def test_unverified_history_fails_closed(self):
         attribution = ATTR.read_text()
