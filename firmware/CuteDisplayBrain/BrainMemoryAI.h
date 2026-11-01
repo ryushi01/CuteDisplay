@@ -43,7 +43,8 @@ inline void tick(bool busy){
      pendingSummaryOwnerVerified=false;pendingSummaryConversation=0;}
     running=false;worker=nullptr;vTaskDelete(nullptr);
    };
-   if(abortRequested || interactive || utterance.length()<12){finish();return;}
+   if(abortRequested || interactive){finish();return;}
+   if(utterance.length()<12){finish(true);return;}
    String l=utterance;l.toLowerCase();
    // Conservative candidate filter: avoid Ollama requests for jokes,
    // questions, greetings and the majority of ordinary conversation.
@@ -135,7 +136,8 @@ inline void tick(bool busy){
         cJSON *sentence=cJSON_GetObjectItem(parsed,"summary");
         if(cJSON_IsString(sentence) && sentence->valuestring &&
            !abortRequested && !interactive)
-          accepted=KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified,summaryConversation);
+          accepted=String(sentence->valuestring).isEmpty() ||
+            KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified,summaryConversation);
        }
        cJSON *facts=cJSON_GetObjectItem(parsed,"facts");
        if(!summarize && cJSON_IsArray(facts) && cJSON_GetArraySize(facts)<=3){
