@@ -10,7 +10,10 @@ import base64
 import binascii
 import collections
 import re
-from kitty_realtime_speaker_v6 import SpeakerTurn, identify_turn
+try:
+    from .kitty_realtime_speaker_v6 import SpeakerTurn, identify_turn
+except ImportError:
+    from kitty_realtime_speaker_v6 import SpeakerTurn, identify_turn
 
 _ITEM = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
 
