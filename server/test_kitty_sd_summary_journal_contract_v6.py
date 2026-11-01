@@ -43,4 +43,6 @@ check('[MEMORY AI] interrupted HTTP=' in worker, "non-sensitive cancellation dia
 check('reply.reserve(12288)' in worker, "memory HTTP reply preallocation")
 check('e->data_len<=16384' in worker, "memory HTTP reply accepts 8KB responses")
 check('response.truncated?1:0' in worker, "memory response truncation diagnostics")
+check('truncated=%d format=%d json=%d' in worker, "privacy-safe reply format diagnostics")
+check('format==1 && !response.truncated' in worker, "only attempt JSON parsing on complete JSON-like replies")
 print("Kitty V6 SD summary journal source contract: OK")
