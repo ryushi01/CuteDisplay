@@ -46,17 +46,17 @@ def patch(src):
     # prompt template. Ignore differences in indentation and whitespace.
     update = re.search(
         r"(?m)^(?P<indent>[ ]*)await upstream[.]send_json[(]\s*"
-        r"\{\s*['\\"]type['\\"]\s*:\s*['\\"]session[.]update['\\"]",
+        r"\{\s*[\x27\x22]type[\x27\x22]\s*:\s*[\x27\x22]session[.]update[\x27\x22]",
         src,
     )
     expression = re.search(
         r"(?m)^(?P<indent>[ ]*)[(]config[.]get[(]"
-        r"['\\"]audio[.]realtime[.]prompt_template['\\"]"
+        r"[\x27\x22]audio[.]realtime[.]prompt_template[\x27\x22]"
         r"[)]\s+or\s+DEFAULT_REALTIME_CALL_PROMPT_TEMPLATE[)]",
         src,
     )
     if (not update or not expression or
-            len(re.findall(r"['\\"]type['\\"]\s*:\s*['\\"]session[.]update['\\"]", src)) != 1 or
+            len(re.findall(r"[\x27\x22]type[\x27\x22]\s*:\s*[\x27\x22]session[.]update[\x27\x22]", src)) != 1 or
             len(re.findall(r"DEFAULT_REALTIME_CALL_PROMPT_TEMPLATE[)]", src)) != 1 or
             update.start() >= expression.start() or
             expression.start() - update.start() > 2500):
@@ -68,7 +68,7 @@ def patch(src):
     # Match fresh expression after insertion; insert immediately after it.
     expression = re.search(
         r"(?m)^(?P<indent>[ ]*)[(]config[.]get[(]"
-        r"['\\"]audio[.]realtime[.]prompt_template['\\"]"
+        r"[\x27\x22]audio[.]realtime[.]prompt_template[\x27\x22]"
         r"[)]\s+or\s+DEFAULT_REALTIME_CALL_PROMPT_TEMPLATE[)]", src)
     pos = expression.end()
     src = src[:pos] + "\n" + expression.group("indent") + "+ _kitty_initial_profile" + src[pos:]
