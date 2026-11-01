@@ -32,12 +32,17 @@ inline void tick(bool busy){
  running=true;
  if(xTaskCreatePinnedToCore([](void*){
    // Take only one bounded user utterance from the SD worker's RAM queue.
-   String utterance=pending;pending="";
-   bool summarize=pendingSummary;pendingSummary=false;
+   String utterance=pending;
+   bool summarize=pendingSummary;
    bool summaryOwnerVerified=pendingSummaryOwnerVerified;
    uint32_t summaryConversation=pendingSummaryConversation;
-   pendingSummaryOwnerVerified=false;pendingSummaryConversation=0;
-   auto finish=[](){running=false;worker=nullptr;vTaskDelete(nullptr);};
+   // Keep the pending candidate until the model returns an accepted result.
+   // Interrupted network/model work must be retried, not silently lost.
+   auto finish=[](bool accepted=false){
+    if(accepted){pending="";pendingSummary=false;
+     pendingSummaryOwnerVerified=false;pendingSummaryConversation=0;}
+    running=false;worker=nullptr;vTaskDelete(nullptr);
+   };
    if(abortRequested || interactive || utterance.length()<12){finish();return;}
    String l=utterance;l.toLowerCase();
    // Conservative candidate filter: avoid Ollama requests for jokes,
@@ -46,7 +51,7 @@ inline void tick(bool busy){
       (l.indexOf("i ")<0 && l.indexOf("my ")<0 && l.indexOf("im ")<0 &&
        l.indexOf("je ")<0 && l.indexOf("j'")<0 &&
        l.indexOf("私は")<0 && l.indexOf("私の")<0 && l.indexOf("今日は")<0))){
-     finish();return;
+     finish(true);return;
    }
    Preferences prefs;String url,model,key;
    if(prefs.begin("brain-ai",true)){
@@ -105,6 +110,7 @@ inline void tick(bool busy){
     return ESP_OK;
    };
    esp_http_client_handle_t http=esp_http_client_init(&cfg);
+   bool accepted=false;
    if(http && !abortRequested){
     String auth="Bearer "+key;
     esp_http_client_set_method(http,HTTP_METHOD_POST);
@@ -129,7 +135,7 @@ inline void tick(bool busy){
         cJSON *sentence=cJSON_GetObjectItem(parsed,"summary");
         if(cJSON_IsString(sentence) && sentence->valuestring &&
            !abortRequested && !interactive)
-          (void)KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified,summaryConversation);
+          accepted=KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified,summaryConversation);
        }
        cJSON *facts=cJSON_GetObjectItem(parsed,"facts");
        if(!summarize && cJSON_IsArray(facts) && cJSON_GetArraySize(facts)<=3){
@@ -155,7 +161,7 @@ inline void tick(bool busy){
    }
    if(http)esp_http_client_cleanup(http);
    free(payload);
-   finish();
+   finish(accepted || !summarize);
   },"kitty_memory_ai",12288,nullptr,1,&worker,0)!=pdPASS){
    running=false;worker=nullptr;
  }
