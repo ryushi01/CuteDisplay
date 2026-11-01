@@ -6,6 +6,7 @@ Unknown or mismatched items never unlock semantic memory. Never log PCM.
 """
 import os
 import asyncio
+import time
 try:
     from .kitty_realtime_speaker_session_v6 import SpeakerSession
     from .kitty_realtime_turn_gate_v6 import MemoryTurnGate
@@ -20,6 +21,7 @@ class KittySpeakerObserver:
         self.on_candidate = on_candidate
         self.on_candidate_clear = on_candidate_clear
         self.candidate_hint = None
+        self.candidate_expires = 0.0
         self.url = url if url is not None else os.environ.get("KITTY_SEMANTIC_SERVICE_URL", "")
         self.token = token if token is not None else os.environ.get("KITTY_MEMORY_TOKEN", "")
         self.session = session or SpeakerSession()
@@ -55,7 +57,10 @@ class KittySpeakerObserver:
             self.gate.invalidate()
             self.pending_stopped_item = None
             self._active_item = None
-            self.candidate_hint = None
+            # Keep the last bounded, non-authorizing hint across a short follow-up.
+            # This never affects the separate per-turn authorization gate.
+            if time.monotonic() >= self.candidate_expires:
+                self.candidate_hint = None
         elif kind == "input_audio_buffer.speech_stopped":
             item = event.get("item_id")
             self.session.speech_stopped(item_id=item if isinstance(item, str) else None)
@@ -95,6 +100,7 @@ class KittySpeakerObserver:
         # the S3 or allow it to authorize person-scoped memory.
         if candidate == "person:shana":
             self.candidate_hint = (item, candidate)
+            self.candidate_expires = time.monotonic() + 20.0
         if candidate == "person:shana" and callable(self.on_candidate):
             try:
                 await self.on_candidate(item, candidate)
@@ -137,4 +143,5 @@ class KittySpeakerObserver:
     def close(self):
         self.gate.invalidate()
         self.candidate_hint = None
+        self.candidate_expires = 0.0
         self.session.close()
