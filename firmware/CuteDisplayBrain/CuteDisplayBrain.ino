@@ -1015,6 +1015,22 @@ static void consoleCommand(String cmd){
    (int)BrainC5OTA::stage,(unsigned long)C5Image::version);
   return;
  }
+ // Physical USB console only. The operator explicitly chooses content to share.
+ // Never accept share requests from voice transcripts, BLE, or LAN.
+ if(cmd.startsWith("memory share ")){
+  if(BrainRealtimeDirect::active()){
+   Serial.println("[MEM SHARE] Finish the live call before approving memory");return;
+  }
+  String payload=cmd.substring(13);
+  int space=payload.indexOf(' ');
+  if(space<=0){
+   Serial.println("[MEM SHARE] Usage: memory share <id> <non-secret text>");return;
+  }
+  String id=payload.substring(0,space),note=payload.substring(space+1);
+  bool queued=KittyMemory::queueApprovedSharedMemory(id,note,true);
+  Serial.println(queued?"[MEM SHARE] queued for S3 SD write":"[MEM SHARE] rejected; verify SD and format");
+  return;
+ }
  if(cmd=="call diagnose"){
   bool busy=BrainVoiceSTT::running || BrainAI::busy ||
     BrainAudioTest::running || BrainC5OTA::updating() ||
