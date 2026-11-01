@@ -36,6 +36,11 @@ static volatile uint32_t bytesSent=0;
 static volatile int lastHttpStatus=0;
 static volatile uint8_t lastFileIndex=0;
 static volatile uint8_t failureStage=0; // 1=export, 2=chunk, 3=finalize, 4=concurrent-change
+static volatile uint32_t changedDuringExport=0,abortedBeforeUpload=0;
+inline bool archiveChanged(uint32_t saved,uint32_t facts,uint32_t summaries){
+ return saved!=KittyMemory::saved || facts!=KittyMemory::factRevision ||
+        summaries!=KittyMemory::summaryRevision;
+}
 inline bool configured(){
  return String(KITTY_SYNC_V6_URL)=="https://ragnarok-project.com/kitty-v6/sync" &&
         strlen(KITTY_SYNC_V6_DEVICE_TOKEN)>=32 &&
@@ -98,11 +103,19 @@ inline bool exportAndSend(const String &snapshot){
  failureStage=0;lastHttpStatus=0;
  for(uint8_t i=0;i<KittyMemory::EXPORT_COUNT;i++){
   lastFileIndex=i;
+  if(archiveChanged(savedBefore,factsBefore,summariesBefore)){
+   changedDuringExport++;failureStage=4;return false;
+  }
   if(!allowed()){failureStage=1;return false;}
   mbedtls_sha256_context sha;mbedtls_sha256_init(&sha);
   if(mbedtls_sha256_starts(&sha,0)!=0){mbedtls_sha256_free(&sha);return false;}
   uint32_t offset=0,total=0;bool ok=true;
   while(ok){
+   // Abort before the next SD read/HTTPS chunk when the live archive grows.
+   // A partial staging upload is never finalized as a mixed-revision snapshot.
+   if(archiveChanged(savedBefore,factsBefore,summariesBefore)){
+    failureStage=4;changedDuringExport++;ok=false;break;
+   }
    if(!pauseForSpeech() || !KittyMemory::requestExport(i,offset)){ok=false;break;}
    KittyMemory::ExportBlock block={};
    if(!KittyMemory::takeExport(block,1200) || !block.ok ||
@@ -129,7 +142,7 @@ inline bool exportAndSend(const String &snapshot){
    // Yield between chunks; use gentler pacing when sharing Wi-Fi with voice.
    vTaskDelay(pdMS_TO_TICKS(callActive && callActive()?750:12));
   }
-  if(!ok){failureStage=lastHttpStatus==200?1:2;mbedtls_sha256_free(&sha);return false;}
+  if(!ok){if(failureStage!=4)failureStage=lastHttpStatus==200?1:2;mbedtls_sha256_free(&sha);return false;}
   unsigned char hash[32]={0};
   if(mbedtls_sha256_finish(&sha,hash)!=0){mbedtls_sha256_free(&sha);return false;}
   mbedtls_sha256_free(&sha);
@@ -138,8 +151,9 @@ inline bool exportAndSend(const String &snapshot){
     String(total)+",\"sha256\":\""+digestHex(hash)+"\"}";
  }
  manifest+="}";
- if(savedBefore!=KittyMemory::saved || factsBefore!=KittyMemory::factRevision ||
-    summariesBefore!=KittyMemory::summaryRevision){failureStage=4;return false;}
+ if(archiveChanged(savedBefore,factsBefore,summariesBefore)){
+  changedDuringExport++;failureStage=4;return false;
+ }
  String reply;
  String body=String("{\"snapshot\":\"")+snapshot+"\",\"manifest\":"+manifest+"}";
  failureStage=3;
@@ -150,20 +164,31 @@ inline bool exportAndSend(const String &snapshot){
 // Short eligibility debounce, not a restriction on ongoing calls.
 // Polling is lightweight; actual SD reads remain on the memory worker.
 static constexpr uint32_t IDLE_QUIET_MS=500UL;
+// Do not start large exports during bursts of archived conversation writes.
+static constexpr uint32_t ARCHIVE_QUIET_MS=3000UL;
 static constexpr uint32_t FAILURE_RETRY_MS=15000UL;
 static constexpr uint32_t PERIODIC_REFRESH_MS=60000UL;
 inline void task(void*){
  uint32_t idleSince=0,lastSuccess=0,lastFailure=0;
+ uint32_t lastArchiveChange=millis();
+ uint32_t seenSaved=KittyMemory::saved,seenFacts=KittyMemory::factRevision;
+ uint32_t seenSummaries=KittyMemory::summaryRevision;
  uint32_t syncedSaved=UINT32_MAX,syncedFacts=UINT32_MAX,syncedSummaries=UINT32_MAX;
  while(true){
   uint32_t now=millis();
+  if(archiveChanged(seenSaved,seenFacts,seenSummaries)){
+   lastArchiveChange=now;
+   seenSaved=KittyMemory::saved;seenFacts=KittyMemory::factRevision;
+   seenSummaries=KittyMemory::summaryRevision;
+  }
   if(!allowed()){
    idleSince=0;
    vTaskDelay(pdMS_TO_TICKS(500));
    continue;
   }
   if(idleSince==0)idleSince=now;
-  bool quiet=(uint32_t)(now-idleSince)>=IDLE_QUIET_MS;
+  bool quiet=(uint32_t)(now-idleSince)>=IDLE_QUIET_MS &&
+              (uint32_t)(now-lastArchiveChange)>=ARCHIVE_QUIET_MS;
   bool changed=syncedSaved!=KittyMemory::saved ||
                syncedFacts!=KittyMemory::factRevision ||
                syncedSummaries!=KittyMemory::summaryRevision;
@@ -175,6 +200,10 @@ inline void task(void*){
    const uint32_t startSummaries=KittyMemory::summaryRevision;
    String snapshot=String("s3_")+String((unsigned long)time(nullptr))+
       "_"+String((unsigned long)esp_random(),HEX);
+   if(archiveChanged(startSaved,startFacts,startSummaries)){
+    abortedBeforeUpload++;lastArchiveChange=millis();
+    idleSince=0;vTaskDelay(pdMS_TO_TICKS(500));continue;
+   }
    if(exportAndSend(snapshot)){
     completed++;
     syncedSaved=startSaved;syncedFacts=startFacts;syncedSummaries=startSummaries;
@@ -183,6 +212,7 @@ inline void task(void*){
    }else{
     // An in-flight SD write can invalidate a snapshot; retry soon.
     failures++;lastFailure=millis();
+    if(failureStage==4)lastArchiveChange=lastFailure;
     Serial.printf("[MEMSYNC] upload deferred/failed stage=%u file=%u http=%d (SD authoritative)\n",
       (unsigned)failureStage,(unsigned)lastFileIndex,(int)lastHttpStatus);
    }
