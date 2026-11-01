@@ -20,7 +20,8 @@ class LiveSyncContract(unittest.TestCase):
         self.assertIn("IDLE_QUIET_MS=500UL",code)
         self.assertIn("KittyMemory::requestExport(i,offset)",code)
         self.assertIn("pauseForSpeech()",code)
-        self.assertIn("savedBefore!=KittyMemory::saved",code)
+        self.assertIn("return saved!=KittyMemory::saved",code)
+        self.assertIn("archiveChanged(savedBefore,factsBefore,summariesBefore)",code)
         self.assertIn("WiFiClientSecure client;client.setCACert",code)
     def test_archive_revision_guard_and_audio_safe_diagnostics(self):
         sync=(ROOT/"firmware/CuteDisplayBrain/KittyMemorySyncV6.h").read_text()
@@ -34,7 +35,9 @@ class LiveSyncContract(unittest.TestCase):
         self.assertIn("slowestPostMs=elapsed",sync)
         self.assertIn('send("/snapshot/finalize",body,reply)',sync)
         self.assertIn('client.setCACert(KITTY_SYNC_V6_CA_PEM)',sync)
-        self.assertNotIn("setInsecure(",sync)
+        # A comment documents the forbidden API; exclude comments from the check.
+        executable="\n".join(line.split("//",1)[0] for line in sync.splitlines())
+        self.assertNotIn("setInsecure(",executable)
 
 if __name__=="__main__":
     unittest.main()
