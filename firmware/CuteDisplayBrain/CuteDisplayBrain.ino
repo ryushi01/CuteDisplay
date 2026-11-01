@@ -1010,6 +1010,16 @@ static void consoleCommand(String cmd){
     WiFi.status()==WL_CONNECTED?1:0);
   return;
  }
+ if(cmd=="memory ai on"){
+  BrainMemoryAI::setEnabled(true);
+  Serial.println("[MEMORY AI] enabled for this boot only; at most one in-flight request");
+  return;
+ }
+ if(cmd=="memory ai off"){
+  BrainMemoryAI::setEnabled(false);
+  Serial.println("[MEMORY AI] disabled; current request cancellation requested");
+  return;
+ }
  if(cmd=="memory ai config"){
   // USB-only, read-only: never print API keys, URL paths, query strings,
   // or embedded userinfo. This does not change the working call pipeline.
