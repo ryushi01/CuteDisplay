@@ -46,11 +46,11 @@ inline bool proposeConsolidatedFact(const String &key,const String &value){
  return xQueueSend(consolidatedFacts,&item,0)==pdTRUE;
 }
 
-static volatile bool mounted=false;
 // Network-free one-slot SD export. Only kitty_sd opens SD_MMC.
 struct ExportRequest { uint8_t file; uint32_t offset; uint32_t limit; };
 struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint32_t boundaries[9]; uint8_t ok; };
 static QueueHandle_t exportRequests=nullptr,exportBlocks=nullptr;
+static volatile bool mounted=false;
 struct SharedMemoryWrite {char id[65];char text[321];};
 static QueueHandle_t sharedMemoryWrites=nullptr;
 static volatile uint32_t sharedRevision=0;
