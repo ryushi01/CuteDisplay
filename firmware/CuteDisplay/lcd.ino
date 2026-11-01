@@ -26,6 +26,7 @@
 #include "board_config.h"
 #include "axp2602.h"
 #include "CuteLink.h"
+#include "KittyAppLink.h"
 #include "C5FirmwareVersion.h"
 #include "C5JapaneseFont.h"
 #include "C5LatinUpper.h"
@@ -42,6 +43,9 @@
 #include <BLEServer.h>
 #include <BLESecurity.h>
 #include <BLEUtils.h>
+#if defined(CONFIG_BLUEDROID_ENABLED)
+#include <BLE2902.h>
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -145,6 +149,12 @@ SemaphoreHandle_t lcdSemaphore = nullptr;
 QueueHandle_t commandQueue = nullptr;
 AXP2602 axp;
 Preferences displayPrefs;
+#ifndef KITTY_C5_BLE_MIGRATION_ENABLED
+#define KITTY_C5_BLE_MIGRATION_ENABLED 0
+#endif
+static BLECharacteristic *appControlCharacteristic = nullptr;
+static volatile bool appEncryptedReadSeen = false;
+static bool appBLEReady = false;
 BLECharacteristic *batteryCharacteristic = nullptr;
 BLECharacteristic *powerCharacteristic = nullptr;
 bool lcdReady = false;
@@ -2314,7 +2324,7 @@ void initBattery(){
  lastBatteryRead=millis();
 }
 class ServerEvents:public BLEServerCallbacks{
- void onConnect(BLEServer *s)override{bleConnected=true;Serial.println("[BLE] Connected");}
+ void onConnect(BLEServer *s)override{bleConnected=true;appEncryptedReadSeen=false;appBLEReady=false;Serial.println("[BLE] Connected");}
  void onDisconnect(BLEServer *s)override{
    bleConnected=false;
    // NimBLE's advertiseOnDisconnect(true) owns the advertising restart.
@@ -2324,21 +2334,23 @@ class ServerEvents:public BLEServerCallbacks{
  }
 };
 class CommandEvents:public BLECharacteristicCallbacks{
+ void onRead(BLECharacteristic*)override{appEncryptedReadSeen=true;}
  void onWrite(BLECharacteristic *c)override{
-  String s=c->getValue();if(s.isEmpty()||!commandQueue)return;
+  String s=c->getValue();if(s.isEmpty()||!commandQueue||!appBLEReady||s.length()>MAX_CMD)return;
+   for(size_t k=0;k<s.length();++k)if(s[k]=='\0')return;
   char item[MAX_CMD+1]={0};int n=min((int)s.length(),MAX_CMD);
   memcpy(item,s.c_str(),n);
   if(xQueueSend(commandQueue,item,0)!=pdTRUE)Serial.println("[BLE] Command queue full");
  }
 };
 void initBLE(){
- if(!BLEDevice::init("CuteDisplay")){Serial.println("[BLE] Failed");return;}
+ if(!BLEDevice::init("CuteDisplay-Kitty")){Serial.println("[BLE] Failed");return;}
  BLEDevice::setMTU(185);
  // Persistent BLE bonding (Just Works; no physical passkey input on this board).
  // FFF1 writes remain compatible with unencrypted iOS connections; system accessory authorization alone does not ensure link encryption.
  BLESecurity *security = new BLESecurity();
  security->setCapability(ESP_IO_CAP_NONE);
- security->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_BOND);
+ security->setAuthenticationMode(true,false,false);
  BLEServer *server=BLEDevice::createServer();
  server->setCallbacks(new ServerEvents());server->advertiseOnDisconnect(true);
  BLEService *control=server->createService("FFF0");
@@ -3083,10 +3095,14 @@ void setup(){
  userButtonStable=userButtonLastRaw;
  loadDisplayState();
  installStartupGlyphs();loadPersistedGlyphs();loadSmoothGlyphs();initBattery();
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ initBLE();
+#else
  // This build delegates *all* BLE, WiFi and WiFi provisioning to S3.
  // No BLEDevice::init(), WiFi.begin() or LAN listener runs on C5.
  Serial.println("[C5] Local BLE/WiFi disabled; radios owned by S3");
  bleConnected=false;
+#endif
  wifiEnabled=false;
  WiFi.mode(WIFI_OFF);
  Serial.println("[BOOT] Initializing LCD...");
@@ -3102,6 +3118,18 @@ void setup(){
 }
 void loop(){
  serviceBrain();
+#if KITTY_C5_BLE_MIGRATION_ENABLED
+ if(bleConnected && appEncryptedReadSeen && !appBLEReady && brainLinkConnected()){
+  appEncryptedReadSeen=false;
+  appBLEReady=true;
+  appControlCharacteristic->setValue("PROXY_READY");
+  appControlCharacteristic->notify();
+ }
+ if(!brainLinkConnected() && appBLEReady){
+  appBLEReady=false;
+  appControlCharacteristic->setValue("PROXY_DISABLED");
+ }
+#endif
  C5UARTOTA::tick();
  if(C5UARTOTA::active()){
   // Yield to FreeRTOS/flash driver while the display is in OTA mode.
