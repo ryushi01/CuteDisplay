@@ -327,7 +327,9 @@ inline void diagnose(bool audioBusy){
   !url.isEmpty()?1:0,!model.isEmpty()?1:0,
   key.startsWith("sk-")&&key.length()>20?1:0,audioBusy?1:0);
 }
+inline void flushSpeakerTurns(bool all);
 inline void stop(){
+ flushSpeakerTurns(true);
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
  requested=false;ready=false;connected=false;started=false;
  clearSemanticTurn();waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
@@ -340,6 +342,7 @@ inline void stop(){
  status("CALL_OFF");
 }
 inline void fail(const char *why){
+ flushSpeakerTurns(true);
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
  const bool localAudio=(strcmp(why,"I2S_RUNTIME")==0 ||
    strcmp(why,"AUDIO_TASK_ALLOC")==0 ||
@@ -361,8 +364,47 @@ inline void fail(const char *why){
  status("CALL_ERROR");
 }
 // V6 speaker recognition is probabilistic and turn-scoped; never owner auth.
-static String pendingSpeakerItem, pendingSpeakerTranscript;
-static uint32_t pendingSpeakerAt=0;
+static constexpr uint8_t SPEAKER_PENDING_MAX=6;
+static constexpr uint32_t SPEAKER_WAIT_MS=5000UL;
+struct SpeakerTurn {String item,transcript,intro;uint32_t at=0;};
+static SpeakerTurn speakerTurns[SPEAKER_PENDING_MAX];
+static uint32_t speakerMatched=0,speakerExpired=0,speakerOverflow=0,speakerUnmatched=0;
+inline int findSpeakerTurn(const String &id){
+ for(uint8_t i=0;i<SPEAKER_PENDING_MAX;i++)
+  if(!speakerTurns[i].item.isEmpty() && speakerTurns[i].item==id)return i;
+ return -1;
+}
+inline void clearSpeakerTurn(uint8_t i){speakerTurns[i]=SpeakerTurn();}
+inline void archiveSpeakerTurn(uint8_t i){
+ SpeakerTurn &t=speakerTurns[i];
+ if(t.item.isEmpty())return;
+ (void)KittyMemory::queueAttributed(t.transcript,"[voice transcript]",
+  t.intro.isEmpty()?String("unknown"):t.intro,
+  t.intro.isEmpty()?String("unverified"):String("explicit_introduction"));
+ clearSpeakerTurn(i);
+}
+inline void flushSpeakerTurns(bool all){
+ const uint32_t now=millis();
+ for(uint8_t i=0;i<SPEAKER_PENDING_MAX;i++){
+  if(speakerTurns[i].item.isEmpty())continue;
+  if(!all && (uint32_t)(now-speakerTurns[i].at)<SPEAKER_WAIT_MS)continue;
+  speakerExpired++;archiveSpeakerTurn(i);
+ }
+}
+inline void addSpeakerTurn(const String &id,const String &transcript,const String &intro){
+ int slot=findSpeakerTurn(id);
+ if(slot>=0)archiveSpeakerTurn((uint8_t)slot);
+ if(slot<0)for(uint8_t i=0;i<SPEAKER_PENDING_MAX;i++)
+  if(speakerTurns[i].item.isEmpty()){slot=i;break;}
+ if(slot<0){
+  uint8_t oldest=0;
+  for(uint8_t i=1;i<SPEAKER_PENDING_MAX;i++)
+   if((int32_t)(speakerTurns[i].at-speakerTurns[oldest].at)<0)oldest=i;
+  slot=oldest;speakerOverflow++;archiveSpeakerTurn((uint8_t)slot);
+ }
+ speakerTurns[slot].item=id;speakerTurns[slot].transcript=transcript;
+ speakerTurns[slot].intro=intro;speakerTurns[slot].at=millis();
+}
 // Unverified conversation name: reset per call, never owner authorization.
 static String introducedSpeaker;
 static String introducedClaimContext;
@@ -378,14 +420,7 @@ inline String selfIntroducedSpeaker(const String &utterance){
  }
  value.toLowerCase();return "person:"+value;
 }
-inline void flushPendingSpeaker(bool timedOut=false){
- if(pendingSpeakerItem.isEmpty())return;
- if(!timedOut && (uint32_t)(millis()-pendingSpeakerAt)<1100UL)return;
- (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
-   introducedSpeaker.isEmpty()?String("unknown"):introducedSpeaker,
-   introducedSpeaker.isEmpty()?String("unverified"):String("explicit_introduction"));
- pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
-}
+// Late speaker results are matched by item ID rather than arrival order.
 
 inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
  if(event==WStype_DISCONNECTED){
@@ -399,7 +434,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    (unsigned long)BrainRealtimeAudio::droppedSpeakerMs());
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
-  memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();introducedSpeaker="";introducedClaimContext="";
+  memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();flushSpeakerTurns(true);introducedSpeaker="";introducedClaimContext="";
   waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  deferredVoiceItem="";playbackSpeechDetected=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -519,8 +554,12 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   cJSON *id=cJSON_GetObjectItem(json,"item_id");
   cJSON *sid=cJSON_GetObjectItem(json,"speaker_id");
   cJSON *conf=cJSON_GetObjectItem(json,"confidence");
-  if(cJSON_IsString(id) && pendingSpeakerItem==id->valuestring &&
-     !pendingSpeakerTranscript.isEmpty()){
+  const int slot=cJSON_IsString(id)?findSpeakerTurn(String(id->valuestring)):-1;
+   if(slot>=0 && !speakerTurns[slot].transcript.isEmpty()){
+    speakerMatched++;
+    const String item=speakerTurns[slot].item;
+    const String transcript=speakerTurns[slot].transcript;
+    const String introduction=speakerTurns[slot].intro;
    String speaker="unknown",source="unverified";
    if(cJSON_IsString(sid) && cJSON_IsString(conf) &&
       strlen(sid->valuestring)<60){
@@ -567,10 +606,10 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
      if(safe){speaker=String(name);source="voice_probable";}
     }
    }
-   if(speaker=="unknown" && !introducedSpeaker.isEmpty()){
-    speaker=introducedSpeaker;source="explicit_introduction";
-   }
-   (void)KittyMemory::queueAttributed(pendingSpeakerTranscript,"[voice transcript]",
+   if(speaker=="unknown" && !introduction.isEmpty()){
+     speaker=introduction;source="explicit_introduction";
+    }
+   (void)KittyMemory::queueAttributed(transcript,"[voice transcript]",
                                      speaker,source);
    // A different recognized speaker invalidates any prior introduction.
    if(source=="voice_probable" && !introducedSpeaker.isEmpty() &&
@@ -581,8 +620,8 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    // Candidate metadata never permits private semantic recall.
    if(source=="voice_probable" && cJSON_IsString(sid) &&
       strcmp(sid->valuestring,speaker.c_str())==0)
-    requestSemanticTurn(pendingSpeakerItem,speaker,source,pendingSpeakerTranscript);
-   pendingSpeakerItem="";pendingSpeakerTranscript="";pendingSpeakerAt=0;
+    requestSemanticTurn(item,speaker,source,transcript);
+    clearSpeakerTurn((uint8_t)slot);
   }
  }else if(strcmp(type,"conversation.item.input_audio_transcription.completed")==0){
   cJSON *id=cJSON_GetObjectItem(json,"item_id");
@@ -594,16 +633,15 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    clearSemanticTurn();
    // Await the bounded turn-linked speaker result briefly, but never delay
    // replying or block audio. Unknown is persisted on timeout.
-   flushPendingSpeaker(true);
-   if(cJSON_IsString(id) && id->valuestring && strlen(id->valuestring)<=160){
-    pendingSpeakerItem=String(id->valuestring);
-    pendingSpeakerTranscript=KittyMemory::clipUTF8(String(transcript->valuestring),254);
-    String intro=selfIntroducedSpeaker(pendingSpeakerTranscript);
+   flushSpeakerTurns(false);
+    if(cJSON_IsString(id) && id->valuestring && strlen(id->valuestring)<=160){
+     String clipped=KittyMemory::clipUTF8(String(transcript->valuestring),254);
+     String intro=selfIntroducedSpeaker(clipped);
     if(!intro.isEmpty()){
      introducedSpeaker=intro;introducedClaimContext="";
      (void)KittyMemory::requestClaimContext(introducedSpeaker);
     }
-    pendingSpeakerAt=millis();
+    addSpeakerTurn(String(id->valuestring),clipped,intro);
    }else{
     (void)KittyMemory::queue(String(transcript->valuestring),"[voice transcript]");
    }
@@ -856,7 +894,7 @@ inline bool toggle(bool audioBusy){
  return true;
 }
 inline void tick(bool audioBusy){
- flushPendingSpeaker(false);
+ flushSpeakerTurns(false);
  if(!introducedSpeaker.isEmpty()){
   String claim;
   if(KittyMemory::takeClaimContext(introducedSpeaker,claim))
