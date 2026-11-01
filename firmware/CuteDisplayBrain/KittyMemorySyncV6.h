@@ -142,7 +142,7 @@ inline void task(void*){
    String snapshot=String("s3_")+String((unsigned long)time(nullptr))+
       "_"+String((unsigned long)esp_random(),HEX);
    if(exportAndSend(snapshot)){completed++;Serial.println("[MEMSYNC] snapshot finalized");}
-   else{failures++;Serial.printf("[MEMSYNC] upload deferred/failed stage=%u file=%u http=%d (SD authoritative)\\n",(unsigned)failureStage,(unsigned)lastFileIndex,(int)lastHttpStatus);}
+   else{failures++;Serial.printf("[MEMSYNC] upload deferred/failed stage=%u file=%u http=%d (SD authoritative)\n",(unsigned)failureStage,(unsigned)lastFileIndex,(int)lastHttpStatus);}
   }
   vTaskDelay(pdMS_TO_TICKS(600000));
  }
