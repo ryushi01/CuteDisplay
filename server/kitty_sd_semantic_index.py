@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import threading
@@ -155,7 +156,7 @@ def search(db_path, query, k=5, model_name=DEFAULT_MODEL, speaker_id=None):
     import numpy as np
     # Fail closed: callers must establish the speaker identity for this
     # session. An unknown speaker is not an alias for the device owner.
-    if not speaker_id or speaker_id == "unknown" or len(speaker_id)>128:
+    if not isinstance(speaker_id, str) or not re.fullmatch(r"person:[A-Za-z0-9_-]{1,48}", speaker_id):
         return []
     if not query or not query.strip() or len(query)>1000:
         return []
