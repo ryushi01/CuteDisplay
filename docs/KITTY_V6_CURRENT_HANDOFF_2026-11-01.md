@@ -88,3 +88,7 @@ Commit `f67bd78` guards the idle AI parser: a model response to a **summary** re
 ## Summary flush backpressure fix — 2026-11-01 (source only)
 
 Commit `11d5a3c3` adds a fallback to the existing end-of-call marker: if the bounded write queue is full, the SD worker records the pending end and flushes the matching summary batch after the queue drains. It never drops archived turns to enqueue a marker. This is a best-effort, single-pending-boundary fallback, not a guarantee across multiple overlapping queued call endings or resets. No SD formatting, live deployment changes, or gateway modification. Same-call injection of unverified summaries remains disabled for speaker privacy. Compilation and physical testing are still required before flashing.
+
+## Idle summary queue backpressure — 2026-11-01 (source only)
+
+Commit `3fdb5dbd` expands the PSRAM-backed summary-candidate FIFO from 2 to 8 batches (about 6 KiB of queue payload). When full, it now preserves the oldest queued batches instead of silently evicting them, emits `[MEMORY V6] summary queue full; archived turns retained on SD`, and increments `summaryBackpressure` for diagnostics. Complete conversation-turn archiving still precedes summarization. This lowers transient pressure but does **not** guarantee that every summary is generated: new batches can still be skipped during prolonged inference outages, and the AI runs only after the conversation finishes/is idle. No live-call memory injection or speaker authorization change; hardware not flashed or compiled.
