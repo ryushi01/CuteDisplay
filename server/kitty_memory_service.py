@@ -204,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not index or not os.path.isfile(index):
                     return self._reply(503,{"error":"semantic_index_unavailable"})
                 sid=data.get("speaker_id")
-                if not isinstance(sid,str) or not sid.strip() or sid=="unknown" or len(sid)>128:
+                if not isinstance(sid,str) or not re.fullmatch(r"person:[A-Za-z0-9_-]{1,48}",sid):
                     return self._reply(400,{"error":"speaker_identity_required"})
                 from kitty_memory_context_v6 import recall_context
                 return self._reply(200,{"context":recall_context(
@@ -217,8 +217,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._reply(503,{"error":"semantic_index_unavailable"})
                 from kitty_sd_semantic_index import search
                 speaker_id = data.get("speaker_id")
-                if (not isinstance(speaker_id,str) or not speaker_id.strip()
-                    or speaker_id=="unknown" or len(speaker_id)>128):
+                if (not isinstance(speaker_id,str)
+                    or not re.fullmatch(r"person:[A-Za-z0-9_-]{1,48}",speaker_id)):
                     return self._reply(400,{"error":"invalid_speaker_id"})
                 return self._reply(200,{"results":search(
                     index,str(data.get("query",""))[:300],
