@@ -62,10 +62,33 @@ class SpeakerTurn:
         return self._generation, bytes(self._pcm)
 
 
+def _trim_quiet_edges(pcm):
+    """Trim only quiet margins for CPU identification; preserve conversational audio."""
+    if len(pcm) < 24000 * 2 * 2 or len(pcm) % 2:
+        return pcm
+    import math
+    frame_bytes = 24000 * 2 // 10  # 100 ms at 24 kHz, mono 16-bit
+    energies = []
+    for start in range(0, len(pcm) - frame_bytes + 1, frame_bytes):
+        frame = pcm[start:start + frame_bytes]
+        count = len(frame) // 2
+        samples = struct.unpack("<" + "h" * count, frame)
+        energies.append(math.sqrt(sum(x * x for x in samples) / count) / 32768.)
+    active = [i for i, energy in enumerate(energies) if energy >= 0.012]
+    if not active:
+        return pcm
+    # Keep at least 200 ms around speech; avoid short or aggressively cut samples.
+    first = max(0, active[0] - 2)
+    last = min(len(energies), active[-1] + 3)
+    candidate = pcm[first * frame_bytes:last * frame_bytes]
+    return candidate if len(candidate) >= 24000 * 2 * 2 else pcm
+
+
 def to_16k_wav(pcm24):
     """Pure Python bounded 24 kHz -> 16 kHz linear resample, mono PCM16."""
     if len(pcm24) % 2 or len(pcm24) > MAX_BYTES:
         raise ValueError("invalid_24k_pcm")
+    pcm24 = _trim_quiet_edges(pcm24)
     n = len(pcm24) // 2
     if n < RATE * 3 // 2:
         raise ValueError("sample_too_short")
