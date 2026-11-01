@@ -93,3 +93,10 @@ python3 -m unittest discover -s server -p 'test_kitty_*contract_v6.py' -v
 test -s ~/kitty-v6/private/kitty-sync-deployment/KittySyncPrivateConfig.h
 ```
 Run build script from this clean worktree using private environment variables as described earlier in this handoff. Arduino verify S3; one S3 flash only if build succeeds. Collect one synchronized call with `[CALL AUDIO DIAG]` and `[MEMSYNC]` counters. Avoid repeated long tests.
+
+
+### 2026-11-01: Fixed-boundary live SD sync candidate (not yet hardware-validated)
+- Branch commit 569a0f7: the SD owner captures all eight export file lengths in one task pass. The network uploader transfers only the captured byte prefixes, so append-only conversation turns can accumulate while a snapshot is in flight.
+- Changing fact/summary revisions still aborts the export rather than finalizing a potentially mixed rewrite. Existing SHA-256 manifest verification, TLS, bearer-token separation, speaker authorization guard, speaker/microphone audio and C5 v38 remain untouched.
+- This is a candidate requiring the Ubuntu Python contract suite and Arduino S3 compile before upload; do not report hardware success from static checks alone. No server redeploy is required for the fixed-boundary protocol; the deployed 8s gateway and 12s S3 timeout baseline remains in place.
+- The latest pre-change hardware run successfully finalized a snapshot after the realtime call, with 0 mic drops, 0 speaker dropped ms, and 0 observed HTTP 502; active-call archive changes still caused stage=4/1 interruptions.
