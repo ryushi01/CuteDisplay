@@ -43,13 +43,17 @@ def patch(source):
         "                    if epoch is None:\n"
         "                        continue\n"
         + guard, 1)
-    sink = "                ), flush=True)\n        kitty_speaker_observer = None"
-    if source.count(sink) != 1:
-        raise ValueError("Speaker-result callback differs from inspected gateway")
-    source = source.replace(sink,
-        "                ), flush=True)\n"
-        "                await ws.send_json(event)\n"
-        "        kitty_speaker_observer = None", 1)
+    callback_start = source.find("        async def kitty_speaker_sink(event):")
+    callback_end = source.find("        kitty_speaker_observer = None", callback_start)
+    if callback_start < 0 or callback_end < 0:
+        raise ValueError("Speaker result callback not found")
+    callback = source[callback_start:callback_end]
+    log_end = "                ), flush=True)"
+    if callback.count(log_end) != 1:
+        raise ValueError("Speaker result callback structure differs")
+    callback = callback.replace(log_end,
+                                log_end + "\n                await ws.send_json(event)", 1)
+    source = source[:callback_start] + callback + source[callback_end:]
     ast.parse(source)
     return source
 
