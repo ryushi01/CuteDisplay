@@ -28,6 +28,6 @@ check("summary_jobs_v6" not in files and "unverified_summaries_v6" not in files,
 
 # Ensure journal text includes actual delimiter escapes, not literal backslash sequences.
 journal = memory.split("auto submitSummaryBatch=", 1)[1].split("auto dispatchSummaryJob=", 1)[0]
-check('+"\\t"+' in journal and '+"\\n";' in journal, "actual TSV delimiter escapes")
-check('+"\\\\t"+' not in journal and '+"\\\\n";' not in journal, "double-escaped TSV delimiters")
+check(r'+"\\t"+' in journal and r'+"\\n";' in journal, "actual TSV delimiter escapes")
+check(r'+"\\\\t"+' not in journal and r'+"\\\\n";' not in journal, "double-escaped TSV delimiters")
 print("Kitty V6 SD summary journal source contract: OK")
