@@ -346,11 +346,11 @@ final class BluetoothManager: NSObject, ObservableObject {
                 // A read of encrypted FFF1 triggers pairing on iOS, and the
                 // app becomes usable only after didUpdateValueFor succeeds.
                 if !brainBLEReady {
-                    status = "Securing Bluetooth with the Brain..."
+                    status = "Securing Kitty Bluetooth..."
                     if characteristic.properties.contains(.read) {
                         device.readValue(for: characteristic)
                     } else {
-                        status = "Brain control characteristic is not readable"
+                        status = "Kitty control characteristic is not readable"
                     }
                 }
             } else if service.uuid == networkServiceUUID && characteristic.uuid == networkCharacteristicUUID {
@@ -1126,8 +1126,8 @@ extension BluetoothManager: CBPeripheralDelegate {
                 } ?? ""
                 if isBrain && response != "PROXY_READY" {
                     status = response == "PAIRING_FAILED"
-                        ? "Brain Bluetooth pairing failed; forget and pair again"
-                        : "Waiting for Brain command relay..."
+                        ? "Kitty Bluetooth pairing failed; forget and pair again"
+                        : "Waiting for Kitty-to-Brain command relay..."
                     brainReadyReadAttempts += 1
                     if brainReadyReadAttempts == 1 || brainReadyReadAttempts.isMultiple(of: 10) {
                         print("[CuteDisplay BLE] FFF1 read attempt \(brainReadyReadAttempts): \(response)")
@@ -1142,21 +1142,21 @@ extension BluetoothManager: CBPeripheralDelegate {
                             device.readValue(for: control)
                         }
                     } else {
-                        status = "Brain FFF1 still not ready (last: \(response)); retrying BLE..."
+                        status = "Kitty FFF1 still not ready (last: \(response)); retrying BLE..."
                     }
                     return
                 }
                 brainReadyReadAttempts = 0
                 if !isBrain {
-                    status = "This is not the S3 Brain. Select the Brain in Bluetooth settings."
+                    status = "This device lacks the Kitty command relay. Pair CuteDisplay-Kitty in accessory settings."
                     isConnected = wifiFallbackConnected
                     return
                 }
                 brainBLEReady = true
                 bluetoothBrainConnected = true
                 isConnected = true
-                status = isBrain ? "Connected securely to Brain (Bluetooth)" :
-                         "Pair the S3 Brain for network features"
+                status = isBrain ? "Connected securely to Kitty C5 (Bluetooth)" :
+                         "Pair CuteDisplay-Kitty for network features"
                 if wifiFallbackConnected && waitingForWrite {
                     // LAN command completion is indeterminate at handover;
                     // do not duplicate the command via Bluetooth.
