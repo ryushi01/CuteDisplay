@@ -172,6 +172,12 @@ static void showC5UpdateStatus(const String &value){
  Serial.printf("[S3 OTA UI] %s\\n",value.c_str());
 }
 static void proxyResult(const String &value){
+ if(lanAwaitingCommand && (value.startsWith("ACK:CMD")||value.startsWith("ERR:"))){
+  if(lanClient && lanAuthenticated)
+   lanClient.println(value.startsWith("ACK:")?"ACK":"NACK");
+  lanAwaitingCommand=false;
+  return;
+ }
 #if KITTY_C5_BLE_MIGRATION_ENABLED
  if(c5AppSession && faceOnline && !BrainC5OTA::updating()){
   if(c5AppCommandPending){
@@ -183,13 +189,6 @@ static void proxyResult(const String &value){
  }
  return;
 #endif
- if(lanAwaitingCommand &&
-    (value.startsWith("ACK:CMD")||value.startsWith("ERR:"))){
-  if(lanClient && lanAuthenticated)
-   lanClient.println(value.startsWith("ACK:")?"ACK":"NACK");
-  lanAwaitingCommand=false;
-  return;
- }
  if(!controlChar)return;
  controlChar->setValue(value.c_str());
  if(clientConnected && bleAuthenticated)controlChar->notify();
@@ -287,6 +286,7 @@ static void processFace(const CuteLink::Frame &f){
  faceOnline=true;
 #if KITTY_C5_BLE_MIGRATION_ENABLED
  if(f.type=="APP_SESSION"){
+  if(BrainC5OTA::updating())return;
   if(f.payload=="ON"){
    c5AppSession=true;clientConnected=true;bleAuthenticated=true;proxyEnabled=true;
    c5AppCommandPending=false;
@@ -299,7 +299,7 @@ static void processFace(const CuteLink::Frame &f){
  }
  if(f.type=="APP_CMD"){
   String command;
-  if(!c5AppSession || !KittyAppLink::readCommand(f,command) ||
+  if(!c5AppSession || !faceOnline || !KittyAppLink::readCommand(f,command) ||
      !incomingCommands || c5AppCommandPending || BrainC5OTA::updating()){
     KittyAppLink::sendReply(Serial1,f.seq,"ERR:NOT_READY");return;
   }
