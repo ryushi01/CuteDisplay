@@ -13,18 +13,23 @@ OWNER_PROOF = None
 # Optional, isolated CPU index refresh. Snapshot upload acknowledgement never
 # waits for embedding; a single worker coalesces bursts of completed snapshots.
 SEMANTIC_REFRESH_Q = queue.Queue(maxsize=1)
-# Coalesce bursts from frequent snapshot finalization without blocking HTTP.
-# One quiet period leads to one refresh; voice and SD writes remain independent.
-SEMANTIC_REFRESH_QUIET_SECONDS = 90
+# Keep indexing bounded even if the S3 finalizes snapshots continuously.
+# No embeddings or index writes execute on the HTTP request thread.
+SEMANTIC_REFRESH_QUIET_SECONDS = 15
+SEMANTIC_REFRESH_MAX_WAIT_SECONDS = 90
 
 def semantic_refresh_worker():
     while True:
         snapshot = SEMANTIC_REFRESH_Q.get()
         try:
-            # Drain repeated finalize notifications and wait for the latest.
+            deadline = time.monotonic() + SEMANTIC_REFRESH_MAX_WAIT_SECONDS
             while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
                 try:
-                    snapshot = SEMANTIC_REFRESH_Q.get(timeout=SEMANTIC_REFRESH_QUIET_SECONDS)
+                    snapshot = SEMANTIC_REFRESH_Q.get(
+                        timeout=min(SEMANTIC_REFRESH_QUIET_SECONDS, remaining))
                     SEMANTIC_REFRESH_Q.task_done()
                 except queue.Empty:
                     break
@@ -33,7 +38,6 @@ def semantic_refresh_worker():
             if root and db:
                 from kitty_refresh_finalized_v6 import refresh
                 result = refresh(root, db, dry_run=False)
-                # Metadata only; never log queries or memory contents.
                 print("Kitty semantic index refreshed:", result.get("indexed", 0), flush=True)
         except Exception as exc:
             print("Kitty semantic refresh failed:", type(exc).__name__, flush=True)
