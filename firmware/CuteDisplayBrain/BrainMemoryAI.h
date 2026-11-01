@@ -181,19 +181,27 @@ inline void tick(bool busy){
        if(data=="[DONE]"){streamDone=true;break;}
        cJSON *event=cJSON_Parse(data.c_str());
        if(event){
-        cJSON *choice=cJSON_GetArrayItem(cJSON_GetObjectItem(event,"choices"),0);
+        // Support both standard OpenAI SSE chunks and Open WebUI events
+        // wrapping a full completion under data.choices.
+        cJSON *payloadEvent=cJSON_GetObjectItem(event,"data");
+        if(!cJSON_IsObject(payloadEvent))payloadEvent=event;
+        cJSON *choice=cJSON_GetArrayItem(cJSON_GetObjectItem(payloadEvent,"choices"),0);
         cJSON *finish=cJSON_GetObjectItem(choice,"finish_reason");
         if(cJSON_IsString(finish) && finish->valuestring && strlen(finish->valuestring))streamDone=true;
         cJSON *delta=cJSON_GetObjectItem(choice,"delta");
         cJSON *part=cJSON_GetObjectItem(delta,"content");
-        if(cJSON_IsString(part) && part->valuestring &&
-           streamedContent.length()+strlen(part->valuestring)<=2048)
+        if(!cJSON_IsString(part))part=cJSON_GetObjectItem(cJSON_GetObjectItem(choice,"message"),"content");
+        if(cJSON_IsString(part) && part->valuestring){
+         // Full message content is authoritative; deltas append.
+         if(cJSON_GetObjectItem(choice,"message"))streamedContent="";
+         if(streamedContent.length()+strlen(part->valuestring)<=2048)
           streamedContent+=part->valuestring;
+        }
         cJSON_Delete(event);
        }
       }
      }
-     if(cJSON_IsString(content) || (format==3 && streamDone && !streamedContent.isEmpty())){
+     if(cJSON_IsString(content) || (format==3 && !streamedContent.isEmpty())){
       const char *raw=cJSON_IsString(content)?content->valuestring:streamedContent.c_str();
       // Some chat models wrap JSON in a markdown fence; parse first object.
       String body(raw);int start=body.indexOf('{'),end=body.lastIndexOf('}');
