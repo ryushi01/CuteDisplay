@@ -3,14 +3,23 @@
 This does not identify the current speaker, grant memory access, or read the SD
 memory index. Caller must append it to the existing system instructions only.
 """
-import os
+import os\nimport json\nfrom pathlib import Path
 
 DEFAULT_NAME = "Shana"
 
 def public_profile_instruction():
-    if os.environ.get("KITTY_PUBLIC_PROFILE_ENABLED") != "1":
+    # An explicit persisted opt-in, rather than relying on ephemeral Docker env.
+    path = Path("/app/backend/data/kitty-public-profile.json")
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return ""
-    name = os.environ.get("KITTY_PUBLIC_PROFILE_NAME", DEFAULT_NAME).strip()
+    if not isinstance(config, dict) or config.get("enabled") is not True:
+        return ""
+    name = config.get("name", DEFAULT_NAME)
+    if not isinstance(name, str):
+        return ""
+    name = name.strip()
     if not name or len(name) > 48 or not all(c.isalnum() or c in " -_" for c in name):
         return ""
     return (
