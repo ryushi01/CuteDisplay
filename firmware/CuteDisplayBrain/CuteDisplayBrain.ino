@@ -180,7 +180,11 @@ static void proxyResult(const String &value){
  }
 #if KITTY_C5_BLE_MIGRATION_ENABLED
  if(c5AppSession && faceOnline && !BrainC5OTA::updating()){
-  if(c5AppCommandPending){
+  // Asynchronous AI status is not the synchronous ACK of the pending app command.
+  // Otherwise the app advances its provisioning stream before the S3 accepts it.
+  const bool isFinalReply=value.startsWith("ACK:") ||
+      value.startsWith("ERR:") || value.startsWith("NACK:");
+  if(c5AppCommandPending && isFinalReply){
    if(KittyAppLink::sendReply(Serial1,c5AppSeq,value)) c5AppCommandPending=false;
   }else{
    String coded;
