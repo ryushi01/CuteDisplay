@@ -35,4 +35,7 @@ check('if(running || !operatorEnabled || pausedAfterHttpFailure' in worker, "idl
 check('operatorEnabled=false;\n    running=false;requestStartedAt=0;' in worker, "one request per opt-in")
 check('operatorEnabled=false;running=false;requestStartedAt=0;worker=nullptr;' in worker, "allocation failure clears opt-in")
 check('static constexpr uint32_t TOTAL_BUDGET_MS=30000UL;' in worker, "cooperative elapsed budget")
+check('KittyMemory::clipUTF8(utterance,440)' in worker, "bounded summary prompt")
+check('KittyMemory::clipUTF8(utterance,220)' in worker, "bounded fact prompt")
+check('cJSON_AddStringToObject(user,"content",inferenceInput.c_str());' in worker, "bounded inference used")
 print("Kitty V6 SD summary journal source contract: OK")
