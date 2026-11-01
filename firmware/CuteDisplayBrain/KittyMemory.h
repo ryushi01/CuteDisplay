@@ -48,8 +48,8 @@ inline bool proposeConsolidatedFact(const String &key,const String &value){
 
 static volatile bool mounted=false;
 // Network-free one-slot SD export. Only kitty_sd opens SD_MMC.
-struct ExportRequest { uint8_t file; uint32_t offset; };
-struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint8_t ok; };
+struct ExportRequest { uint8_t file; uint32_t offset; uint32_t limit; };
+struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint32_t boundaries[8]; uint8_t ok; };
 static QueueHandle_t exportRequests=nullptr,exportBlocks=nullptr;
 struct ClaimRequest {char speaker[48];};
 struct ClaimResult {char speaker[48];char context[512];};
@@ -68,9 +68,10 @@ inline bool takeClaimContext(const String &speaker,String &out){
 }
 static constexpr const char* EXPORT_NAMES[]={"facts.tsv","factsmeta.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv","turn_sources.tsv","voice_profiles_v6.json","speaker_claims_v6.tsv"};
 static constexpr uint8_t EXPORT_COUNT=sizeof(EXPORT_NAMES)/sizeof(EXPORT_NAMES[0]);
-inline bool requestExport(uint8_t file,uint32_t offset){
- if(!exportRequests || !exportBlocks || !mounted || file>=EXPORT_COUNT)return false;
- ExportRequest req={file,offset};return xQueueSend(exportRequests,&req,0)==pdTRUE;
+// Sentinel file=EXPORT_COUNT captures all file sizes in one SD-worker pass.
+inline bool requestExport(uint8_t file,uint32_t offset,uint32_t limit=UINT32_MAX){
+ if(!exportRequests || !exportBlocks || !mounted || file>EXPORT_COUNT)return false;
+ ExportRequest req={file,offset,limit};return xQueueSend(exportRequests,&req,0)==pdTRUE;
 }
 inline bool takeExport(ExportBlock &block,uint32_t timeoutMs=150){
  return exportBlocks && xQueueReceive(exportBlocks,&block,pdMS_TO_TICKS(timeoutMs))==pdTRUE;
@@ -1097,20 +1098,30 @@ inline void task(void*){
      xQueueReceive(exportRequests,&exportReq,0)==pdTRUE){
    ExportBlock block={};
    block.file=exportReq.file;block.offset=exportReq.offset;
-   if(exportReq.file<EXPORT_COUNT){
+   if(exportReq.file==EXPORT_COUNT){
+    // No other Kitty SD write occurs between these eight stat operations.
+    block.ok=1;
+    for(uint8_t n=0;n<EXPORT_COUNT;n++){
+     String filename=String("/kitty/")+EXPORT_NAMES[n];
+     File f=SD_MMC.open(filename,FILE_READ);
+     if(f){block.boundaries[n]=(uint32_t)f.size();f.close();}
+     else if(!SD_MMC.exists(filename))block.boundaries[n]=0;
+     else {block.ok=0;break;}
+    }
+   }else if(exportReq.file<EXPORT_COUNT){
     String filename=String("/kitty/")+EXPORT_NAMES[exportReq.file];
     File f=SD_MMC.open(filename,FILE_READ);
     if(f){
-     block.total=(uint32_t)f.size();
-     if(exportReq.offset<=block.total && f.seek(exportReq.offset)){
-      block.length=(uint16_t)f.read(block.data,
-        min((size_t)sizeof(block.data),(size_t)(block.total-exportReq.offset)));
-      block.ok=1;
+     const uint32_t size=(uint32_t)f.size();
+     block.total=exportReq.limit==UINT32_MAX?size:exportReq.limit;
+     if(size>=block.total && exportReq.offset<=block.total && f.seek(exportReq.offset)){
+      const size_t needed=min((size_t)sizeof(block.data),(size_t)(block.total-exportReq.offset));
+      block.length=(uint16_t)f.read(block.data,needed);
+      block.ok=(block.length==needed);
      }
      f.close();
     }else if(!SD_MMC.exists(filename)){
-     // A freshly formatted card has no files yet. Export as empty.
-     block.ok=exportReq.offset==0?1:0;
+     block.ok=(exportReq.limit==0 && exportReq.offset==0)?1:0;
      block.total=0;
     }
    }
