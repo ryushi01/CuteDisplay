@@ -1010,6 +1010,35 @@ static void consoleCommand(String cmd){
     WiFi.status()==WL_CONNECTED?1:0);
   return;
  }
+ if(cmd=="memory ai config"){
+  // USB-only, read-only: never print API keys, URL paths, query strings,
+  // or embedded userinfo. This does not change the working call pipeline.
+  Preferences memoryPrefs;
+  String base,model;
+  bool hasKey=false,opened=memoryPrefs.begin("brain-ai",true);
+  if(opened){
+   base=memoryPrefs.getString("url","");
+   model=memoryPrefs.getString("model","");
+   hasKey=!memoryPrefs.getString("key","").isEmpty();
+   memoryPrefs.end();
+  }
+  bool https=base.startsWith("https://");
+  bool http=base.startsWith("http://");
+  int start=https?8:(http?7:0);
+  String authority=(https||http)?base.substring(start):String("");
+  int slash=authority.indexOf('/');
+  if(slash>=0)authority.remove(slash);
+  int question=authority.indexOf('?');
+  if(question>=0)authority.remove(question);
+  // Suppress the authority altogether if credentials appear in the URL.
+  if(authority.indexOf('@')>=0)authority="[redacted-userinfo]";
+  if(authority.length()>96)authority="[invalid-length]";
+  Serial.printf("[MEMORY AI CONFIG] stored=%d scheme=%s host_port=%s model=%s key_present=%d\\n",
+    opened?1:0,https?"https":(http?"http":"other"),
+    authority.isEmpty()?"(not set)":authority.c_str(),
+    model.isEmpty()?"(not set)":model.c_str(),hasKey?1:0);
+  return;
+ }
  if(cmd=="memory summary status"){
   // Read-only diagnostics: no SD file I/O, no private text or credentials.
   Serial.printf("[MEMORY V6] sd=%d active_call=%lu job_ack_offset=%lu awaiting=%d summary_queue=%u results_queue=%u backpressure=%lu ai_running=%d ai_pending=%d\\n",
