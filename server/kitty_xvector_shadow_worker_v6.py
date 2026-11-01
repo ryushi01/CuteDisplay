@@ -65,6 +65,45 @@ def warm_async():
     return True
 
 
+def recognize_candidate(audio, *, threshold=0.970):
+    """Opt-in experimental identity match. Caller controls any authorization.
+
+    Higher threshold than the diagnostic shadow 0.957; this is NOT calibrated
+    security-grade voice authentication. Safe failure returns unknown.
+    """
+    if not _GATE.acquire(blocking=False):
+        return {"speaker_id":"unknown","confidence":"unknown","score":None}
+    try:
+        with _LOCK:
+            _init()
+            with wave.open(io.BytesIO(audio), "rb") as wav:
+                if (wav.getframerate(),wav.getnchannels(),wav.getsampwidth()) != (16000,1,2):
+                    raise ValueError("bad_audio")
+                import numpy as np
+                import torch
+                samples=np.frombuffer(wav.readframes(wav.getnframes()),dtype="<i2").astype("float32")/32768.
+            if not 1.5 <= len(samples)/16000 <= 8:
+                raise ValueError("bad_duration")
+            started=time.monotonic()
+            with torch.inference_mode():
+                v=_MODEL.encode_batch(torch.from_numpy(samples).unsqueeze(0))
+            v=v.detach().cpu().numpy().reshape(-1).astype("float64")
+            v/=np.linalg.norm(v)
+            score=statistics.median(float(np.dot(v,a)) for a in _ANCHORS)
+            ms=round((time.monotonic()-started)*1000)
+            accepted=score >= threshold
+            print("[KITTY_XVECTOR_EXPERIMENTAL] match=%s score=%.4f inference_ms=%d" %
+                  (accepted,score,ms),flush=True)
+            return {"speaker_id":"person:shana" if accepted else "unknown",
+                    "confidence":"probable" if accepted else "unknown",
+                    "score":round(score,3) if accepted else None}
+    except Exception as exc:
+        print("[KITTY_XVECTOR_EXPERIMENTAL] error=%s"%type(exc).__name__,flush=True)
+        return {"speaker_id":"unknown","confidence":"unknown","score":None}
+    finally:
+        _GATE.release()
+
+
 def _run(audio):
     try:
         with _LOCK:
