@@ -41,6 +41,12 @@ class S3StabilityContract(unittest.TestCase):
                        "ai_stack_free=", "reset_reason="):
             self.assertIn(marker, BRAIN)
 
+    def test_loop_stack_has_conservative_headroom(self):
+        # Long-call hardware data showed a 548-byte minimum on 8 KiB loopTask.
+        # Keep audio buffers/loop timing unchanged and reserve 2 KiB more.
+        self.assertIn("SET_LOOP_TASK_STACK_SIZE(10 * 1024);", BRAIN)
+        self.assertIn("loop_stack_highwater_bytes=", BRAIN)
+
     def test_flash_configuration_unchanged(self):
         for marker in ("PSRAM=opi", "LoopCore=1", "EventsCore=0",
                        "CPUFreq=240", "PartitionScheme=custom"):
