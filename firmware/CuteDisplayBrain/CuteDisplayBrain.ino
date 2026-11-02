@@ -9,6 +9,7 @@
 #include <ESPmDNS.h>
 #include <mbedtls/md.h>
 #include <esp_system.h>
+#include <esp_bt.h>
 #include <esp_ota_ops.h>
 #include <Preferences.h>
 #include <BLEDevice.h>
@@ -697,6 +698,20 @@ static void recoverFreshBootUART(uint32_t now){
  Serial1.flush();
  Serial1.end();
  delay(25);
+#if KITTY_C5_BLE_MIGRATION_ENABLED && defined(CONFIG_BT_ENABLED)
+ // S3 never initializes BLE: the C5 owns all phone Bluetooth connections.
+ // Reclaim unused ESP32-S3 BLE controller memory before starting Wi-Fi/audio.
+ // Only release from the IDLE state; a failure leaves normal startup intact.
+ if(esp_bt_controller_get_status()==ESP_BT_CONTROLLER_STATUS_IDLE){
+  size_t before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+  esp_err_t btRelease=esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
+  size_t after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+  Serial.printf("[S3 BT] controller_release=%d internal_reclaimed=%ld\\n",
+    (int)btRelease,(long)(after-before));
+ }else{
+  Serial.println("[S3 BT] controller memory retained: unexpected active state");
+ }
+#endif
  Serial1.setRxBufferSize(2048);
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
