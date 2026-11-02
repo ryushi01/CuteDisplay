@@ -47,6 +47,9 @@ jobs:
       - name: Check durable S3 summary journal and privacy contracts
         run: python3 server/test_kitty_sd_summary_journal_contract_v6.py
 
+      - name: Guard accepted S3 heap, BLE and stack diagnostics
+        run: python3 server/test_kitty_s3_memory_stability_contract_v6.py
+
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
