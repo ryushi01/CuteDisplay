@@ -5,11 +5,6 @@
  Retains original C5 recovery BLE and proven UART GPIO wiring.
 */
 #include <Arduino.h>
-// The Arduino-ESP32 loopTask defaults to 8192 bytes. A physical long call
-// reached just 548 bytes free; reserve 2 KiB more for nested TLS/WebSocket
-// callbacks. This affects only S3 loopTask stack, not I2S or C5 task timing.
-// Recheck both loop_stack_highwater_bytes and internal_min after the next flash.
-SET_LOOP_TASK_STACK_SIZE(10 * 1024);
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <mbedtls/md.h>
@@ -48,6 +43,12 @@ SET_LOOP_TASK_STACK_SIZE(10 * 1024);
 #include "BrainMemoryAI.h"
 #include "KittyMemorySyncV6.h"
 #include "KittyHTTPSOTA.h"
+
+// Arduino auto-prototype generation needs every project type declared first.
+// Keep this macro AFTER the full include block (it defines a function).
+// Long-call loopTask minimum was 548 bytes on the 8 KiB default; reserve
+// 2 KiB more without changing PCM, WebSocket, C5 or I2S behavior.
+SET_LOOP_TASK_STACK_SIZE(10 * 1024);
 
 // Complete migration must be enabled on both boards in the same release.
 #ifndef KITTY_C5_BLE_MIGRATION_ENABLED
