@@ -16,7 +16,9 @@ class TurnContextTests(unittest.IsolatedAsyncioTestCase):
             for callback in (text_turn_context, voice_turn_context):
                 self.assertEqual(await callback(
                     "local", "token", "my old memories", attr,
-                    trusted_item_id="turn-123", lookup=forbidden), "")
+                    trusted_item_id="turn-123",
+                    trusted_session_id="trusted-live-session-123",
+                    lookup=forbidden), "")
 
     async def test_trusted_item_bound_guest_can_query_only_that_item(self):
         seen=[]
