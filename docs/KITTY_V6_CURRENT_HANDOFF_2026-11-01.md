@@ -1,5 +1,7 @@
 # Kitty V6 — Current checkpoint and next-chat handoff (2026-11-01)
 
+> **FROZEN / SUPERSEDED BY [NOVEMBER 2 MAIN CHECKPOINT](KITTY_V6_CHECKPOINT_2026-11-02.md).** All active V6 source work and previously pending cross-AI test PR #3 are now on `main`. This document preserves the sequential investigation and may describe earlier `accepted=0` or provisional server assumptions; the Nov 2 checkpoint gives final hardware results, privacy and CI boundaries. Do **not** treat a note here about an old feature branch or a proposed flash as current instructions. No additional hardware or live Ubuntu deployment occurred during checkpoint consolidation.
+
 ## Intent
 Preserve the **working** voice-first Kitty companion and improve reliability of long conversations **without** allowing an unrecognized voice to disclose another person's private facts. iPhone app is for setup/settings/management only, not calls or automatic memory approvals.
 
