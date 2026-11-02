@@ -8,14 +8,47 @@ import asyncio
 import http.client
 import socket
 import json
+import posixpath
 import re
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 MAX_QUERY = 300
 MAX_CONTEXT = 1800
 ALLOWED_TIMEOUT = 0.35
 SPEAKER_ID = re.compile(r"person:[A-Za-z0-9_-]{1,48}\Z")
+
+
+def _local_memory_endpoint(url):
+    """Validate parsed localhost/Unix-socket destination, not a string prefix."""
+    if not isinstance(url, str) or len(url) > 512:
+        return False
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme == "http":
+            return (parsed.hostname == "127.0.0.1"
+                    and parsed.port is not None
+                    and 0 < parsed.port <= 65535
+                    and not parsed.username and not parsed.password
+                    and parsed.path in ("", "/")
+                    and not parsed.query and not parsed.fragment)
+        if parsed.scheme == "unix":
+            path = parsed.path
+            return (parsed.netloc == "" and not parsed.query
+                    and not parsed.fragment
+                    and path.startswith("/run/kitty-semantic/")
+                    and path == posixpath.normpath(path)
+                    and not any(c in path for c in ("%", "\\x00", "\\\\")))
+    except ValueError:
+        return False
+    return False
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward a private API token or owner grant via HTTP redirects."""
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
 
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
@@ -58,7 +91,7 @@ def _read_context(url, token, query, speaker_id, timeout):
         data=body, method="POST",
         headers={"Authorization": "Bearer " + token,
                  "Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout) as response:
         if response.status != 200:
             return ""
         payload = response.read(4096)
@@ -78,9 +111,8 @@ async def semantic_context(url, token, query, speaker_id, *, timeout=ALLOWED_TIM
         return ""
     if not isinstance(query, str) or not query.strip():
         return ""
-    if not isinstance(url, str) or not (url.startswith("http://127.0.0.1:")
-                 or url.startswith("unix:///run/kitty-semantic/")):
-        # Only loopback memory service; no remote forwarding of private queries.
+    if not _local_memory_endpoint(url):
+        # Never send private queries to a host hidden in URL credentials.
         return ""
     if not isinstance(token, str) or not token:
         return ""
@@ -109,7 +141,7 @@ def _read_shared_context(url, token, timeout):
     else:
         request=urllib.request.Request(url.rstrip("/")+"/shared/context",
                                       data=body,method="POST",headers=headers)
-        with urllib.request.urlopen(request,timeout=timeout) as response:
+        with urllib.request.build_opener(_NoRedirect()).open(request,timeout=timeout) as response:
             if response.status!=200:
                 return ""
             obj=json.loads(response.read(2048))
@@ -120,10 +152,7 @@ def _read_shared_context(url, token, timeout):
 async def shared_context(url, token, *, timeout=0.35,
                          request_fn=_read_shared_context):
     """Read only explicitly approved public snapshot notes; fail closed."""
-    if not isinstance(url,str) or not (
-        url.startswith("http://127.0.0.1:") or
-        url.startswith("unix:///run/kitty-semantic/")
-    ) or not isinstance(token,str) or not token:
+    if not _local_memory_endpoint(url) or not isinstance(token,str) or not token:
         return ""
     try:
         limit=min(max(float(timeout),0.05),ALLOWED_TIMEOUT)
