@@ -993,6 +993,11 @@ static void consoleCommand(String cmd){
     (unsigned long)(BrainRealtimeAudio::owner?uxTaskGetStackHighWaterMark(BrainRealtimeAudio::owner):0),
     (unsigned long)(KittyMemory::worker?uxTaskGetStackHighWaterMark(KittyMemory::worker):0),
     (unsigned long)(BrainAI::worker?uxTaskGetStackHighWaterMark(BrainAI::worker):0));
+  Serial.printf("[SYS UART AI] ack_ok=%lu ignored_ack=%lu retransmits=%lu timeouts=%lu pending=%u\n",
+    (unsigned long)BrainAI::uartAckAccepted,
+    (unsigned long)BrainAI::uartAckIgnored,
+    (unsigned long)BrainAI::uartRetransmitted,
+    (unsigned long)BrainAI::uartPacketTimeouts,(unsigned)BrainAI::pending);
   Serial.printf("[SYS MEMORY] mounted=%d state=%u facts=%u indexed=%lu/%lu saved=%lu failed=%lu queue=%u ai_queue=%u\n",
     KittyMemory::ready()?1:0,(unsigned)KittyMemory::status(),
     (unsigned)KittyMemory::factCount,(unsigned long)KittyMemory::indexCount,
