@@ -6,12 +6,14 @@ probabilistic recognition alone never unlock prior private speaker history.
 Approved shared memories use a separate public-only path.
 """
 from kitty_semantic_async_client_v6 import semantic_context, SPEAKER_ID
+from kitty_live_rolling_context_v6 import LiveCallContinuity
 
 CONTEXT_LIMIT = 1800
 
 
 async def context_for_turn(service_url, service_token, transcript, attribution,
-                           *, trusted_item_id=None, lookup=semantic_context):
+                           *, trusted_item_id=None, rolling=None,
+                           lookup=semantic_context):
     if not isinstance(attribution, dict):
         return ""
     speaker = attribution.get("speaker_id")
@@ -28,6 +30,14 @@ async def context_for_turn(service_url, service_token, transcript, attribution,
             or not isinstance(speaker, str) or not SPEAKER_ID.fullmatch(speaker)
             or attribution.get("speaker_role") != "guest"):
         return ""
+    # Prefer the bounded same-call extractive context when available.
+    # It adds zero inference requests and zero network calls. The buffer
+    # itself requires a matching trusted session/item/speaker, so probable
+    # voice IDs and speaker changes never unlock it.
+    if isinstance(rolling, LiveCallContinuity):
+        live=rolling.context_for_turn(attribution,trusted_item_id=trusted_item_id)
+        if live:
+            return live[:CONTEXT_LIMIT]
     context = await lookup(service_url, service_token, transcript, speaker)
     if not isinstance(context, str) or not context.strip():
         return ""
@@ -37,13 +47,16 @@ async def context_for_turn(service_url, service_token, transcript, attribution,
 
 
 async def text_turn_context(service_url, service_token, text, attribution,
-                            *, trusted_item_id=None, lookup=semantic_context):
+                            *, trusted_item_id=None, rolling=None,
+                            lookup=semantic_context):
     return await context_for_turn(service_url, service_token, text, attribution,
-                                  trusted_item_id=trusted_item_id, lookup=lookup)
+                                  trusted_item_id=trusted_item_id,
+                                  rolling=rolling, lookup=lookup)
 
 
 async def voice_turn_context(service_url, service_token, transcript, attribution,
-                             *, trusted_item_id=None, lookup=semantic_context):
+                             *, trusted_item_id=None, rolling=None,
+                             lookup=semantic_context):
     return await context_for_turn(service_url, service_token, transcript,
                                   attribution, trusted_item_id=trusted_item_id,
-                                  lookup=lookup)
+                                  rolling=rolling, lookup=lookup)
