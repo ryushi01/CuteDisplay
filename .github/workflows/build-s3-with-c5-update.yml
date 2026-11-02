@@ -53,8 +53,13 @@ jobs:
       - name: Verify unverified realtime memory isolation
         run: python3 server/test_kitty_realtime_public_memory_contract_v6.py
 
-      - name: Test item-bound speaker memory privacy
-        run: PYTHONPATH=server python3 -m unittest server.test_kitty_turn_context_v6 -v
+      - name: Test speaker-bound private recall and public-memory isolation
+        run: |
+          PYTHONPATH=server python3 -m unittest \
+            server.test_kitty_turn_context_v6 \
+            server.test_kitty_memory_context_v6 \
+            server.test_kitty_semantic_async_client_v6 \
+            server.test_kitty_gateway_speaker_guard_v6 -v
 
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
