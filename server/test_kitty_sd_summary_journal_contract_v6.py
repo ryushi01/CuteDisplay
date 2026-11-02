@@ -16,6 +16,8 @@ check('SD_MMC.open("/kitty/summary_jobs_ack_v6.tsv",FILE_READ)' in memory, "ack 
 check('if(!jobs.seek(summaryAckEnd))' in memory, "cursor replay")
 check('if(xQueueSend(summaryCandidates,&batch,0)==pdTRUE)summaryJobAwaiting=true;' in memory, "in-flight guard")
 check('summaryAckEnd=summary.jobEnd;summaryJobAwaiting=false;' in memory, "ack after persistence")
+check('savedSummary=expected>0 && written==(size_t)expected;' in memory, "do not ack partially written summary")
+check('if(expected>0 && written==(size_t)expected){' in memory, "do not accept partial ack cursor")
 check('summaryJobAwaiting && summary.jobEnd>summaryAckEnd' in memory, "no stale ack")
 check('if(!e.ownerVerified){' in memory, "owner fact write gate")
 check('"/kitty/unverified_summaries_v6.tsv"' in memory, "unverified output isolation")
