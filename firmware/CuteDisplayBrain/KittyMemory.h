@@ -1305,16 +1305,23 @@ inline void task(void*){
    }
    (void)xQueueSend(claimResults,&reply,0);
   }
-  // Apply completed summaries entirely on the SD task, never the network callback.
+  // Persist an accepted result before removing it from the bounded queue.
+  // A temporary SD open failure must not force a second Mac inference.
+  // Never keep retrying a partial append: an incomplete TSV row needs review.
+  static uint32_t savedSummaryJobEnd=0;
+  static uint32_t summaryStoreRetryAt=0;
+  static bool summaryStorePaused=false;
   SummaryResult summary={};
-  if(mounted && summaryResults && xQueueReceive(summaryResults,&summary,0)==pdTRUE){
-   String item=sanitize(String(summary.text),220);
-   if(summaryJobAwaiting && summary.jobEnd>summaryAckEnd){
-    bool savedSummary=item.isEmpty();
-    if(!item.isEmpty()){
+  if(mounted && summaryResults && !summaryStorePaused &&
+     (int32_t)(millis()-summaryStoreRetryAt)>=0 &&
+     xQueuePeek(summaryResults,&summary,0)==pdTRUE){
+   bool consumed=!summaryJobAwaiting || summary.jobEnd<=summaryAckEnd;
+   if(!consumed){
+    String item=sanitize(String(summary.text),220);
+    bool savedSummary=item.isEmpty() || savedSummaryJobEnd==summary.jobEnd;
+    if(!savedSummary){
      File f=SD_MMC.open(summary.ownerVerified?"/kitty/summaries.tsv":"/kitty/unverified_summaries_v6.tsv",FILE_APPEND);
      if(f){
-      // A partial append must not acknowledge an incomplete memory row.
       unsigned long stamp=(unsigned long)time(nullptr);
       int expected=summary.ownerVerified?
        snprintf(nullptr,0,"%lu\t%s\n",stamp,item.c_str()):
@@ -1322,27 +1329,45 @@ inline void task(void*){
       size_t written=summary.ownerVerified?
        f.printf("%lu\t%s\n",stamp,item.c_str()):
        f.printf("%lu\t%lu\t%s\n",stamp,(unsigned long)summary.conversation,item.c_str());
-      savedSummary=expected>0 && written==(size_t)expected;
       f.close();
-      if(!savedSummary)Serial.println("[MEMORY V6] summary append incomplete; job not acknowledged");
+      savedSummary=expected>0 && written==(size_t)expected;
+      if(savedSummary)savedSummaryJobEnd=summary.jobEnd;
+      else if(written>0){
+       summaryStorePaused=true;
+       Serial.println("[MEMORY V6] partial summary append; SD retry paused, journal retained");
+      }
      }
     }
     if(savedSummary){
      File ack=SD_MMC.open("/kitty/summary_jobs_ack_v6.tsv",FILE_APPEND);
      if(ack){
-      size_t written=ack.printf("%lu\n",(unsigned long)summary.jobEnd);
       int expected=snprintf(nullptr,0,"%lu\n",(unsigned long)summary.jobEnd);
+      size_t written=ack.printf("%lu\n",(unsigned long)summary.jobEnd);
       ack.close();
       if(expected>0 && written==(size_t)expected){
        summaryAckEnd=summary.jobEnd;summaryJobAwaiting=false;
+       consumed=true;
+       Serial.printf("[MEMORY V6] summary persisted ack_offset=%lu\\n",
+        (unsigned long)summaryAckEnd);
        if(summary.ownerVerified && !item.isEmpty() && cacheMutex &&
           xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
         latestSummary=item;latestSummaryAt=(uint32_t)time(nullptr);
         summaryRevision++;xSemaphoreGive(cacheMutex);
        }
+      }else if(written>0){
+       summaryStorePaused=true;
+       Serial.println("[MEMORY V6] partial summary ACK; SD retry paused, journal retained");
       }
      }
     }
+   }
+   if(consumed){
+    // Only the SD task reads this queue, so peek + receive cannot race a reader.
+    (void)xQueueReceive(summaryResults,&summary,0);
+    savedSummaryJobEnd=0;
+    summaryStoreRetryAt=0;
+   }else if(!summaryStorePaused){
+    summaryStoreRetryAt=millis()+10000UL;
    }
   }
   // S3's network task proposes changes only; the SD worker owns persistence.
