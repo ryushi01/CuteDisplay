@@ -1,6 +1,7 @@
 """Offline trust-boundary tests: unverified voice never recalls private history."""
 import unittest
 from kitty_turn_context_v6 import text_turn_context, voice_turn_context
+from kitty_live_rolling_context_v6 import LiveCallContinuity
 
 
 class TurnContextTests(unittest.IsolatedAsyncioTestCase):
@@ -56,6 +57,41 @@ class TurnContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await voice_turn_context(
                 "local","token",text,attr,
                 trusted_item_id="turn-123",lookup=forbidden),"")
+
+    async def test_verified_live_context_avoids_remote_semantic_request(self):
+        rolling=LiveCallContinuity()
+        rolling.begin_call("trusted-live-session-123")
+        early={"speaker_id":"person:aki","speaker_role":"guest",
+               "provenance":"session_verified","item_id":"early",
+               "session_id":"trusted-live-session-123"}
+        later={**early,"item_id":"later"}
+        self.assertTrue(rolling.observe("We agreed to keep the C5 Bluetooth.",
+                                        early,trusted_item_id="early"))
+        self.assertTrue(rolling.observe("Tell me a story.",later,trusted_item_id="later"))
+        async def forbidden(*args):
+            raise AssertionError("live context should not cause HTTP lookup")
+        result=await voice_turn_context(
+            "local","token","What did we decide?",later,
+            trusted_item_id="later",rolling=rolling,lookup=forbidden)
+        self.assertIn("C5 Bluetooth",result)
+
+    async def test_live_context_never_opens_on_unverified_item(self):
+        rolling=LiveCallContinuity()
+        rolling.begin_call("trusted-live-session-123")
+        good={"speaker_id":"person:aki","speaker_role":"guest",
+              "provenance":"session_verified","item_id":"early",
+              "session_id":"trusted-live-session-123"}
+        rolling.observe("Remember the hidden plan",good,trusted_item_id="early")
+        async def forbidden(*args):
+            raise AssertionError("wrong item must never reach semantic lookup")
+        for bad in (
+            {**good,"item_id":"later","provenance":"voice_probable"},
+            {**good,"item_id":"later","session_id":"another-session"},
+            {**good,"item_id":"later","speaker_role":"owner"},
+        ):
+            self.assertEqual(await voice_turn_context(
+                "local","token","private",bad,trusted_item_id="later",
+                rolling=rolling,lookup=forbidden),"")
 
     async def test_unknown_and_owner_claims_fail_closed(self):
         async def forbidden(*args):
