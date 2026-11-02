@@ -228,30 +228,29 @@ class Handler(BaseHTTPRequestHandler):
                     if snapshots:
                         context=shareable_context(snapshots[0],max_chars=520)
                 return self._reply(200,{"context":context[:640]})
-            if self.path=="/semantic/context":
+            if self.path in ("/semantic/context","/semantic"):
+                # Device bearer auth is not human identity. Both legacy and
+                # contextual private search must enforce the same signed grant
+                # *before* opening the semantic database or loading a model.
+                # No guest/probable-speaker grant issuer is wired yet.
+                from kitty_semantic_authorization_v6 import authorized_semantic_speaker
+                sid=authorized_semantic_speaker(data,OWNER_PROOF)
+                if sid is None:
+                    return self._reply(403,{"error":"verified_owner_session_required"})
                 index=os.environ.get("KITTY_SEMANTIC_DB","")
                 if not index or not os.path.isfile(index):
                     return self._reply(503,{"error":"semantic_index_unavailable"})
-                sid=data.get("speaker_id")
-                if not isinstance(sid,str) or not re.fullmatch(r"person:[A-Za-z0-9_-]{1,48}",sid):
-                    return self._reply(400,{"error":"speaker_identity_required"})
-                from kitty_memory_context_v6 import recall_context
-                return self._reply(200,{"context":recall_context(
-                    index,str(data.get("query",""))[:300],sid)})
-            if self.path=="/semantic":
-                # Optional local index, refreshed from a read-only SD export.
-                # Disabled when the DB/model aren't configured.
-                index=os.environ.get("KITTY_SEMANTIC_DB","")
-                if not index or not os.path.isfile(index):
-                    return self._reply(503,{"error":"semantic_index_unavailable"})
+                query=data.get("query","")
+                if not isinstance(query,str) or not query.strip():
+                    return self._reply(400,{"error":"invalid_query"})
+                query=query[:300]
+                if self.path=="/semantic/context":
+                    from kitty_memory_context_v6 import recall_context
+                    return self._reply(200,{"context":recall_context(
+                        index,query,sid)})
                 from kitty_sd_semantic_index import search
-                speaker_id = data.get("speaker_id")
-                if (not isinstance(speaker_id,str)
-                    or not re.fullmatch(r"person:[A-Za-z0-9_-]{1,48}",speaker_id)):
-                    return self._reply(400,{"error":"invalid_speaker_id"})
                 return self._reply(200,{"results":search(
-                    index,str(data.get("query",""))[:300],
-                    speaker_id=speaker_id)})
+                    index,query,speaker_id=sid)})
             if self.path=="/recall":
                 if not legacy_memory_enabled():
                     return self._reply(410,{"error":"legacy_ubuntu_memory_disabled"})
