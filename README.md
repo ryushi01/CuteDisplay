@@ -2,7 +2,7 @@
 
 **Kitty** is a physical, voice-first AI companion with an expressive animated face, two ESP32 boards, and long-term memory. Talk directly to Kitty—not through the phone. The iPhone app is for **initial setup, device settings, and management only**.
 
-> **Current checkpoint — 1 November 2026:** Kitty answers realtime calls and correctly recalled the approved shared memory **“Mochi Planet”** across separate conversations. C5 firmware **v38** is running. Long-conversation summaries and private speaker-specific recall are **not yet reliable**; see [current handoff](docs/KITTY_V6_CURRENT_HANDOFF_2026-11-01.md). The repo contains source and deployment helpers, **not** private credentials, live data, or all machine-local configuration. No next-stage firmware change has been flashed.
+> **Frozen checkpoint — 2 November 2026:** Current Kitty S3/C5 realtime audio and C5 **v38** remain the working physical baseline. Automatic post-call summaries are now **hardware-verified** (`accepted=1`, SD journal acknowledgement `2578 → 2878`); approved shared memory (“Mochi Planet”) was previously recalled across calls. **Private owner recall, identity-bound long-call continuity and rolling live summaries are NOT deployed or end-to-end validated.** All accepted current source work and pending cross-AI documentation are consolidated on `main`. The repository does not contain private server credentials, SD contents, or the deployed private Ubuntu gateway. See [November 2 consolidation checkpoint](docs/KITTY_V6_CHECKPOINT_2026-11-02.md) and [detailed handoff](docs/KITTY_V6_CURRENT_HANDOFF_2026-11-01.md).
 
 ## What Kitty can do
 
@@ -15,7 +15,8 @@
 | Recall an **explicitly approved shareable** memory across calls | **Verified** with Mochi Planet |
 | Familiar-sounding voice hint (“sounds like Shana”) | **Experimental**; voice similarity varies |
 | Verified owner identity, private cross-call recall | **Not yet validated**; candidate-only matching never authorizes access |
-| Reliable long-conversation summaries for unknown/unverified speakers | **Source patch**; unverified summaries are isolated and conversation-batched with end-of-call flushing, but call-scoped recall is not yet implemented or hardware-validated |
+| Automatic post-call summaries for unverified speakers | **Hardware-verified** idle SSE parsing, microSD summary write and advancing ACK; unverified summaries remain isolated from owner facts |
+| Long uninterrupted-call continuity and private recall | **Offline source prototypes only**; bounded extractive speaker-scoped context tests passed, but trusted item/session attribution and live gateway integration are not deployed |
 | iPhone companion app for setup/settings | **Configuration role only**, not everyday conversation |
 | S3-to-C5 firmware delivery via existing UART | **Implemented**; protect validated C5 build |
 
@@ -47,7 +48,7 @@ The **microSD in the S3** is the durable source of truth for Kitty's archived me
 1. **Conversation archive:** completed conversation turns are appended to the S3 SD archive, even if the current voice is unknown.
 2. **Approved shared notes:** only explicitly approved non-secret entries in `/kitty/shareable_memories_v6.tsv` become global cross-call conversational context. Test entry: “Kitty's favorite imaginary planet is Mochi Planet.”
 3. **Speaker-scoped data:** user-specific claims and semantic recall are kept separate. A *voice candidate* or spoken self-introduction is **not** an authenticated owner identity.
-4. **Current limitation:** in `KittyMemory.h`, unverified turns are archived but return early before the summary/consolidation work. Thus long conversations may be preserved on SD without producing sufficient useful recall context. **The first source patch now allows unverified summary batches, isolated from owner facts and global context.** Same-call recall remains unfinished and hardware-unvalidated.
+4. **Current limitation:** automatic summarization of unverified conversations is now validated on the S3, but those summaries are intentionally **not** copied to global owner context. Private later-call recall and ongoing same-call context require independently trusted owner/speaker binding; the optional bounded rolling-context helper is not connected to the deployed gateway.
 
 ## Hardware at a glance
 
