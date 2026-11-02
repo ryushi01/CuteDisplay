@@ -12,7 +12,8 @@ CONTEXT_LIMIT = 1800
 
 
 async def context_for_turn(service_url, service_token, transcript, attribution,
-                           *, trusted_item_id=None, rolling=None,
+                           *, trusted_item_id=None, trusted_session_id=None,
+                           rolling=None,
                            lookup=semantic_context):
     if not isinstance(attribution, dict):
         return ""
@@ -23,7 +24,10 @@ async def context_for_turn(service_url, service_token, transcript, attribution,
     # decision, NOT a model transcript, S3-provided ID or mutable SD sidecar.
     # No such binding exists on the currently deployed candidate-only system:
     # default means no private semantic lookup.
-    if (not isinstance(trusted_item_id, str) or not 1 <= len(trusted_item_id) <= 160
+    if (not isinstance(trusted_session_id, str)
+            or not 8 <= len(trusted_session_id) <= 100
+            or attribution.get("session_id") != trusted_session_id
+            or not isinstance(trusted_item_id, str) or not 1 <= len(trusted_item_id) <= 160
             or not isinstance(item_id, str) or item_id != trusted_item_id
             or not isinstance(transcript, str) or not transcript.strip()
             or len(transcript) > 300 or source != "session_verified"
@@ -47,16 +51,20 @@ async def context_for_turn(service_url, service_token, transcript, attribution,
 
 
 async def text_turn_context(service_url, service_token, text, attribution,
-                            *, trusted_item_id=None, rolling=None,
+                            *, trusted_item_id=None, trusted_session_id=None,
+                            rolling=None,
                             lookup=semantic_context):
     return await context_for_turn(service_url, service_token, text, attribution,
                                   trusted_item_id=trusted_item_id,
+                                  trusted_session_id=trusted_session_id,
                                   rolling=rolling, lookup=lookup)
 
 
 async def voice_turn_context(service_url, service_token, transcript, attribution,
-                             *, trusted_item_id=None, rolling=None,
+                             *, trusted_item_id=None, trusted_session_id=None,
+                             rolling=None,
                              lookup=semantic_context):
     return await context_for_turn(service_url, service_token, transcript,
                                   attribution, trusted_item_id=trusted_item_id,
+                                  trusted_session_id=trusted_session_id,
                                   rolling=rolling, lookup=lookup)
