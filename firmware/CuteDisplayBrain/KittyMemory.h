@@ -1347,7 +1347,7 @@ inline void task(void*){
       if(expected>0 && written==(size_t)expected){
        summaryAckEnd=summary.jobEnd;summaryJobAwaiting=false;
        consumed=true;
-       Serial.printf("[MEMORY V6] summary persisted ack_offset=%lu\\n",
+       Serial.printf("[MEMORY V6] summary persisted ack_offset=%lu\n",
         (unsigned long)summaryAckEnd);
        if(summary.ownerVerified && !item.isEmpty() && cacheMutex &&
           xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
