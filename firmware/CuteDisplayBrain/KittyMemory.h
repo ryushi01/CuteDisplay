@@ -1100,13 +1100,38 @@ inline void task(void*){
   Serial.println("[MEMORY] SD mount failed: card may need FAT formatting, be damaged, or be missing; no auto erase");
  }else{
   SD_MMC.mkdir("/kitty");
-  // Journal cursor: append-only acknowledgements survive power loss.
+  // Recover only complete, decimal, monotonic ACK lines that point to a
+  // completed journal row. A torn ACK must never skip unsummarized turns.
+  File jobsForAck=SD_MMC.open("/kitty/summary_jobs_v6.tsv",FILE_READ);
   File ack=SD_MMC.open("/kitty/summary_jobs_ack_v6.tsv",FILE_READ);
-  if(ack){while(ack.available()){
-   String line=ack.readStringUntil('\n');
-   uint32_t offset=(uint32_t)line.toInt();
-   if(offset)summaryAckEnd=offset;
-  }ack.close();}
+  if(ack){
+   while(ack.available()){
+    uint32_t rowStart=(uint32_t)ack.position();
+    String line=ack.readStringUntil('\n');
+    bool valid=ack.position()==rowStart+line.length()+1 &&
+      line.length()>0 && line.length()<=10 && jobsForAck;
+    uint64_t value=0;
+    for(size_t i=0;valid && i<line.length();i++){
+     char c=line[i];
+     if(c<'0' || c>'9'){valid=false;break;}
+     value=value*10+(c-'0');
+     if(value>UINT32_MAX)valid=false;
+    }
+    if(valid){
+     uint32_t offset=(uint32_t)value;
+     valid=offset>0 && offset>=summaryAckEnd &&
+       offset<=(uint32_t)jobsForAck.size() &&
+       jobsForAck.seek(offset-1) && jobsForAck.read()=='\n';
+     if(valid)summaryAckEnd=offset;
+    }
+    if(!valid){
+     Serial.println("[MEMORY V6] incomplete/invalid summary ACK; retaining last valid cursor");
+     break;
+    }
+   }
+   ack.close();
+  }
+  if(jobsForAck)jobsForAck.close();
   updateStorage();
   if(facts)restoreFactSnapshots();
   if(pruneInvalidPreferences()){
@@ -1206,10 +1231,12 @@ inline void task(void*){
   if(!jobs)return;
   if(summaryAckEnd>=jobs.size()){jobs.close();return;}
   if(!jobs.seek(summaryAckEnd)){jobs.close();return;}
+  uint32_t rowStart=(uint32_t)jobs.position();
   String line=jobs.readStringUntil('\n');
   uint32_t next=(uint32_t)jobs.position();jobs.close();
+  bool completeRow=next==rowStart+line.length()+1;
   int a=line.indexOf('\t'),b=line.indexOf('\t',a+1);
-  if(a<0 || b<=a || line.length()-b-1<12 || line.length()-b-1>740 ||
+  if(!completeRow || a<0 || b<=a || line.length()-b-1<12 || line.length()-b-1>740 ||
      (line[0]!='0' && line[0]!='1')){
    // Never discard malformed or partially written jobs automatically.
    Serial.println("[MEMORY V6] summary journal entry invalid; replay paused");
