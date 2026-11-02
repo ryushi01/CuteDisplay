@@ -103,6 +103,20 @@ jobs:
         shell: bash
         run: bash tools/build_s3_with_c5_update.sh
 
+      # S3-only app contains the empty CombinedFirmwareImage placeholder.
+      # It cannot trigger the working C5 v38 OTA path during S3-only testing.
+      - name: Build consolidated S3-only memory and stack candidate
+        shell: bash
+        run: bash tools/build_s3_only_v6.sh
+
+      - name: Publish S3-only candidate without C5 OTA image
+        uses: actions/upload-artifact@v4
+        with:
+          name: KittyV6-S3Only-NoC5OTA
+          path: s3-only-candidate/
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Publish ready-to-upload S3 project and binaries
         uses: actions/upload-artifact@v4
         with:
