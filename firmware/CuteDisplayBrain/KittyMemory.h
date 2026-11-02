@@ -1314,18 +1314,26 @@ inline void task(void*){
     if(!item.isEmpty()){
      File f=SD_MMC.open(summary.ownerVerified?"/kitty/summaries.tsv":"/kitty/unverified_summaries_v6.tsv",FILE_APPEND);
      if(f){
+      // A partial append must not acknowledge an incomplete memory row.
+      unsigned long stamp=(unsigned long)time(nullptr);
+      int expected=summary.ownerVerified?
+       snprintf(nullptr,0,"%lu\t%s\n",stamp,item.c_str()):
+       snprintf(nullptr,0,"%lu\t%lu\t%s\n",stamp,(unsigned long)summary.conversation,item.c_str());
       size_t written=summary.ownerVerified?
-       f.printf("%lu\t%s\n",(unsigned long)time(nullptr),item.c_str()):
-       f.printf("%lu\t%lu\t%s\n",(unsigned long)time(nullptr),(unsigned long)summary.conversation,item.c_str());
-      savedSummary=written>0;f.close();
+       f.printf("%lu\t%s\n",stamp,item.c_str()):
+       f.printf("%lu\t%lu\t%s\n",stamp,(unsigned long)summary.conversation,item.c_str());
+      savedSummary=expected>0 && written==(size_t)expected;
+      f.close();
+      if(!savedSummary)Serial.println("[MEMORY V6] summary append incomplete; job not acknowledged");
      }
     }
     if(savedSummary){
      File ack=SD_MMC.open("/kitty/summary_jobs_ack_v6.tsv",FILE_APPEND);
      if(ack){
       size_t written=ack.printf("%lu\n",(unsigned long)summary.jobEnd);
+      int expected=snprintf(nullptr,0,"%lu\n",(unsigned long)summary.jobEnd);
       ack.close();
-      if(written>0){
+      if(expected>0 && written==(size_t)expected){
        summaryAckEnd=summary.jobEnd;summaryJobAwaiting=false;
        if(summary.ownerVerified && !item.isEmpty() && cacheMutex &&
           xSemaphoreTake(cacheMutex,pdMS_TO_TICKS(5))==pdTRUE){
