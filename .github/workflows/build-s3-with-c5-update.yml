@@ -50,6 +50,9 @@ jobs:
       - name: Guard accepted S3 heap, BLE and stack diagnostics
         run: python3 server/test_kitty_s3_memory_stability_contract_v6.py
 
+      - name: Verify unverified realtime memory isolation
+        run: python3 server/test_kitty_realtime_public_memory_contract_v6.py
+
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
