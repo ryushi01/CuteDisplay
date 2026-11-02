@@ -39,7 +39,7 @@ def _local_memory_endpoint(url):
                     and not parsed.fragment
                     and path.startswith("/run/kitty-semantic/")
                     and path == posixpath.normpath(path)
-                    and not any(c in path for c in ("%", "\\x00", "\\\\")))
+                    and not any(c in path for c in ("%", chr(0), chr(92))))
     except ValueError:
         return False
     return False
