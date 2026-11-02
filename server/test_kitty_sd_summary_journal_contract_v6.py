@@ -14,6 +14,13 @@ def check(condition, message):
 check('SD_MMC.open("/kitty/summary_jobs_v6.tsv",FILE_APPEND)' in memory, "job journal")
 check('SD_MMC.open("/kitty/summary_jobs_ack_v6.tsv",FILE_READ)' in memory, "ack recovery")
 check('if(!jobs.seek(summaryAckEnd))' in memory, "cursor replay")
+check('bool valid=ack.position()==rowStart+line.length()+1' in memory,
+      "truncated ACK line cannot advance journal cursor")
+check("jobsForAck.read()=='\\n'" in memory,
+      "recovered ACK must align with completed journal row")
+check('if(!completeRow || a<0' in memory,
+      "torn trailing summary job cannot be dispatched")
+
 check('if(xQueueSend(summaryCandidates,&batch,0)==pdTRUE)summaryJobAwaiting=true;' in memory, "in-flight guard")
 check('summaryAckEnd=summary.jobEnd;summaryJobAwaiting=false;' in memory, "ack after persistence")
 check('savedSummary=expected>0 && written==(size_t)expected;' in memory, "do not ack partially written summary")
