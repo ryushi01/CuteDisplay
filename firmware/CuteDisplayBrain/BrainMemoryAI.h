@@ -159,12 +159,23 @@ inline void tick(bool busy){
      char ch=reply[first];
      format=(ch=='{' || ch=='[')?1:(ch=='<'?2:(reply.startsWith("data:",first)?3:4));
     }
+    // Diagnostics classify rejection without exposing model output or memories.
+    // Stages: 0=not summary, 1=no content, 2=content but no JSON object,
+    // 3=JSON object without summary, 4=summary fails length/job checks,
+    // 5=SD-result queue rejected, 6=queued for SD persistence.
+    int summaryStage=summarize?1:0;
+    size_t summaryBytes=0;
+    bool summaryClipped=false;
+    bool outputLimitHit=false;
     if(rc==ESP_OK && status==200 && !abortRequested && !interactive){
      cJSON *outer=(format==1 && !response.truncated)?cJSON_Parse(reply.c_str()):nullptr;
      cJSON *choices=cJSON_GetObjectItem(outer,"choices");
      cJSON *first=cJSON_GetArrayItem(choices,0);
      cJSON *message=cJSON_GetObjectItem(first,"message");
      cJSON *content=cJSON_GetObjectItem(message,"content");
+     cJSON *outerFinish=cJSON_GetObjectItem(first,"finish_reason");
+     if(cJSON_IsString(outerFinish) && outerFinish->valuestring &&
+        strcmp(outerFinish->valuestring,"length")==0)outputLimitHit=true;
      String streamedContent;
      bool streamDone=false;
      if(format==3 && !response.truncated){
@@ -187,7 +198,10 @@ inline void tick(bool busy){
         if(!cJSON_IsObject(payloadEvent))payloadEvent=event;
         cJSON *choice=cJSON_GetArrayItem(cJSON_GetObjectItem(payloadEvent,"choices"),0);
         cJSON *finish=cJSON_GetObjectItem(choice,"finish_reason");
-        if(cJSON_IsString(finish) && finish->valuestring && strlen(finish->valuestring))streamDone=true;
+        if(cJSON_IsString(finish) && finish->valuestring && strlen(finish->valuestring)){
+         streamDone=true;
+         if(strcmp(finish->valuestring,"length")==0)outputLimitHit=true;
+        }
         cJSON *delta=cJSON_GetObjectItem(choice,"delta");
         cJSON *part=cJSON_GetObjectItem(delta,"content");
         if(!cJSON_IsString(part))part=cJSON_GetObjectItem(cJSON_GetObjectItem(choice,"message"),"content");
@@ -202,16 +216,33 @@ inline void tick(bool busy){
       }
      }
      if(cJSON_IsString(content) || (format==3 && !streamedContent.isEmpty())){
+      if(summarize)summaryStage=2;
       const char *raw=cJSON_IsString(content)?content->valuestring:streamedContent.c_str();
       // Some chat models wrap JSON in a markdown fence; parse first object.
       String body(raw);int start=body.indexOf('{'),end=body.lastIndexOf('}');
       if(start>=0 && end>start){
        cJSON *parsed=cJSON_Parse(body.substring(start,end+1).c_str());
        if(summarize){
+        if(parsed)summaryStage=3;
         cJSON *sentence=cJSON_GetObjectItem(parsed,"summary");
         if(cJSON_IsString(sentence) && sentence->valuestring &&
-           !abortRequested && !interactive)
-          accepted=KittyMemory::proposeSummary(String(sentence->valuestring),summaryOwnerVerified,summaryConversation,summaryJobEnd);
+           !abortRequested && !interactive){
+         // The SD queue is byte-limited, but the model instruction allows
+         // multibyte Japanese characters. Trim only the summary proposal,
+         // never the journal or the original complete conversation archive.
+         String summaryText(sentence->valuestring);
+         summaryBytes=summaryText.length();
+         if(summaryBytes>220){
+          summaryText=KittyMemory::clipUTF8(summaryText,220);
+          summaryClipped=true;
+         }
+         summaryStage=4;
+         if((summaryText.isEmpty() || summaryText.length()>=12) && summaryJobEnd){
+          summaryStage=5;
+          accepted=KittyMemory::proposeSummary(summaryText,summaryOwnerVerified,summaryConversation,summaryJobEnd);
+          if(accepted)summaryStage=6;
+         }
+        }
        }
        cJSON *facts=cJSON_GetObjectItem(parsed,"facts");
        if(!summarize && cJSON_IsArray(facts) && cJSON_GetArraySize(facts)<=3){
@@ -233,9 +264,10 @@ inline void tick(bool busy){
       }
      }
      // Report metadata only: never print response text or private memory.
-     Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu truncated=%d format=%d json=%d choices=%d content=%d stream_done=%d stream_chars=%u accepted=%d\\n",
+     Serial.printf("[MEMORY AI] result HTTP=%d elapsed_ms=%lu rx_bytes=%lu truncated=%d format=%d json=%d choices=%d content=%d stream_done=%d stream_chars=%u accepted=%d summary_stage=%d summary_bytes=%lu clipped=%d output_limit=%d\\n",
        status,(unsigned long)elapsed,(unsigned long)response.bytes,response.truncated?1:0,format,
-       outer?1:0,cJSON_IsArray(choices)?1:0,cJSON_IsString(content)?1:0,streamDone?1:0,(unsigned)streamedContent.length(),accepted?1:0);
+       outer?1:0,cJSON_IsArray(choices)?1:0,cJSON_IsString(content)?1:0,streamDone?1:0,(unsigned)streamedContent.length(),accepted?1:0,
+       summaryStage,(unsigned long)summaryBytes,summaryClipped?1:0,outputLimitHit?1:0);
      if(outer)cJSON_Delete(outer);
     }else if(abortRequested || interactive || !operatorEnabled){
      Serial.printf("[MEMORY AI] interrupted HTTP=%d err=%d elapsed_ms=%lu connected=%d rx_bytes=%lu\\n",
