@@ -53,4 +53,20 @@ check('format==3 && !streamedContent.isEmpty()' in worker, "nonempty complete HT
 check('stream_done=%d stream_chars=%u' in worker, "SSE diagnostics")
 check('lastAttempt && (uint32_t)(now-lastAttempt)<RETRY_GAP_MS' in worker, "first automatic summary not delayed by cooldown")
 check('cJSON_GetObjectItem(event,"data")' in worker, "SSE Open WebUI wrapper support")
+# The model may return more than 220 UTF-8 bytes (especially Japanese).
+# Fit only the proposal to the established SD result schema, never raw archives.
+check('summaryBytes=summaryText.length();' in worker, "summary byte count is classified")
+check('summaryText=KittyMemory::clipUTF8(summaryText,220);' in worker, "UTF-8-safe summary clipping")
+check('if((summaryText.isEmpty() || summaryText.length()>=12) && summaryJobEnd)' in worker,
+      "short or invalid jobs cannot be acknowledged")
+check('KittyMemory::proposeSummary(summaryText,summaryOwnerVerified,summaryConversation,summaryJobEnd)' in worker,
+      "validated summary proposal preserves ownership and job identity")
+check('summary_stage=%d summary_bytes=%lu clipped=%d output_limit=%d' in worker,
+      "privacy-safe summary rejection diagnostics")
+check('strcmp(finish->valuestring,"length")==0' in worker,
+      "SSE output-token exhaustion is detectable")
+check('strcmp(outerFinish->valuestring,"length")==0' in worker,
+      "JSON output-token exhaustion is detectable")
+check('if(!summarize && cJSON_IsArray(facts)' in worker, "no summary-to-owner fact promotion")
+
 print("Kitty V6 SD summary journal source contract: OK")
