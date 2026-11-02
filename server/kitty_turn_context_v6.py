@@ -5,7 +5,7 @@ identity before invoking this helper. Device tokens, names in speech, and
 probabilistic recognition alone never unlock prior private speaker history.
 Approved shared memories use a separate public-only path.
 """
-from kitty_semantic_async_client_v6 import semantic_context
+from kitty_semantic_async_client_v6 import semantic_context, SPEAKER_ID
 
 CONTEXT_LIMIT = 1800
 
@@ -21,11 +21,12 @@ async def context_for_turn(service_url, service_token, transcript, attribution,
     # decision, NOT a model transcript, S3-provided ID or mutable SD sidecar.
     # No such binding exists on the currently deployed candidate-only system:
     # default means no private semantic lookup.
-    if (not isinstance(trusted_item_id, str) or not trusted_item_id
+    if (not isinstance(trusted_item_id, str) or not 1 <= len(trusted_item_id) <= 160
             or not isinstance(item_id, str) or item_id != trusted_item_id
-            or source != "session_verified"
-            or not isinstance(speaker, str) or not speaker.startswith("person:")
-            or speaker == "person:" or attribution.get("speaker_role") != "guest"):
+            or not isinstance(transcript, str) or not transcript.strip()
+            or len(transcript) > 300 or source != "session_verified"
+            or not isinstance(speaker, str) or not SPEAKER_ID.fullmatch(speaker)
+            or attribution.get("speaker_role") != "guest"):
         return ""
     context = await lookup(service_url, service_token, transcript, speaker)
     if not isinstance(context, str) or not context.strip():
