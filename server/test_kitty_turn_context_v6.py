@@ -11,7 +11,8 @@ class TurnContextTests(unittest.IsolatedAsyncioTestCase):
         for source in ("voice_probable", "explicit_introduction",
                        "explicit_correction", "unverified"):
             attr={"speaker_id":"person:aki", "speaker_role":"guest",
-                  "provenance":source, "item_id":"turn-123"}
+                  "provenance":source, "item_id":"turn-123",
+                  "session_id":"trusted-live-session-123"}
             for callback in (text_turn_context, voice_turn_context):
                 self.assertEqual(await callback(
                     "local", "token", "my old memories", attr,
@@ -23,11 +24,14 @@ class TurnContextTests(unittest.IsolatedAsyncioTestCase):
             seen.append((query,speaker))
             return "- [speaker=person:aki; unverified_identity] Aki likes coffee"
         attr={"speaker_id":"person:aki", "speaker_role":"guest",
-              "provenance":"session_verified", "item_id":"turn-123"}
+              "provenance":"session_verified", "item_id":"turn-123",
+              "session_id":"trusted-live-session-123"}
         a=await text_turn_context("local","token","珈琲",attr,
-                                  trusted_item_id="turn-123",lookup=lookup)
+                                  trusted_item_id="turn-123",
+                                  trusted_session_id="trusted-live-session-123",lookup=lookup)
         b=await voice_turn_context("local","token","cafe",attr,
-                                   trusted_item_id="turn-123",lookup=lookup)
+                                   trusted_item_id="turn-123",
+                                  trusted_session_id="trusted-live-session-123",lookup=lookup)
         self.assertIn("Aki likes coffee",a)
         self.assertIn("Aki likes coffee",b)
         self.assertEqual(seen,[("珈琲","person:aki"),("cafe","person:aki")])
@@ -36,27 +40,51 @@ class TurnContextTests(unittest.IsolatedAsyncioTestCase):
         async def forbidden(*args):
             raise AssertionError("untrusted lookup")
         attr={"speaker_id":"person:aki","speaker_role":"guest",
-              "provenance":"session_verified","item_id":"turn-123"}
+              "provenance":"session_verified","item_id":"turn-123",
+              "session_id":"trusted-live-session-123"}
         for bound in (None,"","turn-122"):
             self.assertEqual(await voice_turn_context(
                 "local","token","private",attr,
-                trusted_item_id=bound,lookup=forbidden),"")
+                trusted_item_id=bound,
+                trusted_session_id="trusted-live-session-123",lookup=forbidden),"")
+
+    async def test_trusted_session_is_required_independently_of_item(self):
+        async def forbidden(*args):
+            raise AssertionError("missing trusted session cannot query memory")
+        attr={"speaker_id":"person:aki","speaker_role":"guest",
+              "provenance":"session_verified","item_id":"turn-123",
+              "session_id":"trusted-live-session-123"}
+        for trusted in (None,"","different-session"):
+            self.assertEqual(await voice_turn_context(
+                "local","token","private",attr,
+                trusted_item_id="turn-123",trusted_session_id=trusted,
+                lookup=forbidden),"")
+        forged={**attr,"session_id":"another-session"}
+        self.assertEqual(await voice_turn_context(
+            "local","token","private",forged,
+            trusted_item_id="turn-123",
+            trusted_session_id="trusted-live-session-123",
+            lookup=forbidden),"")
 
     async def test_malformed_speakers_and_oversize_inputs_denied(self):
         async def forbidden(*args):
             raise AssertionError("malformed speaker or item cannot query")
         for speaker in ("person:日本", "person:bad name", "person:"+"x"*49):
             attr={"speaker_id":speaker,"speaker_role":"guest",
-                  "provenance":"session_verified","item_id":"turn-123"}
+                  "provenance":"session_verified","item_id":"turn-123",
+              "session_id":"trusted-live-session-123"}
             self.assertEqual(await voice_turn_context(
                 "local","token","private",attr,
-                trusted_item_id="turn-123",lookup=forbidden),"")
+                trusted_item_id="turn-123",
+                                  trusted_session_id="trusted-live-session-123",lookup=forbidden),"")
         attr={"speaker_id":"person:aki","speaker_role":"guest",
-              "provenance":"session_verified","item_id":"turn-123"}
+              "provenance":"session_verified","item_id":"turn-123",
+              "session_id":"trusted-live-session-123"}
         for text in ("", "x"*301):
             self.assertEqual(await voice_turn_context(
                 "local","token",text,attr,
-                trusted_item_id="turn-123",lookup=forbidden),"")
+                trusted_item_id="turn-123",
+                                  trusted_session_id="trusted-live-session-123",lookup=forbidden),"")
 
     async def test_verified_live_context_avoids_remote_semantic_request(self):
         rolling=LiveCallContinuity()
@@ -72,7 +100,9 @@ class TurnContextTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("live context should not cause HTTP lookup")
         result=await voice_turn_context(
             "local","token","What did we decide?",later,
-            trusted_item_id="later",rolling=rolling,lookup=forbidden)
+            trusted_item_id="later",
+            trusted_session_id="trusted-live-session-123",
+            rolling=rolling,lookup=forbidden)
         self.assertIn("C5 Bluetooth",result)
 
     async def test_live_context_never_opens_on_unverified_item(self):
@@ -91,6 +121,7 @@ class TurnContextTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertEqual(await voice_turn_context(
                 "local","token","private",bad,trusted_item_id="later",
+                trusted_session_id="trusted-live-session-123",
                 rolling=rolling,lookup=forbidden),"")
 
     async def test_unknown_and_owner_claims_fail_closed(self):
@@ -98,11 +129,13 @@ class TurnContextTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("owner claim is not authentication")
         attrs=(None, {}, {"speaker_id":"unknown","provenance":"session_verified"},
                {"speaker_id":"person:owner","speaker_role":"owner",
-                "provenance":"session_verified","item_id":"turn-123"})
+                "provenance":"session_verified","item_id":"turn-123",
+              "session_id":"trusted-live-session-123"})
         for attr in attrs:
             self.assertEqual(await text_turn_context(
                 "local","token","private",attr,
-                trusted_item_id="turn-123",lookup=forbidden),"")
+                trusted_item_id="turn-123",
+                                  trusted_session_id="trusted-live-session-123",lookup=forbidden),"")
 
 
 if __name__=="__main__":
