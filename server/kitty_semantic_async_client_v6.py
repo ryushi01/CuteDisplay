@@ -95,7 +95,7 @@ def _read_context(url, token, query, speaker_id, timeout,
         data=body, method="POST",
         headers={"Authorization": "Bearer " + token,
                  "Content-Type": "application/json"})
-    with urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout) as response:
+    with urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open(request, timeout=timeout) as response:
         if response.status != 200:
             return ""
         payload = response.read(4096)
@@ -171,7 +171,7 @@ def _read_shared_context(url, token, timeout):
     else:
         request=urllib.request.Request(url.rstrip("/")+"/shared/context",
                                       data=body,method="POST",headers=headers)
-        with urllib.request.build_opener(_NoRedirect()).open(request,timeout=timeout) as response:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open(request,timeout=timeout) as response:
             if response.status!=200:
                 return ""
             obj=json.loads(response.read(2048))
