@@ -18,7 +18,18 @@ check('if(xQueueSend(summaryCandidates,&batch,0)==pdTRUE)summaryJobAwaiting=true
 check('summaryAckEnd=summary.jobEnd;summaryJobAwaiting=false;' in memory, "ack after persistence")
 check('savedSummary=expected>0 && written==(size_t)expected;' in memory, "do not ack partially written summary")
 check('if(expected>0 && written==(size_t)expected){' in memory, "do not accept partial ack cursor")
-check('summaryJobAwaiting && summary.jobEnd>summaryAckEnd' in memory, "no stale ack")
+check('bool consumed=!summaryJobAwaiting || summary.jobEnd<=summaryAckEnd;' in memory,
+      "stale results do not apply storage writes")
+check('xQueuePeek(summaryResults,&summary,0)==pdTRUE' in memory,
+      "accepted summary retained until durable acknowledgement")
+check('(void)xQueueReceive(summaryResults,&summary,0);' in memory and
+      'if(consumed){' in memory, "only consume after ack or stale result")
+check('savedSummaryJobEnd==summary.jobEnd' in memory,
+      "retry ACK without appending duplicate summary")
+check('summaryStoreRetryAt=millis()+10000UL;' in memory,
+      "SD failures retry with nonbusy backoff")
+check('summaryStorePaused=true;' in memory,
+      "partial SD writes pause rather than corrupting archive")
 check('if(!e.ownerVerified){' in memory, "owner fact write gate")
 check('"/kitty/unverified_summaries_v6.tsv"' in memory, "unverified output isolation")
 check('if(summary.ownerVerified && !item.isEmpty() && cacheMutex' in memory, "owner context isolation")
