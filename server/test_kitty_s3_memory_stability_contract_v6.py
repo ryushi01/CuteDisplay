@@ -19,7 +19,11 @@ class S3StabilityContract(unittest.TestCase):
         self.assertIn("#if KITTY_C5_BLE_MIGRATION_ENABLED && defined(CONFIG_BT_ENABLED)", BRAIN)
         self.assertIn("esp_bt_controller_get_status()==ESP_BT_CONTROLLER_STATUS_IDLE", BRAIN)
         self.assertIn("esp_bt_controller_mem_release(ESP_BT_MODE_BLE)", BRAIN)
-        # Execution order must be assessed at call sites, not by source position.
+        # A healthy C5 link never enters UART recovery; release on normal boot.
+        setup = BRAIN[BRAIN.index("void setup(){"):BRAIN.index("void loop(){")]
+        self.assertIn("esp_bt_controller_mem_release(ESP_BT_MODE_BLE)", setup)
+        recovery = BRAIN[BRAIN.index("static void recoverFreshBootUART("):BRAIN.index("static void pollFace(){")]
+        self.assertNotIn("esp_bt_controller_mem_release(ESP_BT_MODE_BLE)", recovery)
 
     def test_bounded_legacy_http_transport(self):
         self.assertRegex(AI, r"cfg\.buffer_size\s*=\s*1024\s*;")
