@@ -41,6 +41,22 @@ class TurnContextTests(unittest.IsolatedAsyncioTestCase):
                 "local","token","private",attr,
                 trusted_item_id=bound,lookup=forbidden),"")
 
+    async def test_malformed_speakers_and_oversize_inputs_denied(self):
+        async def forbidden(*args):
+            raise AssertionError("malformed speaker or item cannot query")
+        for speaker in ("person:日本", "person:bad name", "person:"+"x"*49):
+            attr={"speaker_id":speaker,"speaker_role":"guest",
+                  "provenance":"session_verified","item_id":"turn-123"}
+            self.assertEqual(await voice_turn_context(
+                "local","token","private",attr,
+                trusted_item_id="turn-123",lookup=forbidden),"")
+        attr={"speaker_id":"person:aki","speaker_role":"guest",
+              "provenance":"session_verified","item_id":"turn-123"}
+        for text in ("", "x"*301):
+            self.assertEqual(await voice_turn_context(
+                "local","token",text,attr,
+                trusted_item_id="turn-123",lookup=forbidden),"")
+
     async def test_unknown_and_owner_claims_fail_closed(self):
         async def forbidden(*args):
             raise AssertionError("owner claim is not authentication")
