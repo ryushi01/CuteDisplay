@@ -412,8 +412,10 @@ inline void run(void*){
   cfg.crt_bundle_attach=esp_crt_bundle_attach;
   cfg.event_handler=event;
   cfg.timeout_ms=60000;
-  cfg.buffer_size=2048;
-  cfg.buffer_size_tx=1024;
+  // Small bounded transport buffers reduce internal heap pressure while
+  // esp_http_client continues to deliver the full streamed response in chunks.
+  cfg.buffer_size=1024;
+  cfg.buffer_size_tx=512;
   esp_http_client_handle_t http=esp_http_client_init(&cfg);
   if(http){
    String auth="Bearer "+key;
