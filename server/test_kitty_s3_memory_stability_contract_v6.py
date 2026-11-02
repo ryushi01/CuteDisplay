@@ -47,6 +47,17 @@ class S3StabilityContract(unittest.TestCase):
         self.assertIn("SET_LOOP_TASK_STACK_SIZE(10 * 1024);", BRAIN)
         self.assertIn("loop_stack_highwater_bytes=", BRAIN)
 
+    def test_uart_diagnostics_do_not_change_ack_timing(self):
+        # Observe the reported timeouts without changing C5, packet content,
+        # retry thresholds, or the working 24 kHz audio worker.
+        for key in ("uartAckAccepted", "uartAckIgnored", "uartRetransmitted",
+                    "uartPacketTimeouts"):
+            self.assertIn(key, AI)
+        self.assertIn("if(millis()-pendingAt<1800)return;", AI)
+        self.assertIn("if(++retries>4)", AI)
+        self.assertIn("[SYS UART AI] ack_ok=", BRAIN)
+        self.assertIn("BrainAI::uartPacketTimeouts", BRAIN)
+
     def test_flash_configuration_unchanged(self):
         for marker in ("PSRAM=opi", "LoopCore=1", "EventsCore=0",
                        "CPUFreq=240", "PartitionScheme=custom"):
