@@ -63,9 +63,13 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
         self.sock.connect(self.path)
 
 
-def _read_context(url, token, query, speaker_id, timeout):
-    body = json.dumps({"query": query, "speaker_id": speaker_id},
-                      ensure_ascii=False).encode("utf-8")
+def _read_context(url, token, query, speaker_id, timeout,
+                  session_id=None, owner_grant=None):
+    payload={"query":query,"speaker_id":speaker_id}
+    if session_id is not None and owner_grant is not None:
+        payload["session_id"]=session_id
+        payload["owner_grant"]=owner_grant
+    body = json.dumps(payload,ensure_ascii=False).encode("utf-8")
     if url.startswith("unix:///run/kitty-semantic/"):
         path = url[len("unix://"):]
         conn = _UnixHTTPConnection(path, timeout)
@@ -124,6 +128,32 @@ async def semantic_context(url, token, query, speaker_id, *, timeout=ALLOWED_TIM
     except (TimeoutError, OSError, ValueError, TypeError, KeyError,
             json.JSONDecodeError, urllib.error.URLError):
         return ""
+
+async def owner_semantic_context(url, token, query, session_id, owner_grant,
+                                 *, timeout=ALLOWED_TIMEOUT,
+                                 request_fn=_read_context):
+    """One-shot owner-only lookup, never automatically called from voice IDs.
+
+    The memory service verifies a cryptographic enrolled-key owner grant for
+    this particular session. An S3 API token or spoken name is insufficient.
+    No Mac inference or realtime audio worker is involved.
+    """
+    if (not _local_memory_endpoint(url) or not isinstance(token,str) or not token
+            or not isinstance(query,str) or not query.strip()
+            or not isinstance(session_id,str) or not 8<=len(session_id)<=100
+            or not isinstance(owner_grant,str)
+            or not 1<=len(owner_grant)<=1024):
+        return ""
+    try:
+        limit=min(max(float(timeout),0.05),ALLOWED_TIMEOUT)
+        return await asyncio.wait_for(
+            asyncio.to_thread(request_fn,url,token,query[:MAX_QUERY],
+                              "person:owner",limit,session_id,owner_grant),
+            timeout=limit)
+    except (TimeoutError,OSError,ValueError,TypeError,KeyError,
+            json.JSONDecodeError,urllib.error.URLError):
+        return ""
+
 
 def _read_shared_context(url, token, timeout):
     body=b"{}"
