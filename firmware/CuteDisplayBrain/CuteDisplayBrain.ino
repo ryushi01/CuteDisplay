@@ -698,20 +698,7 @@ static void recoverFreshBootUART(uint32_t now){
  Serial1.flush();
  Serial1.end();
  delay(25);
-#if KITTY_C5_BLE_MIGRATION_ENABLED && defined(CONFIG_BT_ENABLED)
- // S3 never initializes BLE: the C5 owns all phone Bluetooth connections.
- // Reclaim unused ESP32-S3 BLE controller memory before starting Wi-Fi/audio.
- // Only release from the IDLE state; a failure leaves normal startup intact.
- if(esp_bt_controller_get_status()==ESP_BT_CONTROLLER_STATUS_IDLE){
-  size_t before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
-  esp_err_t btRelease=esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
-  size_t after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
-  Serial.printf("[S3 BT] controller_release=%d internal_reclaimed=%ld\\n",
-    (int)btRelease,(long)(after-before));
- }else{
-  Serial.println("[S3 BT] controller memory retained: unexpected active state");
- }
-#endif
+
  Serial1.setRxBufferSize(2048);
  Serial1.setTxBufferSize(2048);
  Serial1.begin(BrainPinPlan::UART_BAUD,SERIAL_8N1,BrainPinPlan::UART_RX,BrainPinPlan::UART_TX);
@@ -1473,6 +1460,20 @@ void setup(){
   (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
   (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
  Serial.printf("[S3] CuteDisplay Brain FW=%s\n",S3_FW_VERSION);
+#if KITTY_C5_BLE_MIGRATION_ENABLED && defined(CONFIG_BT_ENABLED)
+ // S3 never initializes BLE: the C5 owns all phone Bluetooth connections.
+ // Reclaim unused ESP32-S3 BLE controller memory during boot.
+ // Only release from the IDLE state; a failure leaves normal startup intact.
+ if(esp_bt_controller_get_status()==ESP_BT_CONTROLLER_STATUS_IDLE){
+  size_t before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+  esp_err_t btRelease=esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
+  size_t after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+  Serial.printf("[S3 BT] controller_release=%d internal_reclaimed=%ld\\n",
+    (int)btRelease,(long)(after-before));
+ }else{
+  Serial.println("[S3 BT] controller memory retained: unexpected active state");
+ }
+#endif
  const esp_partition_t *runningApp=esp_ota_get_running_partition();
  const esp_partition_t *bootApp=esp_ota_get_boot_partition();
  Serial.printf("[S3 BOOT PARTITION] running=%s offset=0x%08lx selected=%s offset=0x%08lx build=kitty-v6-partition-diag-20261031\\n",
