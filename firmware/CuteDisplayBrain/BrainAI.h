@@ -131,6 +131,9 @@ static bool failed=false;
 static bool doneSeen=false;
 static uint32_t requestStarted=0,firstTokenAt=0,lastTextFlush=0;
 static uint32_t emittedBytes=0,ackedBytes=0,packetCount=0;
+// Boot-lifetime, read-only UART diagnostics; no retry timing or payload changes.
+static volatile uint32_t uartAckAccepted=0,uartAckIgnored=0;
+static volatile uint32_t uartRetransmitted=0,uartPacketTimeouts=0;
 static String provisioningField,provisioningBuffer;
 static size_t provisioningExpected=0;
 static uint32_t provisioningAt=0;
@@ -612,10 +615,15 @@ inline bool provision(const String &cmd,String &reply){
  return false;
 }
 inline void onAck(uint16_t seq,const String &type,const String &payload){
- if(!pending||seq!=pending)return;
+ // A valid AI ACK for an older sequence is observed but never applied to
+ // the current pending packet. Count it without exposing private text.
+ if(!pending||seq!=pending){
+  if(type=="ACK" && payload=="AI")uartAckIgnored++;
+  return;
+ }
  if(type=="ACK" && payload=="AI"){
   if(!strcmp(outstanding.kind,"AI_DATA"))ackedBytes+=strlen(outstanding.text);
-  packetCount++;
+  packetCount++;uartAckAccepted++;
   pending=0;retries=0;return;
  }
  // NACK or bad ACK: stop streaming until a fresh request.
@@ -631,7 +639,11 @@ inline void tick(Stream &uart,bool allow){
  if(!out || !allow)return;
  if(pending){
   if(millis()-pendingAt<1800)return;
-  if(++retries>4){Serial.println("[AI] UART ACK timeout");pending=0;failed=true;return;}
+  if(++retries>4){
+   uartPacketTimeouts++;
+   Serial.println("[AI] UART ACK timeout");pending=0;failed=true;return;
+  }
+  uartRetransmitted++;
   CuteLink::send(uart,pending,outstanding.kind,outstanding.text);
   pendingAt=millis();return;
  }
