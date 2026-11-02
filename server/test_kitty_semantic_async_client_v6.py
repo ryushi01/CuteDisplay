@@ -1,7 +1,10 @@
 """Offline tests: semantic lookup must never stall voice or mix speakers."""
 import asyncio
 import unittest
-from kitty_semantic_async_client_v6 import semantic_context
+from kitty_semantic_async_client_v6 import (
+    semantic_context, shared_context, owner_semantic_context,
+    _local_memory_endpoint, _NoRedirect,
+)
 
 
 class AsyncSemanticTests(unittest.IsolatedAsyncioTestCase):
@@ -34,6 +37,58 @@ class AsyncSemanticTests(unittest.IsolatedAsyncioTestCase):
             "http://127.0.0.1:8766", "token", "name", "person:camille",
             timeout=0.05, request_fn=slow)
         self.assertEqual(result, "")
+
+    async def test_owner_recall_requires_explicit_grant_and_session(self):
+        calls=[]
+        def fake(url, token, query, speaker, timeout, session_id, grant):
+            calls.append((query,speaker,session_id,grant))
+            return "authorized owner context"
+        result=await owner_semantic_context(
+            "http://127.0.0.1:8766","device","What did I decide?",
+            "enrolled-session-1234","signed-grant",request_fn=fake)
+        self.assertEqual(result,"authorized owner context")
+        self.assertEqual(calls,[("What did I decide?","person:owner",
+                                 "enrolled-session-1234","signed-grant")])
+
+        def forbidden(*args):
+            raise AssertionError("unproven owner request must not start")
+        for session,grant in (("short","signed-grant"),
+                              ("enrolled-session-1234",""),
+                              ("enrolled-session-1234",None)):
+            result=await owner_semantic_context(
+                "http://127.0.0.1:8766","device","private",session,grant,
+                request_fn=forbidden)
+            self.assertEqual(result,"")
+
+    async def test_crafted_authority_and_remote_redirects_are_rejected(self):
+        def forbidden(*args):
+            raise AssertionError("off-host query must not execute")
+        unsafe=(
+            "http://127.0.0.1:8766@evil.example",
+            "http://127.0.0.1:8766/path",
+            "http://127.0.0.1:8766?token=private",
+            "http://127.0.0.1:8766#fragment",
+            "http://127.0.0.1:bad",
+            "http://127.0.0.1:8766@example.org",
+            "https://127.0.0.1:8766",
+            "unix:///run/kitty-semantic/../escape.sock",
+            "unix:///run/kitty-semantic/%2e%2e/escape.sock",
+            "unix:///tmp/kitty.sock",
+        )
+        for url in unsafe:
+            self.assertFalse(_local_memory_endpoint(url),url)
+            self.assertEqual(await semantic_context(
+                url,"device","private","person:camille",request_fn=forbidden),"")
+            self.assertEqual(await shared_context(
+                url,"device",request_fn=forbidden),"")
+            self.assertEqual(await owner_semantic_context(
+                url,"device","private","enrolled-session-1234","signed",
+                request_fn=forbidden),"")
+        self.assertTrue(_local_memory_endpoint("http://127.0.0.1:8766"))
+        self.assertTrue(_local_memory_endpoint(
+            "unix:///run/kitty-semantic/kitty-memory.sock"))
+        self.assertIsNone(_NoRedirect().redirect_request(
+            None,None,302,"Found",{},"https://evil.example"))
 
     async def test_not_sent_to_remote_memory_server(self):
         def forbidden(*args):
