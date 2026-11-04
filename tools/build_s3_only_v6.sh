@@ -42,7 +42,7 @@ FQBN='esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=custom,CDCOnBo
 ARDUINO_CLI="${ARDUINO_CLI:-arduino-cli}"
 if [ -n "$PRIVATE_HEADER" ]; then
   # Credential-bearing S3 binaries/sketches must never enter a repo or CI artifact.
-  OUT="${KITTY_S3_ONLY_OUT:-$HOME/.local/share/kitty-v6/private-builds/s3-only-$(date -u +%Y%m%dT%H%M%SZ)-$}"
+  OUT="${KITTY_S3_ONLY_OUT:-$HOME/.local/share/kitty-v6/private-builds/s3-only-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
   python3 - "$ROOT" "$OUT" <<'PY'
 from pathlib import Path
 import sys
@@ -56,8 +56,7 @@ else
 fi
 HEADER="$ROOT/firmware/CuteDisplayBrain/CombinedFirmwareImage.h"
 PARTITIONS=""
-for core in "$HOME/.arduino15/packages/esp32/hardware/esp32/3.3.12" \\
-            "$HOME/Library/Arduino15/packages/esp32/hardware/esp32/3.3.12"; do
+for core in "$HOME/.arduino15/packages/esp32/hardware/esp32/3.3.12" "$HOME/Library/Arduino15/packages/esp32/hardware/esp32/3.3.12"; do
   if [ -f "$core/tools/partitions/default_16MB.csv" ]; then
     PARTITIONS="$core/tools/partitions/default_16MB.csv"
     break
