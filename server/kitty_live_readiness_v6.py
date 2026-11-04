@@ -83,8 +83,19 @@ def source_markers(source, markers):
             for key,token in markers.items()}
 
 
-def gateway_markers(*, runner=subprocess.run):
-    # Only fixed strings/booleans cross Docker stdout, not gateway source.
+def gateway_probe(*, runner=subprocess.run):
+    """Fixed-marker scan plus fixed-status reason for any incomplete scan.
+
+    Docker's stderr, gateway source and process environment never appear in
+    output. The inspect and exec operations are read-only.
+    """
+    unknown=source_markers(None,GATEWAY_MARKERS)
+    running=_run(["docker","inspect","--format",
+                  "{{.State.Running}}","open-webui"],runner=runner)
+    if running is None:
+        return unknown,"docker_inaccessible_or_container_missing"
+    if running.strip()!="true":
+        return unknown,"container_not_running"
     code = (
         "import json; from pathlib import Path; "
         "p=Path('/app/backend/open_webui/routers/audio/realtime.py'); "
@@ -94,17 +105,32 @@ def gateway_markers(*, runner=subprocess.run):
         "('present' if v in s else 'absent')) "
         "for k,v in marks.items()}))"
     )
-    output=_run(["docker","exec","open-webui","python","-c",code],runner=runner)
-    if output is None:
-        return source_markers(None,GATEWAY_MARKERS)
-    try:
-        data=json.loads(output)
-        if isinstance(data,dict) and set(data)==set(GATEWAY_MARKERS) and all(
-                v in ("present","absent","unknown") for v in data.values()):
-            return data
-    except (ValueError,TypeError):
-        pass
-    return source_markers(None,GATEWAY_MARKERS)
+    for executable in ("python","python3"):
+        output=_run(["docker","exec","open-webui",executable,"-c",code],
+                    runner=runner)
+        if output is None:
+            continue
+        try:
+            data=json.loads(output)
+            if (isinstance(data,dict) and set(data)==set(GATEWAY_MARKERS)
+                    and all(v in ("present","absent","unknown")
+                            for v in data.values())):
+                status=("inspected" if "unknown" not in data.values()
+                        else "source_missing_or_unreadable")
+                return data,status
+        except (ValueError,TypeError):
+            pass
+    readable=_run(["docker","exec","open-webui","sh","-c",
+        "test -r /app/backend/open_webui/routers/audio/realtime.py"],
+        runner=runner)
+    if readable is None:
+        return unknown,"source_missing_or_unreadable"
+    return unknown,"python_probe_failed"
+
+
+def gateway_markers(*, runner=subprocess.run):
+    """Backward-compatible status-only wrapper for offline tests."""
+    return gateway_probe(runner=runner)[0]
 
 
 def memory_health(*, opener=None):
@@ -139,8 +165,9 @@ def probe(*, runner=subprocess.run, proc_root=Path("/proc"),
             "memory_http_health":memory_health(opener=opener)}
     result.update({"memory_"+k:v for k,v in
                    source_markers(source,MEMORY_MARKERS).items()})
-    result.update({"gateway_"+k:v for k,v in
-                   gateway_markers(runner=runner).items()})
+    marks,inspection=gateway_probe(runner=runner)
+    result.update({"gateway_"+k:v for k,v in marks.items()})
+    result["gateway_inspection"]=inspection
     # Cannot deduce grants, human identity or staging readiness from source text.
     result["trusted_speaker_turn_issuer"]="not_verified"
     result["safe_to_enable_private_auto_recall"]="no"
