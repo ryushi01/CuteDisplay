@@ -60,6 +60,9 @@ jobs:
       - name: Verify secure owner-voice adaptive learning from confirmed turns
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_voice_adaptation_policy_v6 server.test_kitty_voice_learning_v6 server.test_kitty_owner_voice_postcall_v6 server.test_kitty_owner_voice_profile_store_v6 server.test_kitty_voice_adaptive_scoring_v6 server.test_kitty_xvector_adaptive_candidates_v6 server.test_kitty_xvector_adaptive_store_v6 server.test_kitty_owner_voice_review_issuer_v6 server.test_kitty_owner_voice_review_workflow_v6 server.test_kitty_voice_familiarity_hints_v6 -v
 
+      - name: Test guarded upstream provider decode hook and audio forwarding
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_gateway_decode_hook_patch_v6 -v
+
       - name: Test optional passive gateway bridge
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_passive_turn_bridge_v6 server.test_kitty_gateway_provider_scope_v6 -v
 
