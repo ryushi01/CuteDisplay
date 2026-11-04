@@ -111,6 +111,72 @@ class BindRolloutTests(unittest.TestCase):
                                  "previous_installation_or_unfinished_transaction")
                 git.assert_not_called()
 
+    def _exercise_transaction(self, fail_start=False):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder)
+            p=folder/"source.py"
+            p.write_bytes(b"print('working gateway')\n")
+            base=d.host_file_stat(str(p))
+            store=folder/"private_state"
+            active={"running":True,"stops":0,"starts":0}
+            copies={n:b"# safe observer dependency\n" for n in d.HELPERS}
+            def fake_docker(*args,**kwargs):
+                if args[0]=="stop":
+                    active["running"]=False
+                    active["stops"]+=1
+                elif args[0]=="start":
+                    active["running"]=True
+                    active["starts"]+=1
+                return b""
+            def fake_root(path,data,expected,meta):
+                d.overwrite_same_inode(path,data,expected,meta)
+            def fake_inventory():
+                return {n:d.sha(data) for n,data in copies.items()}
+            wellness=iter([False,True]) if fail_start else iter([True])
+            with patch.object(d,"STORE",store),patch.object(
+                    d,"MANIFEST",store/"transaction.json"),patch.object(
+                    d,"health",return_value="healthy"),patch.object(
+                    d,"state",side_effect=lambda:
+                    "running" if active["running"] else "exited"),patch.object(
+                    d,"mounted_host_source",return_value=str(p)),patch.object(
+                    d,"source_in_container",side_effect=lambda:p.read_bytes()),patch.object(
+                    d,"github_file",side_effect=lambda ref,name:copies[name]),patch.object(
+                    d,"git_sha",return_value="a"*40),patch.object(
+                    d,"patcher_from_git",return_value=SimpleNamespace(
+                    patch=lambda src:src+"# passive observation only\n")),patch.object(
+                    d,"helper_inventory",side_effect=fake_inventory),patch.object(
+                    d,"root_write",side_effect=fake_root),patch.object(
+                    d,"docker",side_effect=fake_docker),patch.object(
+                    d,"wait_healthy",side_effect=lambda:next(wellness)),patch.object(
+                    d,"remove_created"):
+                if fail_start:
+                    with self.assertRaises(d.Refusal) as err:
+                        d.apply()
+                    self.assertEqual(str(err.exception),"deployment_failed:start")
+                    self.assertEqual(p.read_bytes(),b"print('working gateway')\n")
+                    self.assertEqual(active["stops"],2)
+                    self.assertEqual(active["starts"],2)
+                    self.assertEqual(json.loads(d.MANIFEST.read_text())[
+                        "status"],"rolled_back")
+                else:
+                    d.apply()
+                    self.assertIn(b"passive observation only",p.read_bytes())
+                    self.assertEqual(active["stops"],1)
+                    self.assertEqual(active["starts"],1)
+                    self.assertEqual(json.loads(d.MANIFEST.read_text())[
+                        "status"],"installed")
+                after=d.host_file_stat(str(p))
+                for key in ("ino","dev","uid","gid","mode"):
+                    self.assertEqual(after[key],base[key])
+                self.assertTrue(active["running"])
+
+    def test_complete_transaction_stops_once_and_preserves_inode(self):
+        self._exercise_transaction(fail_start=False)
+
+    def test_unhealthy_restart_rolls_back_original_in_same_inode(self):
+        self._exercise_transaction(fail_start=True)
+
     def test_source_helpers_are_observer_only(self):
         self.assertEqual(len(d.HELPERS),8)
         self.assertNotIn("kitty_voice_learning_v6.py",d.HELPERS)
