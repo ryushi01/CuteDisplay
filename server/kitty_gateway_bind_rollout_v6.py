@@ -298,6 +298,72 @@ finally:os.close(fd)
 sys.stdout.write("verified\n")
 '''
 
+ROOT_PARTIAL_RECOVERY=r'''import hashlib,json,os,stat,struct,sys
+path=sys.argv[1]
+meta=json.loads(sys.argv[2])
+payload=sys.stdin.buffer.read(4000010)
+assert len(payload)>=9
+n=struct.unpack(">I",payload[:4])[0]
+assert 0<n<=2000000
+original=payload[4:4+n]
+candidate=payload[4+n:]
+assert 0<len(candidate)<=2000000
+assert os.path.isabs(path) and os.path.realpath(path)==path
+assert hashlib.sha256(original).hexdigest()==meta["sha"]
+fd=os.open(path,os.O_RDWR|getattr(os,"O_NOFOLLOW",0))
+try:
+ st=os.fstat(fd)
+ assert stat.S_ISREG(st.st_mode) and st.st_nlink==1
+ assert [st.st_dev,st.st_ino,st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode)]==[
+  meta["dev"],meta["ino"],meta["uid"],meta["gid"],meta["mode"]]
+ current=os.read(fd,2000001)
+ assert 0<len(current)<=2000000
+ def partial():
+  if current in (original,candidate):return True
+  if len(current)==len(original):
+   common=0
+   upto=min(len(current),len(candidate))
+   while common<upto and current[common]==candidate[common]:
+    common+=1
+   return current[common:]==original[common:]
+  if len(original)<len(current)<=len(candidate):
+   return current==candidate[:len(current)]
+  return False
+ assert partial()
+ os.lseek(fd,0,os.SEEK_SET)
+ rest=memoryview(original)
+ while rest:
+  count=os.write(fd,rest)
+  assert count>0
+  rest=rest[count:]
+ os.ftruncate(fd,len(original))
+ os.fsync(fd)
+ os.lseek(fd,0,os.SEEK_SET)
+ assert hashlib.sha256(os.read(fd,2000001)).hexdigest()==meta["sha"]
+finally:os.close(fd)
+print("partial_write_recovered")
+'''
+
+def recover_partial_write(source,original,candidate,metadata):
+    """Rollback only an interrupted prefix-write pattern to the same inode.
+
+    The host-root recovery helper verifies original and candidate bytes and
+    requires a current file matching the exact sequential write algorithm.
+    An unrelated third-party edit will be refused, not overwritten.
+    """
+    import struct
+    incoming=struct.pack(">I",len(original))+original+candidate
+    try:
+        p=subprocess.run(["sudo","python3","-c",ROOT_PARTIAL_RECOVERY,
+                          source,json.dumps(metadata,sort_keys=True)],
+                         input=incoming,stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL,check=False,timeout=22)
+    except (OSError,subprocess.SubprocessError):
+        raise Refusal("partial_recovery_failed") from None
+    if p.returncode or p.stdout!=b"partial_write_recovered\n":
+        raise Refusal("partial_recovery_failed")
+
+
 ROOT_OPEN_PREFLIGHT=r'''import hashlib,json,os,stat,sys
 path=sys.argv[1]
 meta=json.loads(sys.argv[2])
@@ -489,7 +555,14 @@ def apply():
                 current_sha=verified_host_stat(source)["sha"]
                 if current_sha==tx["after"]:
                     root_write(source,original,tx["after"],hostmeta)
-                elif current_sha!=tx["before"]:
+                elif current_sha==tx["before"]:
+                    pass
+                elif phase=="host_write" and state()=="exited":
+                    # A failed or short write may have left old suffix bytes
+                    # after a known new prefix; the helper verifies precisely
+                    # that pattern and restores only this transaction's inode.
+                    recover_partial_write(source,original,updated,hostmeta)
+                else:
                     raise Refusal("rollback_conflict")
                 tx["status"]="rolled_back"
                 save(tx)
