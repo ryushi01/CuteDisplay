@@ -108,3 +108,23 @@ git show FETCH_HEAD:server/kitty_gateway_bind_rollout_v6.py | python3 - --apply
 Expected labels: `KITTY_V6_READONLY_BIND_GATEWAY_ROLLOUT`, `backup=verified`, `gateway_hook=installed`, `gateway_health=healthy`, `host_inode=preserved`, `provider_forwarding=unchanged`, `private_recall=disabled`, `automatic_voice_learning=disabled`, `firmware_and_SD=unchanged`. On `rollout_error` or `failed_phase`, **do not rerun**; share the short statuses and rollback result. The script also has `--rollback` for intentional return to the exact saved original when installed and content checks still match.
 
 **This rollout installs passive provider-event observation, not secure owner speaker verification, private historical memory release or hands-free persistent adaptive learning.** Those V6 acceptance gates remain. C5 v39 black captions over Kitty's unobscured face are compiled but physically untested; C5 hardware still runs v38.
+
+
+## Operator-verified single-file gateway rollout — November 4 (live Ubuntu)
+
+The Ubuntu operator confirmed the `server/kitty_gateway_bind_rollout_v6.py` transaction on the live host. This is a **successful installed deployment**, not an unfinished transaction. The subsequent `--apply` attempt intentionally refused with `rollout_error=previous_installation_or_unfinished_transaction`; **do not rerun** or clear the manifest. The operator ran a read-only check of `~/.local/state/kitty-v6-gateway-bind/transaction.json` with these results:
+
+```text
+status=installed
+pinned_ref=8bf4fedb5108
+backup_verified=true
+candidate_verified=true
+container_state=running healthy
+live_gateway=candidate
+```
+
+These values confirm the running gateway bytes match the saved patched candidate and the container is healthy; they do not alone prove event execution during a call. The original private backup is intact. No rollback is indicated. The hook observes a limited set of upstream provider events while leaving voice forwarding unchanged; no private owner-history release, independent per-turn issuer, biometric learning, or C5 firmware change is enabled.
+
+**Next operator check, read-only:** inspect the installed source for exactly one passive hook marker and call, confirm helper import/instance creation from `/app/backend`, and compare source SHA to the saved `after` digest. Then have one short real Kitty call and confirm ordinary realtime voice, healthy Open WebUI and unchanged private-history denial. Passive observation produces no persistent counters/logs by default; a healthy call alone cannot demonstrate the hook received events. Design opt-in, non-content event-count diagnostics if needed, without logging transcript/audio or enabling owner-grant paths.
+
+**Remain gated:** trusted microphone-to-provider-item provenance, independently verified turn tickets, owner-grant-bound recall, consent-based learning and uninterrupted long-call memory acceptance. Preserve S3 SD memory authority, verified Ubuntu guards, v38 hardware, and private service settings. C5 v39 display release remains a separate physical acceptance task.
