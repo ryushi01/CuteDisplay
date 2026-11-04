@@ -21,6 +21,7 @@ import time
 from kitty_live_rolling_context_v6 import LiveCallContinuity
 
 AUDIENCE = "kitty-verified-spoken-turn-v6"
+RESERVED_OWNER_LOCAL_ID = "person:attested_owner_local"
 ITEM = re.compile(r"[A-Za-z0-9_-]{1,160}\Z")
 PERSON = re.compile(r"person:[A-Za-z0-9_-]{1,48}\Z")
 SESSION = re.compile(r"[A-Za-z0-9_-]{16,100}\Z")
@@ -62,7 +63,8 @@ def issue_external_attestation(secret, *, session_id, item_id, transcript,
             or not isinstance(item_id, str) or not ITEM.fullmatch(item_id)
             or not isinstance(speaker_id, str) or not PERSON.fullmatch(speaker_id)
             or (speaker_role, speaker_id) not in (("owner", "person:owner"),)
-                and (speaker_role != "guest" or speaker_id == "person:owner")
+                and (speaker_role != "guest" or speaker_id in
+                     ("person:owner", RESERVED_OWNER_LOCAL_ID))
             or digest is None or type(ttl) is not int
             or not 1 <= ttl <= MAX_TICKET_TTL):
         raise ValueError("invalid attestation")
@@ -119,7 +121,8 @@ def verify_external_attestation(secret, ticket, *, session_id, item_id,
         if not isinstance(speaker, str) or not PERSON.fullmatch(speaker):
             return None
         if (role == "owner" and speaker == "person:owner") or (
-                role == "guest" and speaker != "person:owner"):
+                role == "guest" and speaker not in
+                ("person:owner", RESERVED_OWNER_LOCAL_ID)):
             return speaker, role
     except (ValueError, TypeError, UnicodeError, OverflowError):
         pass
@@ -142,7 +145,8 @@ class AttestedLiveCall:
                         and len(attestation_secret) >= 32 else None)
         self._owner_secret = (owner_grant_secret
                              if isinstance(owner_grant_secret, bytes)
-                             and len(owner_grant_secret) >= 32 else None)
+                             and len(owner_grant_secret) >= 32
+                             and owner_grant_secret != self._secret else None)
         self._clock = clock
         self._wall_clock = wall_clock
         self._session_id = secrets.token_urlsafe(24)
@@ -238,7 +242,7 @@ class AttestedLiveCall:
         # The rolling buffer uses guest-role storage for this one call only.
         # For a verified owner, use a local-only pseudonym: do NOT store under
         # or search any guest's persistent semantic identity.
-        local_speaker = ("person:attested_owner_local" if role == "owner" else speaker)
+        local_speaker = (RESERVED_OWNER_LOCAL_ID if role == "owner" else speaker)
         attribution = {
             "session_id": self._session_id, "item_id": item_id,
             "speaker_id": local_speaker, "speaker_role": "guest",
