@@ -32,6 +32,35 @@ class RolloutSafetyTests(unittest.TestCase):
                 self.assertEqual(json.loads(d.MANIFEST.read_text())[
                     "status"],"prepared")
 
+    def test_gateway_backup_is_host_owned_and_private_from_creation(self):
+        # Regression: sudo docker cp made a root-owned host file and chmod
+        # raised PermissionError before the gateway had been patched.
+        data=b"from open_webui import app\n# private source never printed\n"
+        with tempfile.TemporaryDirectory() as root:
+            target=Path(root)/"realtime.py"
+            with patch.object(d,"docker",return_value=data) as docker:
+                original=d.backup_gateway_as_host_user(target)
+                self.assertEqual(original,data)
+                self.assertEqual(target.read_bytes(),data)
+                self.assertEqual(target.stat().st_mode & 0o777,0o600)
+                self.assertEqual(target.stat().st_uid,__import__("os").getuid())
+                self.assertEqual(docker.call_args.args[:2],("exec","open-webui"))
+                self.assertNotIn("cp",docker.call_args.args)
+                with self.assertRaises(d.DeployRefusal) as cm:
+                    d.backup_gateway_as_host_user(target)
+                self.assertEqual(str(cm.exception),"backup_write_failed")
+                self.assertEqual(target.read_bytes(),data)
+
+    def test_backup_empty_or_oversized_is_refused_without_creating_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            target=Path(root)/"realtime.py"
+            for data in (b"",b"x"*2000001):
+                with patch.object(d,"docker",return_value=data):
+                    with self.assertRaises(d.DeployRefusal) as cm:
+                        d.backup_gateway_as_host_user(target)
+                    self.assertEqual(str(cm.exception),"gateway_source_unreadable")
+                    self.assertFalse(target.exists())
+
     def test_prior_installation_blocks_repeat_before_source_patching(self):
         with tempfile.TemporaryDirectory() as root:
             store=Path(root)/"state"
