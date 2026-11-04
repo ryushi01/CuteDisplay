@@ -383,3 +383,28 @@ Updated on main:
 - New offline tests cover exact-checksum cleanup and privileged-only atomic operations; the existing full audio-forwarding checks remain in CI.
 
 Operator must not rerun the old revision. On a fresh FETCH_HEAD, an **idle-only** single retry with the updated host-side installer is the planned next operation; if it reports `deployment_failed:<stage>`, stop and provide the short stage string, without disclosing private source, logs, secrets or data. The standalone memory-service private 403 guard remains installed and should not be repeated. The currently operating C5 v38 is unchanged; C5 v39 black captions over Kitty-chan are code/CI-ready but not flashed.
+
+## Atomic replacement blocked after successful staging — 2026-11-04
+
+The next host-side Ubuntu gateway passive rollout returned:
+
+```text
+KITTY_V6_PROVIDER_PASSIVE_ROLLOUT
+source_backup=created
+rollback=no_gateway_change
+rollout_error=deployment_failed:atomic_replace
+```
+
+The exact source patch and prerequisite staging succeeded far enough to reach `move_candidate()`; replacing the original private `/app/backend/open_webui/routers/audio/realtime.py` failed. The installer then checked the source checksum and reported `rollback=no_gateway_change`, with no Open WebUI restart. **Do not retry the same atomic replace path.** A Docker single-file bind mount would prevent `os.replace()` with an EBUSY error, but this remains a hypothesis until read-only mount checks confirm it.
+
+`server/kitty_gateway_atomic_mount_probe_v6.py` now reports only fixed mount labels and container filesystem statuses: whether the exact file is its own bind mount, whether a parent directory is mounted, read-only flags, root directory writability, target mountpoint state, and stale staging-file presence. It does not print private paths, source contents, Compose secrets, mounts' host Source, credentials or transcripts. `server/test_kitty_gateway_atomic_mount_probe_v6.py` includes synthetic bind-mount, volume, overlay and confidentiality cases; the targeted CI step passed.
+
+One **read-only host** command to distinguish file bind mount vs overlay/inode error:
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_gateway_atomic_mount_probe_v6.py | python3 -
+```
+
+Do not restart the container or edit the mount source before this status is available. If the target is an exact-file bind mount, replace the deployment strategy with a verified host-source transaction and safe rollback; never force a rename over the mounted file. If the target is an ordinary container overlay path, introduce a bounded errno-only atomic rename failure classifier, preserving original source and speaker permissions. The earlier separate Ubuntu memory-service 403 guard and C5 v39 compilation remain unchanged. Voice learning and owner history are still off.
