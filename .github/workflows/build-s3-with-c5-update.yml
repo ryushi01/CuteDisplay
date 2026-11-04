@@ -51,6 +51,9 @@ jobs:
       - name: Verify signed single-call speaker attestation and rolling continuity
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_attested_live_call_v6 server.test_kitty_attested_turn_context_v6 -v
 
+      - name: Inspect read-only gateway turn shape without exposing private source
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_gateway_turn_shape_v6 -v
+
       - name: Check speaker attribution and display contracts
         run: |
           python3 -m unittest discover -s server -p 'test_kitty_attribution_pipeline_contract_v6.py' -v
