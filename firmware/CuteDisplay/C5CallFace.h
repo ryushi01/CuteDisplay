@@ -263,29 +263,34 @@ static void drawFullScreenKittyFace(){
  String label=listening?"LISTENING":thinking?"THINKING":
               speaking?"SPEAKING":connecting?"CONNECTING":"CALL";
  textAt(label,15,154,1,BLACK);
- // Transparent 2-line live caption on the light forehead, above the eyes.
- // Keep Kitty-chan fully visible as the real framebuffer background.
- // The framebuffer is redrawn each frame, so no caption-clear panel is needed.
+ // v40: five transparent rows, oldest at the top and newest at the bottom.
+ // Keep 16 px spacing for Japanese glyphs on the 170 px screen.
+ // No opaque panel; Kitty's animated face remains visible underneath.
  if(!callCaption.isEmpty()){
-  const int captionY=40;
-  String rows[2];String current="";int used=0;
+  const int captionY=2;
+  static constexpr int CALL_CAPTION_ROWS=5;
+  String rows[CALL_CAPTION_ROWS];String current="";int used=0;
   auto appendRow=[&](const String &value){
-   rows[0]=rows[1];
-   rows[1]=value;
+   for(int i=0;i<CALL_CAPTION_ROWS-1;i++)rows[i]=rows[i+1];
+   rows[CALL_CAPTION_ROWS-1]=value;
   };
-  for(int pos=0;pos<(int)callCaption.length();){
+  // Prior completed turns plus the currently streaming caption.
+  String transcript=callCaptionHistory;
+  if(!transcript.isEmpty())transcript+="\n";
+  transcript+=callCaption;
+  for(int pos=0;pos<(int)transcript.length();){
    const int begin=pos;
-   uint32_t cp=decodeUTF8(callCaption,pos);
-   if(cp=='\\r')continue;
-   if(cp=='\\n'){appendRow(current);current="";used=0;continue;}
+   uint32_t cp=decodeUTF8(transcript,pos);
+   if(cp=='\r')continue;
+   if(cp=='\n'){appendRow(current);current="";used=0;continue;}
    const int glyph=utfWidth(cp,1,1);
    if(used+glyph>304 && !current.isEmpty()){
     appendRow(current);current="";used=0;
    }
-   current+=callCaption.substring(begin,pos);used+=glyph;
+   current+=transcript.substring(begin,pos);used+=glyph;
   }
   if(!current.isEmpty())appendRow(current);
-  for(int i=0;i<2;i++)if(!rows[i].isEmpty())
+  for(int i=0;i<CALL_CAPTION_ROWS;i++)if(!rows[i].isEmpty())
    richText(rows[i],6,captionY+i*16,1,1,BLACK,316);
  }
 
