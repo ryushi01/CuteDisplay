@@ -29,5 +29,7 @@
 // v37: C5-hosted iPhone BLE with S3 UART command relay (pending CI/hardware validation).
 // v38: keep expressive Kitty face visible behind compact call caption overlay.
 // v39: transparent black conversation text over Kitty face; no opaque dark
-// caption strip or status panel. Preserve active two-row UTF-8 caption flow.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 39;
+// caption strip or status panel.
+// v40: five transparent UTF-8 transcript rows with rolling speaker turns;
+// immediate, idempotent physical-button call stop and no background AI bubble.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 40;
