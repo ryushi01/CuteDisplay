@@ -87,6 +87,34 @@ def docker_exec(pycode, *, timeout=25):
                   "python3","-c",pycode,timeout=timeout)
 
 
+def docker_exec_admin(pycode, *, timeout=25):
+    """Privileged only for an exact path's atomic replacement or removal.
+
+    The running application process and ordinary preflight imports retain
+    their existing configured container user.
+    """
+    return docker("exec","--user","0","-w",str(RUNTIME),CONTAINER,
+                  "python3","-c",pycode,timeout=timeout)
+
+
+def discard_known_candidate(expected_sha):
+    """Remove only our own abandoned TMP with a recorded exact hash."""
+    if (not isinstance(expected_sha,str) or len(expected_sha)!=64
+            or any(c not in "0123456789abcdef" for c in expected_sha)):
+        raise DeployRefusal("staging_hash_invalid")
+    code="from pathlib import Path\nimport hashlib\n"
+    code+=f"p=Path({str(TMP)!r})\n"
+    code+="assert not p.is_symlink()\n"
+    code+="if p.exists():\n"
+    code+=" assert p.is_file()\n"
+    code+=f" assert hashlib.sha256(p.read_bytes()).hexdigest()=={expected_sha!r}\n"
+    code+=" p.unlink()\n"
+    try:
+        docker_exec_admin(code,timeout=18)
+    except DeployRefusal:
+        raise DeployRefusal("staging_file_conflict") from None
+
+
 def get_container_health():
     try:
         return docker("inspect","-f","{{.State.Health.Status}}",
@@ -200,7 +228,7 @@ def move_candidate(expect_before, expect_after):
     code+="if (candidate.stat().st_uid,candidate.stat().st_gid)!=(orig.st_uid,orig.st_gid):\n"
     code+=" os.chown(candidate,orig.st_uid,orig.st_gid)\n"
     code+="os.replace(candidate,original)\n"
-    docker_exec(code,timeout=18)
+    docker_exec_admin(code,timeout=18)
 
 
 def remove_created(state):
@@ -245,12 +273,13 @@ def apply():
     if get_container_health()!="healthy":
         raise DeployRefusal("gateway_not_healthy")
     ensure_store()
+    prior=None
     if MANIFEST.exists():
         try:
             prior=json.loads(MANIFEST.read_text(encoding="utf-8"))
         except (OSError,ValueError):
             raise DeployRefusal("previous_transaction_unreadable") from None
-        if prior.get("status")!="rolled_back":
+        if not isinstance(prior,dict) or prior.get("status")!="rolled_back":
             raise DeployRefusal("previous_transaction_exists")
 
     ref=command(["git","rev-parse","--verify","FETCH_HEAD"],
@@ -298,13 +327,19 @@ def apply():
         raise DeployRefusal("live_provider_layout_incompatible:"+code) from None
     except (UnicodeError,SyntaxError,TypeError,ValueError):
         raise DeployRefusal("live_provider_layout_incompatible") from None
+    expected_before=sha(original)
+    # Recover an abandoned file only if the previous *completed rollback*
+    # manifest proves the exact prior staging hash and original gateway hash.
+    # Never delete a foreign or modified file with the fixed temporary name.
+    if (prior is not None and prior.get("status")=="rolled_back"
+            and prior.get("before")==expected_before):
+        discard_known_candidate(prior.get("after"))
     # A fixed temporary file from a prior interrupted operation must not be
     # overwritten or followed as a symlink. Only a fresh target is admissible.
     check="from pathlib import Path\n"
     check+=f"p=Path({str(TMP)!r})\n"
     check+="assert not p.exists() and not p.is_symlink()\n"
     docker_exec(check,timeout=12)
-    expected_before=sha(original)
     if target_status()!=expected_before:
         raise DeployRefusal("gateway_source_changed")
     candidate=revised.encode("utf-8")
@@ -317,6 +352,7 @@ def apply():
     save_manifest(state)
     print("source_backup=created",flush=True)
     did_change=False
+    stage="copy_helpers"
     try:
         for name in created:
             local=folder/name
@@ -324,15 +360,20 @@ def apply():
             os.chmod(local,0o644)
             docker("cp",str(local),f"{CONTAINER}:{RUNTIME/name}",timeout=25)
         # Pre-import everything while the old gateway continues running.
+        stage="preimport"
         docker_exec("from kitty_passive_turn_bridge_v6 import KittyPassiveTurnBridge\n"
                     "assert KittyPassiveTurnBridge().session_id\n",timeout=20)
+        stage="copy_candidate"
         local=folder/"realtime-candidate.py"
         local.write_bytes(candidate)
         os.chmod(local,0o600)
         docker("cp",str(local),f"{CONTAINER}:{TMP}",timeout=35)
+        stage="atomic_replace"
         move_candidate(expected_before,sha(candidate))
         did_change=True
+        stage="restart"
         restart()
+        stage="commit_state"
         state["status"]="installed"
         save_manifest(state)
         print("gateway_hook=installed",flush=True)
@@ -348,13 +389,16 @@ def apply():
                 restart()
                 print("rollback=completed",flush=True)
             else:
+                # Copy/replace may have left a root-owned candidate after
+                # refusal. Remove ONLY the known transaction candidate hash.
+                discard_known_candidate(state["after"])
                 remove_created(state)
                 state["status"]="rolled_back"
                 save_manifest(state)
                 print("rollback=no_gateway_change",flush=True)
         except (DeployRefusal,OSError,ValueError):
             print("rollback=manual_recovery_required",flush=True)
-        raise DeployRefusal("deployment_failed") from None
+        raise DeployRefusal("deployment_failed:"+stage) from None
 
 
 def rollback():
