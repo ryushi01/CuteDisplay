@@ -89,6 +89,9 @@ jobs:
       - name: Reject voice-probable private recall and validate candidate-only familiarity transport
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_realtime_gateway_observer_v6 server.test_kitty_realtime_speaker_v6 -v
 
+      - name: Test guarded voice safety deployment and rollback
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_v6_voice_stage_deploy -v
+
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
