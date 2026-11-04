@@ -49,7 +49,7 @@ jobs:
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_owner_guard_deploy_v6 -v
 
       - name: Verify signed single-call speaker attestation and rolling continuity
-        run: PYTHONPATH=server python3 -m unittest server.test_kitty_attested_live_call_v6 -v
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_attested_live_call_v6 server.test_kitty_attested_turn_context_v6 -v
 
       - name: Check speaker attribution and display contracts
         run: |
