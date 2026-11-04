@@ -20,12 +20,16 @@ REALTIME = Path("/app/backend/open_webui/routers/audio/realtime.py")
 TRANSCRIPT = "conversation.item.input_audio_transcription.completed"
 
 
-def _async_scope(node):
-    """Outer direct scope of an async forwarding operation (no nested funcs)."""
-    for child in ast.walk(node):
-        if isinstance(child,(ast.FunctionDef,ast.AsyncFunctionDef)) and child is not node:
-            return False
-    return True
+def _own_nodes(func):
+    """Only a function's own scope, never enclosing route / nested callbacks."""
+    pending=list(reversed(func.body))
+    while pending:
+        node=pending.pop()
+        if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef,
+                            ast.ClassDef,ast.Lambda)):
+            continue
+        yield node
+        pending.extend(reversed(list(ast.iter_child_nodes(node))))
 
 
 def _count_label(value):
@@ -47,7 +51,7 @@ def _provider_receive_clues(func):
     # If the local event comes from the upstream socket, the gateway should
     # contain one of these in the *same* async scope. No raw code is emitted.
     uses_upstream=False
-    for n in ast.walk(func):
+    for n in _own_nodes(func):
         if isinstance(n,ast.Call):
             f=n.func
             if (isinstance(f,ast.Attribute)
@@ -80,7 +84,7 @@ def analyze(source):
         if f.name=="client_events":
             continue
         # A nested provider loop may occur in a local route coroutine.
-        for n in ast.walk(f):
+        for n in _own_nodes(f):
             if _is_send_event(n):
                 matches.append((f,n))
     candidates=[]
