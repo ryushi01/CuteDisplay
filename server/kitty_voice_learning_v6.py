@@ -125,10 +125,25 @@ def learn_verified_owner_utterance(profile, raw_wav, *, session_id, item_id,
     vector=_unit(embedding_fn(raw_wav))
     anchors=profile.get("anchor_embeddings",profile.get("embeddings",()))
     anchor_score=_median_similarity(vector,anchors)
-    floor=profile.get("min_genuine_floor",MIN_SCORE)
+    floor=profile.get("verified_learning_floor",
+                      profile.get("min_genuine_floor",MIN_SCORE))
     if (type(floor) not in (float,int) or not math.isfinite(floor)
             or not MIN_SCORE<=floor<=1.0):
         raise ValueError("invalid_model_specific_floor")
+    if profile.get("mode")=="shadow_only":
+        # Verified learning may be more inclusive than candidate recognition
+        # ONLY after independent signature + owner grant + explicit opt-in.
+        # Keep a conservative X-vector anchor floor of at least 0.92; do not
+        # reduce the separate live candidate threshold (0.960/0.965+).
+        if (profile.get("model_id")!="speechbrain/spkrec-xvect-voxceleb"
+                or floor<0.92):
+            raise ValueError("unsafe_xvector_learning_floor")
+        original_floor=profile.get("min_genuine_floor",0.965)
+        if (type(original_floor) not in (int,float)
+                or not math.isfinite(original_floor)
+                or not 0.965<=original_floor<=1.0
+                or floor>original_floor):
+            raise ValueError("invalid_original_xvector_floor")
     if anchor_score < floor:
         raise ValueError("outside_protected_enrollment_voice")
     if not isinstance(other_profiles,(list,tuple)):
