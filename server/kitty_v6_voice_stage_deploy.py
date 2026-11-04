@@ -128,8 +128,23 @@ def speaker_patch(live, fetched):
         if patched.count("KITTY_XVECTOR_EXPERIMENTAL_IDENTITY") != 1:
             raise StageError("speaker_source_incompatible")
         return patched,"patched"
-    if '"candidate_only":True' in live and 'return recognize_candidate(raw)' not in live:
-        return live,"already_safe"
+    # A token elsewhere in this file is NOT proof this branch was fixed.
+    # Require this exact AST (modulo whitespace) for already-safe detection.
+    try:
+        actual=ast.parse(live)
+        actual_identify=next(n for n in actual.body
+                             if isinstance(n,ast.FunctionDef)
+                             and n.name=="identify")
+        actual_branches=[n for n in ast.walk(actual_identify)
+                         if isinstance(n,ast.If) and
+                         "KITTY_XVECTOR_EXPERIMENTAL_IDENTITY" in
+                         ast.get_source_segment(live,n.test)]
+        if (len(actual_branches)==1
+                and ast.dump(actual_branches[0],include_attributes=False)
+                ==ast.dump(guarded[0],include_attributes=False)):
+            return live,"already_safe"
+    except (SyntaxError,StopIteration,ValueError,TypeError):
+        pass
     raise StageError("speaker_source_incompatible")
 
 
