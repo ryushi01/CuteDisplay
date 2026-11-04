@@ -11,6 +11,7 @@ MAX_ADAPTIVE = 6
 MAX_DAYS = 90
 MIN_SPACING_HOURS = 24
 MIN_SCORE = 0.82
+ALLOWED_DIMS = (192, 512)  # pinned ECAPA or X-vector encoders; never mix
 
 def _utc(value):
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -19,9 +20,9 @@ def _utc(value):
     return dt.astimezone(timezone.utc)
 
 def _unit(vec):
-    if not isinstance(vec, (list, tuple)) or len(vec) != 192:
+    if not isinstance(vec, (list, tuple)) or len(vec) not in ALLOWED_DIMS:
         raise ValueError("invalid_embedding_dimension")
-    if any(not isinstance(x, (int, float)) or not isfinite(x) for x in vec):
+    if any(type(x) not in (int,float) or not isfinite(x) for x in vec):
         raise ValueError("invalid_embedding_value")
     norm = sqrt(sum(float(x)*float(x) for x in vec))
     if not 0.99 <= norm <= 1.01:
@@ -56,7 +57,8 @@ def propose(profile, embedding, *, now, score, verified, explicit_approval):
     if len(anchor) < 3:
         raise ValueError("at_least_three_protected_anchors_required")
     for item in anchor:
-        _unit(item)
+        if len(_unit(item)) != len(vec):
+            raise ValueError("mixed_embedding_models")
     current = _utc(now)
     existing = prune_adaptive(profile.get("adaptive_embeddings", []), now=now)
     if any(abs((current - _utc(e["timestamp"])).total_seconds()) < MIN_SPACING_HOURS*3600
@@ -74,4 +76,7 @@ def effective_embeddings(profile, *, now):
     if len(anchors) < 3:
         raise ValueError("profile_has_no_protected_anchors")
     adaptive = prune_adaptive(profile.get("adaptive_embeddings", []), now=now)
-    return anchors + [_unit(x["embedding"]) for x in adaptive]
+    vectors = anchors + [_unit(x["embedding"]) for x in adaptive]
+    if len({len(v) for v in vectors}) != 1:
+        raise ValueError("mixed_embedding_models")
+    return vectors
