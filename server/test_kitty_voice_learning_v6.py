@@ -117,9 +117,9 @@ class GradualOwnerLearningTests(unittest.TestCase):
             self.learn(profile={**self.profile,"owner_enrollment_id":"person:guest"})
 
     def test_owner_grant_alone_or_unsigned_probable_voice_cannot_train(self):
-        ticket,grant=self.proof(with_audio_hash=False)
-        with self.assertRaises(PermissionError):
-            self.learn(ticket=ticket,grant=grant)
+        with self.assertRaises(ValueError):
+            self.proof(with_audio_hash=False)  # learning receipts need microphone binding
+        _,grant=self.proof()
         with self.assertRaises(PermissionError):
             self.learn(ticket="voice_probable",grant=grant)
         ticket,grant=self.proof()
