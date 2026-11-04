@@ -17,6 +17,9 @@ _GATE = threading.BoundedSemaphore(1)
 _LOCK = threading.Lock()
 _MODEL = None
 _ANCHORS = None
+_ADAPTIVE = ()
+_ADAPTIVE_MTIME = None
+_ADAPTIVE_LAST_CHECK = 0.0
 # Provisional, calibrated from only one other speaker. Never an auth threshold.
 SHADOW_THRESHOLD = 0.957
 _WARM_STARTED = False
@@ -43,6 +46,78 @@ def _init():
                                         run_opts={"device":"cpu"})
     _ANCHORS=anchors
     _MODEL=model
+
+
+def _adaptive_candidates():
+    """Read small consented owner cohort at most once per minute, candidate only.
+
+    Refuses symlinks, world-readable templates, profile/model mismatch and
+    unverified adaptive provenance. Never changes original anchors.
+    """
+    global _ADAPTIVE, _ADAPTIVE_MTIME, _ADAPTIVE_LAST_CHECK
+    if os.environ.get("KITTY_XVECTOR_ADAPTIVE_CANDIDATE") != "1":
+        return ()
+    now=time.monotonic()
+    if now-_ADAPTIVE_LAST_CHECK<60:
+        return _ADAPTIVE
+    _ADAPTIVE_LAST_CHECK=now
+    try:
+        path=Path(os.environ["KITTY_XVECTOR_SHADOW_PROFILE"])
+        if path.is_symlink() or not path.is_file():
+            _ADAPTIVE=()
+            return ()
+        st=path.stat()
+        if st.st_mode & 0o077:
+            _ADAPTIVE=()
+            return ()
+        if _ADAPTIVE_MTIME==st.st_mtime_ns:
+            return _ADAPTIVE
+        _ADAPTIVE_MTIME=st.st_mtime_ns
+        profile=json.loads(path.read_text(encoding="utf-8"))
+        if (profile.get("mode")!="shadow_only"
+                or profile.get("memory_authorization") is not False
+                or profile.get("adaptive_learning_consent") is not True
+                or profile.get("speaker_id")!="person:shana"
+                or profile.get("owner_enrollment_id")!="person:shana"
+                or profile.get("model_id")!="speechbrain/spkrec-xvect-voxceleb"
+                or profile.get("adaptive_source")
+                    !="independently_attested_owner_turn"):
+            _ADAPTIVE=()
+            return ()
+        from kitty_voice_adaptation_policy_v6 import prune_adaptive, _unit
+        from datetime import datetime, timezone
+        cohort=prune_adaptive(profile.get("adaptive_embeddings",[]),
+                             now=datetime.now(timezone.utc).isoformat())
+        if len(cohort)<3:
+            _ADAPTIVE=()
+            return ()
+        for entry in cohort:
+            if len(_unit(entry["embedding"]))!=512:
+                raise ValueError("wrong_xvector_dimension")
+        _ADAPTIVE=tuple(cohort)
+        return _ADAPTIVE
+    except (OSError,ValueError,KeyError,TypeError,UnicodeError):
+        _ADAPTIVE=()
+        return ()
+
+
+def _candidate_cosine_score(vector):
+    """Return candidate-only score. Existing threshold is NEVER reduced."""
+    import numpy as np
+    baseline=statistics.median(float(np.dot(vector,a)) for a in _ANCHORS)
+    cohort=_adaptive_candidates()
+    if not cohort:
+        return baseline
+    try:
+        from kitty_voice_adaptive_scoring_v6 import candidate_score
+        from datetime import datetime, timezone
+        value,_=candidate_score(
+            vector.tolist(),[a.tolist() for a in _ANCHORS],cohort,
+            now=datetime.now(timezone.utc).isoformat(),
+            adaptive_enabled=True)
+        return max(baseline,value)
+    except (OSError,ValueError,TypeError,KeyError):
+        return baseline
 
 def warm_async():
     """Preload the model independently of audio capture; nonblocking."""
@@ -99,7 +174,7 @@ def recognize_candidate(audio, *, threshold=None, conversational_hint=False):
                 v=_MODEL.encode_batch(torch.from_numpy(samples).unsqueeze(0))
             v=v.detach().cpu().numpy().reshape(-1).astype("float64")
             v/=np.linalg.norm(v)
-            score=statistics.median(float(np.dot(v,a)) for a in _ANCHORS)
+            score=_candidate_cosine_score(v)
             ms=round((time.monotonic()-started)*1000)
             accepted=score >= threshold
             print("[KITTY_XVECTOR_EXPERIMENTAL] match=%s score=%.4f threshold=%.3f inference_ms=%d" %
