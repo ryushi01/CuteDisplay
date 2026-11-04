@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static cross-board v40 Call Mode contract; hardware acceptance still required."""
+"""Static cross-board Call Mode contract (v40 behavior retained through v41)."""
 import re
 import unittest
 from pathlib import Path
@@ -14,7 +14,7 @@ BUILDER=(ROOT/"tools/build_s3_with_c5_update.sh").read_text()
 
 class C5CallModeV40Contracts(unittest.TestCase):
     def test_version_and_transparent_five_line_layout(self):
-        self.assertIn("C5_FIRMWARE_VERSION = 40;",VERSION)
+        self.assertIn("C5_FIRMWARE_VERSION = 41;",VERSION)
         self.assertIn("CALL_CAPTION_ROWS=5;",FACE)
         self.assertIn("const int captionY=2;",FACE)
         self.assertIn("captionY+i*16",FACE)
@@ -69,7 +69,7 @@ class C5CallModeV40Contracts(unittest.TestCase):
                        "if((bubbleEnabled && !callHidesNormalChat) || aiScrollMode)",
                        'if(callStopPending && next.startsWith("CALL_")',
                        'next!="CALL_OFF" && next!="CALL_ERROR"',
-                       '"NACK","CALL_ACTIVE"'):
+                       '"ACK","AI"'):
             self.assertIn(marker,C5)
         self.assertIn("callHidesNormalChat=false;",C5)
         self.assertNotIn('displayPrefs.putBool("callHidesNormalChat"',C5)
