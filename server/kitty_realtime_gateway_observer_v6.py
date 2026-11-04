@@ -108,6 +108,8 @@ class KittySpeakerObserver:
         item = event.get("item_id")
         confidence = event.get("confidence")
         candidate = event.get("candidate_speaker_id")
+        candidate_score = event.get("candidate_score")
+        candidate_playback_active = event.get("playback_active",False)
         if not self.gate.accept_speaker(self.epoch, item, sid, confidence):
             # Unknown is a legitimate negative response for a matching turn.
             if not self.gate._valid(self.epoch, item):
@@ -140,9 +142,9 @@ class KittySpeakerObserver:
             familiarity = self.familiarity.observe(
                 provider_item_id=item,
                 speaker_candidate=candidate,
-                score=event.get("candidate_score"),
+                score=candidate_score,
                 recognizer_source="trusted_gateway_cpu",
-                echo_or_overlap=event.get("playback_active",False))
+                echo_or_overlap=candidate_playback_active)
             if familiarity is not None and sid=="unknown":
                 safe_event["candidate_familiarity"] = familiarity["familiarity"]
                 safe_event["private_memory_authorized"] = False
