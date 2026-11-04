@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Offline no-audio no-network tests for independently signed Kitty live turns."""
+import asyncio
 import time
 import unittest
 
@@ -163,6 +164,69 @@ class AttestedLiveCallTests(unittest.TestCase):
         self.call.upstream_speech_stopped("j2")
         self.assertFalse(self.call.upstream_transcript_completed("j2","覚"*700))
         self.assertEqual(self.call.context_for_verified_turn("j1"),"")
+
+
+class AsyncAttestedHistoryTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.now=1_900_000_000
+        self.call=AttestedLiveCall(attestation_secret=ATTESTATION_KEY,
+            owner_grant_secret=OWNER_KEY, wall_clock=lambda:self.now)
+
+    def authorize_owner(self):
+        transcript="What did we decide last week?"
+        self.call.upstream_speech_stopped("owner_item")
+        self.call.upstream_transcript_completed("owner_item",transcript)
+        ticket=issue_external_attestation(ATTESTATION_KEY,
+            session_id=self.call.session_id,item_id="owner_item",
+            transcript=transcript,speaker_id="person:owner",
+            speaker_role="owner",now=self.now)
+        grant=issue_grant(OWNER_KEY,True,self.call.session_id,
+                          now=self.now,ttl=120)
+        self.assertTrue(self.call.verify_turn("owner_item",ticket,owner_grant=grant))
+        return transcript,grant
+
+    async def test_owner_lookups_use_only_verified_transcript(self):
+        transcript,grant=self.authorize_owner()
+        seen=[]
+        async def fake(url,token,query,sid,passed):
+            seen.append((query,sid,passed))
+            return "validated owner result"
+        context=await self.call.owner_history_for_verified_turn(
+            "owner_item","http://127.0.0.1:8766","local-token",grant,lookup=fake)
+        self.assertEqual(context,"validated owner result")
+        self.assertEqual(seen,[(transcript,self.call.session_id,grant)])
+        self.assertEqual(await self.call.owner_history_for_verified_turn(
+            "other_item","http://127.0.0.1:8766","local-token",grant,lookup=fake),"")
+        self.assertEqual(len(seen),1)
+
+    async def test_new_utterance_disallows_late_response(self):
+        _,grant=self.authorize_owner()
+        started=asyncio.Event()
+        release=asyncio.Event()
+        async def fake(*args):
+            started.set()
+            await release.wait()
+            return "private note must not reach later speaker"
+        task=asyncio.create_task(self.call.owner_history_for_verified_turn(
+            "owner_item","http://127.0.0.1:8766","token",grant,lookup=fake))
+        await started.wait()
+        self.call.upstream_speech_started()
+        release.set()
+        self.assertEqual(await task,"")
+
+    async def test_expired_owner_grant_and_external_url_deny_lookup(self):
+        _,grant=self.authorize_owner()
+        async def forbidden(*args):
+            raise AssertionError("no owner history access expected")
+        self.now+=121
+        self.assertEqual(await self.call.owner_history_for_verified_turn(
+            "owner_item","http://127.0.0.1:8766","token",grant,lookup=forbidden),"")
+        self.now-=121
+        self.assertEqual(await self.call.owner_history_for_verified_turn(
+            "owner_item","https://example.com","token",grant,lookup=forbidden),"")
+        self.call.end_call()
+        self.assertEqual(await self.call.owner_history_for_verified_turn(
+            "owner_item","http://127.0.0.1:8766","token",grant,lookup=forbidden),"")
 
 
 if __name__=="__main__":
