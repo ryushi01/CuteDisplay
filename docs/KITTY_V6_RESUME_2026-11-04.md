@@ -79,3 +79,29 @@ git show FETCH_HEAD:server/kitty_owner_guard_plan_v6.py | python3 -
 ```
 
 Read `candidate_compiles`, `live_semantic_handlers`, and `dependency_*`; no patch should be applied or service restarted based on this command alone. If the live handlers differ, adjust the proposed patch to the actual private source in a staged, test-only manner with no transcript or token disclosure. Next steps after confirmation: prepare a single targeted backup + patch + offline test + explicit operator-controlled restart/rollback; then verify health and private 403 fail-closed behavior. There is no owner identity issuer wired into actual realtime spoken turns yet.
+
+## Private semantic owner guard deployed — November 4 (operator-confirmed)
+
+**This supersedes all pre-deployment instructions in the earlier November 4 sections above.** The operator fetched GitHub `main` into `FETCH_HEAD` from the existing private Ubuntu worktree and ran:
+
+```bash
+git show FETCH_HEAD:server/kitty_owner_guard_deploy_v6.py | python3 - --apply
+```
+
+The actual live deployment output was:
+
+```text
+KITTY_V6_PRIVATE_OWNER_GUARD_DEPLOY
+backup=created
+offline_private_guard=passed
+deployment=completed
+memory_health=ok
+private_semantic_403=verified
+shared_audio_gateway=unchanged
+```
+
+**Confirmed by the installer and operator:** original live memory service backed up; exact legacy split `/semantic` and `/semantic/context` handlers replaced by GitHub's combined, signed owner-grant handler; two missing helper modules copied; offline owner grant/guest deny tests passed; user `kitty-memory-v6.service` restarted and its localhost `/health` returned OK; both private semantic endpoints rejected an unverified request with HTTP 403 using the service bearer; rollback state retained. The installer intentionally did **not** patch Docker/Open WebUI, S3/C5 firmware, SD archive, audio or Mac AI/TTS. This last point describes code scope, not a separate end-to-end audio test.
+
+**No further service deployment or checks are needed for this identified guard gap.** Do **not** re-run `--apply` on the same installation; it is a one-time transaction. Backups and a strict `--rollback` mode remain available if later needed, but no rollback is indicated by the successful output. Do not display or copy private backup contents or service environment into GitHub.
+
+**Unfinished:** the deployed gateway does not yet have independently verified owner-per-spoken-turn binding. An enrolled phone key and signed, session-bound grant cannot alone establish who uttered a microphone turn; X-vector candidates, self-introduction and device bearer remain non-authorizing. Private automatic cross-call recall and owner fact writing stay gated; approved shared-memory recall and normal automatic SD summarization are separate established features. No new S3 flash or C5 v38 change. Next engineering priority is a per-item trust issuer integrated with the actual realtime flow and user-presence/enrollment policy, tested on a staging gateway before any live enablement; one consolidated deployment and one meaningful conversation test rather than repeated status loops.
