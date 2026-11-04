@@ -104,10 +104,12 @@ def wait_healthy():
 
 
 def ensure_store():
-    STORE.mkdir(parents=True,exist_ok=True,mode=0o700)
-    os.chmod(STORE,0o700)
     if STORE.is_symlink():
         raise DeployRefusal("state_directory_conflict")
+    STORE.mkdir(parents=True,exist_ok=True,mode=0o700)
+    if not STORE.is_dir() or STORE.is_symlink():
+        raise DeployRefusal("state_directory_conflict")
+    os.chmod(STORE,0o700)
 
 
 def save_manifest(data):
@@ -254,6 +256,12 @@ def apply():
         revised=module.patch(source)
     except (UnicodeError,ValueError,SyntaxError,TypeError):
         raise DeployRefusal("live_provider_layout_incompatible") from None
+    # A fixed temporary file from a prior interrupted operation must not be
+    # overwritten or followed as a symlink. Only a fresh target is admissible.
+    check="from pathlib import Path\\n"
+    check+=f"p=Path({str(TMP)!r})\\n"
+    check+="assert not p.exists() and not p.is_symlink()\\n"
+    docker_exec(check,timeout=12)
     expected_before=sha(original)
     if target_status()!=expected_before:
         raise DeployRefusal("gateway_source_changed")
