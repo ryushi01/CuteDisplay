@@ -41,3 +41,30 @@ The next gateway change must be created from this exact scope, backed up, syntac
 Synthetic attestation tests and a healthy memory service do **not** mean hands-free persistent owner voice learning or secure automatic cross-call owner memory is functioning. Those require real speaker provenance, a verified/consented learning path, and the version-matched gateway patch. The C5 screen patch is unrelated to that security blocker and may be tested separately without weakening memory security.
 
 Do not modify S3 SD archive or protected speaker anchors. Preserve the known-good C5 v38 image for rollback. No full C5/S3 flash should be performed until the operator decides which isolated hardware path to use.
+
+## Live gateway topology preflight — confirmed 2026-11-04
+
+The operator performed the original read-only probe on the active `open-webui` container:
+
+```text
+KITTY_V6_PROVIDER_SCOPE_READ_ONLY
+source=readable
+syntax=valid
+async_handlers=multiple
+client_handler=one
+all_ws_event_forwards=multiple
+provider_transcript_scope=none
+provider_forwards_in_scope=none
+provider_receive_clue=not_verified
+passive_hook_safe=no
+trusted_turn_issuer=not_verified
+live_owner_history_enable=no
+```
+
+**Interpretation:** The original strict scope matcher did not identify a unique provider receive+transcript+forward site in the customized gateway. It did **not** detect a service error, and it did not modify any file. Never reinterpret `passive_hook_safe=no` as permission to patch every send, or as a reason to disable the current gateway.
+
+Updated `server/kitty_gateway_provider_scope_v6.py` on GitHub now separately reports `named_provider_handler`, `provider_receive_shape`, `provider_json_event_decodes`, `provider_ws_event_forwards`, `provider_transcript_literal`, and `event_decode_hook_candidate`. These values are predefined labels and counts, not source excerpts, secrets, paths, or transcripts. It can identify a decodable upstream provider loop even when transcript handling and multiple browser forwarding calls are split across functions. A candidate is NOT yet proof that an unattended source patch is safe. The matching synthetic structural tests passed in GitHub CI.
+
+Re-run the **same read-only command** once after fetching latest GitHub `main`. Use the output to design one exact-AST-guarded, rollback-capable opt-in observer insertion while preserving existing realtime forwarding. Do not enable owner-private recall or hands-free voice-learning from a voice candidate alone.
+
+**C5 v39 CI status:** The combined C5 application and S3 firmware compilation plus caption and privacy contract tests completed successfully in [run 41774229414](https://github.com/ryushi01/CuteDisplay/actions/runs/41774229414). This confirms buildability, not a successful physical v39 OTA. Keep C5 v38 as the known-good rollback until the operator tests the isolated v39 display update.
