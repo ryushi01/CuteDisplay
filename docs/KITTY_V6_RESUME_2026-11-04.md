@@ -35,3 +35,21 @@ Safe outputs to share: `KITTY_V6_READ_ONLY_PREFLIGHT` statuses. Never paste secr
 6. Audit the **actual deployed** private Open WebUI gateway and legacy nondelegated BrainAI memory path; all generated Ubuntu diffs must be staged and tested before deployment.
 
 The new preflight is source/test only and is not a production deployment. The first action after reading its results is a **read-only comparison of live Ubuntu runtime state with checked-in modules**, not a speculative flash or gateway patch.
+
+## Actual Ubuntu read-only preflight observation — November 4
+
+Operator ran the original `kitty_live_readiness_v6.py` via `git show FETCH_HEAD:...` in the existing private Ubuntu worktree (without switching its branch). The original `origin/main` reference was missing because the remote fetch went to `FETCH_HEAD`; `FETCH_HEAD` resolved correctly.
+
+Observed on actual Ubuntu VM: `memory_service_state=active`, `memory_http_health=ok`, `memory_owner_grant_gate=absent`, `memory_owner_challenge=present`, `memory_private_semantic_endpoint=present`, `memory_shared_context_endpoint=present`; **all six gateway markers returned unknown**. The service file currently resolved through its running PID is thus missing the exact owner-grant guard marker present on GitHub `main`; this does not by itself prove that a service module wasn't monkey-patched at runtime. **Do not enable private automatic recall** until the live service's authorization is confirmed. An API bearer token alone is not human identity.
+
+The initial gateway scan could not distinguish a missing Docker permission/container/source file from a Python command/JSON probe failure. A revised source-only preflight tests Docker inspect and Python/Python3 with a fixed diagnostic status, and still prints no secrets, environment variables, raw Python source or personal memory. The offline preflight unit tests were expanded to cover no-Docker and missing-source cases.
+
+Next operator action (still read-only; command does NOT switch branches, update services, flash, or modify source files):
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_live_readiness_v6.py | python3 -
+```
+
+Review `gateway_inspection` alongside gateway marker statuses. If Docker access fails, diagnose local container privileges separately before touching live audio. If source was readable, inspect a source-only diff privately to stage the missing owner gate. Do **not** replace the existing memory service wholesale, restart Open WebUI, change the C5 v38 firmware or deploy automatic owner recall based solely on these marker scans.
