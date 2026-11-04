@@ -129,6 +129,17 @@ class GradualOwnerLearningTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.learn(ticket=guest_ticket,grant=grant)
 
+    def test_private_recall_turn_ticket_cannot_approve_voice_learning(self):
+        ticket=issue_external_attestation(
+            SIGNER,session_id=SESSION,item_id=self.item,
+            transcript=self.transcript,speaker_id="person:owner",
+            speaker_role="owner",now=int(self.now.timestamp()),
+            audio_sha256=hashlib.sha256(self.audio).hexdigest(),
+            purpose="turn")
+        _,grant=self.proof()
+        with self.assertRaises(PermissionError):
+            self.learn(ticket=ticket,grant=grant)
+
     def test_ticket_is_bound_to_exact_audio(self):
         ticket,grant=self.proof()
         alternative=clean_wav(6200)
