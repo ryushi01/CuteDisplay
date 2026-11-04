@@ -62,7 +62,7 @@ class GradualOwnerLearningTests(unittest.TestCase):
             transcript=self.transcript,speaker_id=speaker,
             speaker_role=role,now=int(when.timestamp()),
             audio_sha256=hashlib.sha256(audio).hexdigest()
-                         if with_audio_hash else None)
+                         if with_audio_hash else None,purpose="learning")
         owner_grant=issue_grant(OWNER,True,SESSION,now=int(when.timestamp()),
                                 ttl=120)
         return ticket,owner_grant
