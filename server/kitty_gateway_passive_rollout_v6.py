@@ -280,7 +280,23 @@ def apply():
     try:
         source=original.decode("utf-8")
         revised=module.patch(source)
-    except (UnicodeError,ValueError,SyntaxError,TypeError):
+    except module.HookRefusal as exc:
+        # The source patcher uses only a controlled set of fixed refusal
+        # codes, never source fragments, secrets or user-defined strings.
+        allowed={
+            "already_patched_or_invalid","provider_scope_unrecognized",
+            "provider_loop_unrecognized","provider_forward_ambiguous",
+            "provider_decode_unrecognized","provider_decode_ambiguous",
+            "provider_predecode_guard_unrecognized",
+            "multiline_decode_unrecognized",
+            "unsupported_newline_layout","tabs_unrecognized",
+            "decode_line_ambiguous","unexpected_declaration_order",
+            "candidate_python_invalid","postcondition_failed",
+            "gateway_python_invalid"}
+        code=str(exc)
+        if code not in allowed:code="unknown_shape"
+        raise DeployRefusal("live_provider_layout_incompatible:"+code) from None
+    except (UnicodeError,SyntaxError,TypeError,ValueError):
         raise DeployRefusal("live_provider_layout_incompatible") from None
     # A fixed temporary file from a prior interrupted operation must not be
     # overwritten or followed as a symlink. Only a fresh target is admissible.
