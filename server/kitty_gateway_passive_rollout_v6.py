@@ -258,9 +258,9 @@ def apply():
         raise DeployRefusal("live_provider_layout_incompatible") from None
     # A fixed temporary file from a prior interrupted operation must not be
     # overwritten or followed as a symlink. Only a fresh target is admissible.
-    check="from pathlib import Path\\n"
-    check+=f"p=Path({str(TMP)!r})\\n"
-    check+="assert not p.exists() and not p.is_symlink()\\n"
+    check="from pathlib import Path\n"
+    check+=f"p=Path({str(TMP)!r})\n"
+    check+="assert not p.exists() and not p.is_symlink()\n"
     docker_exec(check,timeout=12)
     expected_before=sha(original)
     if target_status()!=expected_before:
