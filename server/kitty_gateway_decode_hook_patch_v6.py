@@ -39,19 +39,39 @@ def _own_nodes(func):
 
 
 def _direct_decode(node, loopvar):
-    if not isinstance(node,ast.Assign) or len(node.targets)!=1:
+    """Only decode a value demonstrably obtained from the upstream loop item.
+
+    Two safe, narrow forms:
+      event = json.loads(msg)   (including an awaited call if supported)
+      event = msg.json()        (aiohttp upstream WSMessage)
+
+    Never accept another variable's .json(), a self-claimed client payload,
+    a transformed upstream alias, keyword arguments or any other target.
+    """
+    if not isinstance(node, ast.Assign) or len(node.targets) != 1:
         return False
-    if not isinstance(node.targets[0],ast.Name) or node.targets[0].id!="event":
+    target=node.targets[0]
+    if not isinstance(target, ast.Name) or target.id!="event":
         return False
     value=node.value
-    if (not isinstance(value,ast.Call)
-            or not isinstance(value.func,ast.Attribute)
-            or value.func.attr not in ("loads","load")
-            or len(value.args)!=1 or value.keywords):
+    if isinstance(value,ast.Await):
+        value=value.value
+    if not isinstance(value,ast.Call) or not isinstance(value.func,ast.Attribute):
         return False
-    # Direct json.loads(raw): strongly bind the decoded event to the single
-    # upstream loop, rather than reusing client-supplied objects.
-    return isinstance(value.args[0],ast.Name) and value.args[0].id==loopvar
+    if value.keywords:
+        return False
+    func=value.func
+    if (func.attr=="json" and not value.args
+            and isinstance(func.value,ast.Name)
+            and func.value.id==loopvar):
+        return True
+    if (func.attr in ("loads","load") and len(value.args)==1
+            and isinstance(func.value,ast.Name)
+            and func.value.id in ("json", "orjson")
+            and isinstance(value.args[0],ast.Name)
+            and value.args[0].id==loopvar):
+        return True
+    return False
 
 
 def _is_forward(node):
@@ -83,23 +103,37 @@ def _target(tree):
     if (len(loop.orelse)>0 or loop.target.id in ("event","ws")
             or len([n for n in _own_nodes(target) if _is_forward(n)])!=1):
         raise HookRefusal("provider_forward_ambiguous")
-    # Both direct event=json.loads(raw) and a single immediate try/except
-    # decoder are safe: the event still originates from the upstream loop.
-    first=loop.body[0] if loop.body else None
-    if isinstance(first,ast.Try):
-        group=first.body
-    elif isinstance(first,getattr(ast,"TryStar",ast.Try)):
-        group=first.body
-    else:
-        group=loop.body
-    if not group or not _direct_decode(group[0],loop.target.id):
-        raise HookRefusal("provider_decode_unrecognized")
-    stmt=group[0]
-    # Other decodes, including nested fallbacks, mean ambiguous origin.
+    # The deployed gateway has an early if-guard and a later DIRECT
+    # event=msg.json() assignment. A guard may precede the decoder, but we
+    # never touch the guard, provider loop or browser forwarding.
+    # Accept one unique decoder from the actual upstream loop item only.
+    direct=[]
+    for child in loop.body:
+        if _direct_decode(child,loop.target.id):
+            direct.append(child)
+        elif isinstance(child,(ast.Try,getattr(ast,"TryStar",ast.Try))):
+            if child.body and _direct_decode(child.body[0],loop.target.id):
+                direct.append(child.body[0])
     all_decodes=[n for n in _own_nodes(target)
                  if _direct_decode(n,loop.target.id)]
-    if len(all_decodes)!=1:
-        raise HookRefusal("provider_decode_ambiguous")
+    if len(direct)!=1 or len(all_decodes)!=1 or direct[0] is not all_decodes[0]:
+        raise HookRefusal("provider_decode_unrecognized")
+    stmt=direct[0]
+    # Allow only a straight-line decode or one directly inside a try. Do
+    # not splice inside nested conditions, function calls or alternative
+    # browser handlers where source attribution might be ambiguous.
+    pre=loop.body[:next((i for i,x in enumerate(loop.body)
+                         if x is stmt or (isinstance(x,(ast.Try,getattr(ast,"TryStar",ast.Try)))
+                            and stmt in x.body)),len(loop.body))]
+    if not all(isinstance(x,ast.If) and not x.orelse
+               and not any(isinstance(n,(ast.Assign,ast.AnnAssign,ast.NamedExpr))
+                           and any(isinstance(t,ast.Name) and t.id in
+                                   (loop.target.id,"event")
+                                   for t in (n.targets if isinstance(n,ast.Assign)
+                                             else [n.target]))
+                           for n in ast.walk(x))
+               for x in pre):
+        raise HookRefusal("provider_predecode_guard_unrecognized")
     if stmt.end_lineno is None or stmt.end_lineno!=stmt.lineno:
         raise HookRefusal("multiline_decode_unrecognized")
     return target,loop,stmt
