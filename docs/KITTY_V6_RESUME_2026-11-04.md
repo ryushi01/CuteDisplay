@@ -134,3 +134,38 @@ git show FETCH_HEAD:server/kitty_gateway_turn_shape_v6.py | sudo docker exec -i 
 ```
 
 The resulting `KITTY_V6_GATEWAY_TURN_SHAPE_READ_ONLY` status output is safe to share for version-matched staging design. **Do not assume** that a source marker means a working runtime issuer, or deploy the attested bridge merely because the source parses. The external independently trusted identity-verifier/signer is still not installed, and owner-only private recall remains off. Do not reflash either S3 or C5 for this Ubuntu-side analysis.
+
+## Gateway source-shape results and no-VAD adapter (2026-11-04)
+
+**New operator-confirmed facts from the actual Ubuntu `open-webui` container**, obtained using the approved read-only `kitty_gateway_turn_shape_v6.py` inspection (no source, secrets or transcripts exposed):
+
+```text
+source=readable
+python_syntax=valid
+function_client_events=once
+function_upstream_events=absent
+function_kitty_speaker_sink=once
+client_to_provider_event_forward=absent
+provider_to_client_event_forward=multiple
+public_memory_refresh=present
+public_profile=present
+speaker_observer=present
+speaker_result=present
+semantic_request=present
+upstream_speech_started=absent
+upstream_speech_stopped=absent
+upstream_transcription_complete=present
+owner_grant_reference=absent
+trusted_turn_issuer=absent
+legacy_voice_gate=present
+trust_issuer_operational=not_verified
+safe_to_enable_owner_history=no
+```
+
+Markers reflect literal source strings and AST declarations, **not runtime proof** of which provider events are received. In particular, `provider_to_client_event_forward=multiple` is a whole-file string count, and `upstream_speech_started=absent` only means there is no explicit literal event handler in this revision. It does not establish that the provider never sends VAD events. **Do not apply** any older patch expecting a unique whole-file `await ws.send_json(event)` or an `upstream_events()` function; that shape does not match this deployment.
+
+To handle the actual observed shape, added source-only `server/kitty_gateway_turn_adapter_v6.py`, tested in `server/test_kitty_gateway_turn_adapter_v6.py`. The passive adapter consumes only **authenticated upstream-provider** transcription events, supports explicit VAD events when present, and falls back to the provider's own completed item ID when no explicit VAD stop is present. It never derives a speaker identity from those items, and ignores user/S3-provided `kitty.speaker.result` and `kitty.memory.semantic` claims. A separate external trusted issuer must sign the exact randomly generated call ID, item ID and transcript; without that signer, the adapter cannot return private context. Unknown, cancelled, replayed, changed-speaker and disconnected turns revoke authorization; 120-turn rolling notes are covered by offline tests. No other inference worker, filesystem storage, or direct changes to the existing realtime socket forwarding are introduced.
+
+**Current remaining blocker:** There is no real independently trusted speaker-to-microphone-turn attestation issuer or live per-item owner-grant transport; the gateway also lacks `owner_grant` and `AttestedLiveCall` references. Source-only tests generate synthetic signatures and cannot validate real human identity. Adding a signature whose issuer only believes a `voice_probable` match would be a privacy regression. Do not enable owner-private automatic recall, persistent owner fact writing or a live gateway patch until the trust issuer and exact provider event forwarding scope have been reviewed on a *staged* gateway copy.
+
+**No Ubuntu commands are required for this source-only checkpoint.** Preserve the working `kitty-memory-v6.service` owner-grant 403 protection, Open WebUI realtime voice, C5 v38 BLE, S3 SD authority and Mac AI/TTS. The next safe engineering action is to build a trusted speaker-proof issuance channel and version-checked, opt-in integration in staging. If a code checkout for the real gateway is needed, obtain it without printing personal prompts, service environment, bearer tokens or entire private `realtime.py` in chat.
