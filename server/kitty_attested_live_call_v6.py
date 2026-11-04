@@ -29,6 +29,7 @@ MAX_TURN_BYTES = 1200
 MAX_TURNS_PER_CALL = 2048
 MAX_WAITING_TURNS = 8
 MAX_TICKET_TTL = 15
+AUDIO_HASH = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def _b64(data):
@@ -51,7 +52,8 @@ def _digest(transcript):
 
 
 def issue_external_attestation(secret, *, session_id, item_id, transcript,
-                               speaker_id, speaker_role, now=None, ttl=10):
+                               speaker_id, speaker_role, now=None, ttl=10,
+                               audio_sha256=None):
     """Issuer-side protocol helper ONLY; caller must verify a human separately.
 
     This function is not a speaker classifier and is never invoked by the
@@ -65,6 +67,9 @@ def issue_external_attestation(secret, *, session_id, item_id, transcript,
             or (speaker_role, speaker_id) not in (("owner", "person:owner"),)
                 and (speaker_role != "guest" or speaker_id in
                      ("person:owner", RESERVED_OWNER_LOCAL_ID))
+            or (audio_sha256 is not None and (
+                not isinstance(audio_sha256, str)
+                or not AUDIO_HASH.fullmatch(audio_sha256)))
             or digest is None or type(ttl) is not int
             or not 1 <= ttl <= MAX_TICKET_TTL):
         raise ValueError("invalid attestation")
@@ -80,20 +85,27 @@ def issue_external_attestation(secret, *, session_id, item_id, transcript,
         "exp": now + ttl,
         "nonce": secrets.token_urlsafe(12),
     }
+    if audio_sha256 is not None:
+        # The independent issuer must have verified these exact microphone
+        # bytes, not merely signed a voice classification or transcript.
+        fields["audio_sha256"] = audio_sha256
     body = _b64(json.dumps(fields, sort_keys=True, separators=(",", ":")).encode())
     signature = _b64(hmac.new(secret, body.encode("ascii"), hashlib.sha256).digest())
     return body + "." + signature
 
 
 def verify_external_attestation(secret, ticket, *, session_id, item_id,
-                                transcript, now=None):
-    """Return only externally signed speaker/role or None; never echo payload."""
+                                transcript, now=None, audio_sha256=None):
+    """Return signed speaker/role, optionally bound to the exact audio bytes."""
     digest = _digest(transcript)
     if (not isinstance(secret, bytes) or len(secret) < 32
             or not isinstance(ticket, str) or len(ticket) > 1024
             or not isinstance(session_id, str) or not SESSION.fullmatch(session_id)
             or not isinstance(item_id, str) or not ITEM.fullmatch(item_id)
-            or digest is None):
+            or digest is None
+            or (audio_sha256 is not None and (
+                not isinstance(audio_sha256, str)
+                or not AUDIO_HASH.fullmatch(audio_sha256)))):
         return None
     try:
         parts = ticket.split(".")
@@ -109,6 +121,10 @@ def verify_external_attestation(secret, ticket, *, session_id, item_id,
         if (not isinstance(obj, dict) or obj.get("aud") != AUDIENCE
                 or obj.get("sid") != session_id or obj.get("item") != item_id
                 or obj.get("digest") != digest
+                or (obj.get("audio_sha256") is not None and
+                    obj.get("audio_sha256") != audio_sha256)
+                or (audio_sha256 is not None and
+                    obj.get("audio_sha256") != audio_sha256)
                 or type(obj.get("iat")) is not int
                 or type(obj.get("exp")) is not int
                 or not obj["iat"] <= now < obj["exp"]
