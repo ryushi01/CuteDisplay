@@ -125,7 +125,11 @@ def learn_verified_owner_utterance(profile, raw_wav, *, session_id, item_id,
     vector=_unit(embedding_fn(raw_wav))
     anchors=profile.get("anchor_embeddings",profile.get("embeddings",()))
     anchor_score=_median_similarity(vector,anchors)
-    if anchor_score < MIN_SCORE:
+    floor=profile.get("min_genuine_floor",MIN_SCORE)
+    if (type(floor) not in (float,int) or not math.isfinite(floor)
+            or not MIN_SCORE<=floor<=1.0):
+        raise ValueError("invalid_model_specific_floor")
+    if anchor_score < floor:
         raise ValueError("outside_protected_enrollment_voice")
     if not isinstance(other_profiles,(list,tuple)):
         raise ValueError("invalid_competitor_profiles")
