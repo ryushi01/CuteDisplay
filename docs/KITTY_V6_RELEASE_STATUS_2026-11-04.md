@@ -128,3 +128,19 @@ These values confirm the running gateway bytes match the saved patched candidate
 **Next operator check, read-only:** inspect the installed source for exactly one passive hook marker and call, confirm helper import/instance creation from `/app/backend`, and compare source SHA to the saved `after` digest. Then have one short real Kitty call and confirm ordinary realtime voice, healthy Open WebUI and unchanged private-history denial. Passive observation produces no persistent counters/logs by default; a healthy call alone cannot demonstrate the hook received events. Design opt-in, non-content event-count diagnostics if needed, without logging transcript/audio or enabling owner-grant paths.
 
 **Remain gated:** trusted microphone-to-provider-item provenance, independently verified turn tickets, owner-grant-bound recall, consent-based learning and uninterrupted long-call memory acceptance. Preserve S3 SD memory authority, verified Ubuntu guards, v38 hardware, and private service settings. C5 v39 display release remains a separate physical acceptance task.
+
+
+## Operator-confirmed live passive hook checksum and initialization
+
+The Ubuntu operator ran the read-only validation against the active Open WebUI container after the installed candidate check. The actual outputs were:
+
+```text
+KITTY_V6_LIVE_HOOK_CHECK
+gateway_sha=matched
+passive_hook=present
+helper_initialization=passed
+```
+
+This establishes that the mounted live gateway matches the recorded candidate, has exactly one marker and one observer call, compiles, and the passive helper can be constructed with a session ID and closed in the current container environment. The validation did **not** send an actual provider event or establish end-to-end observation, live memory retrieval, independent speaker verification, or long-call persistence.
+
+**Next:** one normal, short realtime Kitty call on the currently running S3 and C5 v38 to verify audio, conversational response, and normal end/return to idle. Optional second turn with an interruption; no memory enrollment or private-history test until an independent speaker issuer is connected. After the call, read-only Open WebUI health check; report voice/call behavior. Do not reinstall gateway or reflash either board. If successful, plan an opt-in privacy-safe provider event observation diagnostic and separately integrate the trusted server-issued speaker attestation before authorizing any owner memory.
