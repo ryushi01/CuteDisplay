@@ -29,12 +29,10 @@ class PassiveTurnBridgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_signed_exact_provider_turn_preserves_early_decision(self):
         now=1900000000
-        import kitty_attested_live_call_v6 as module
-        original=module.time.time
-        module.time.time=lambda:now
-        try:
-            bridge=KittyPassiveTurnBridge(issuer_secret=ISSUER,
-                                          owner_grant_secret=OWNER)
+        bridge=KittyPassiveTurnBridge(issuer_secret=ISSUER,
+                                      owner_grant_secret=OWNER,
+                                      wall_clock=lambda:now)
+        if True:
             def signed(item,transcript):
                 ticket=issue_external_attestation(
                     ISSUER,session_id=bridge.session_id,item_id=item,
@@ -51,8 +49,6 @@ class PassiveTurnBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("microSD authority",context)
             self.assertEqual(await bridge.context_for_verified_item("t0"),"")
             bridge.close()
-        finally:
-            module.time.time=original
 
     async def test_cancel_and_new_speaker_dismiss_queued_context(self):
         bridge=KittyPassiveTurnBridge(issuer_secret=ISSUER,
