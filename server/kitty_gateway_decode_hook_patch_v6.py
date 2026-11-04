@@ -88,7 +88,7 @@ def _target(tree):
     first=loop.body[0] if loop.body else None
     if isinstance(first,ast.Try):
         group=first.body
-    elif isinstance(first,ast.TryStar):
+    elif isinstance(first,getattr(ast,"TryStar",ast.Try)):
         group=first.body
     else:
         group=loop.body
