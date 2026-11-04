@@ -363,3 +363,23 @@ git show FETCH_HEAD:server/kitty_gateway_passive_rollout_v6.py | python3 - --app
 ```
 
 Success markers: `gateway_hook=installed`, `gateway_health=healthy`, `provider_forwarding=unchanged`, `private_recall=disabled`, `automatic_voice_learning=disabled`. If it still rejects the private layout, do not rerun; copy only the `rollout_error` label. The C5 v39 black transparent-caption firmware remains source/CI-ready but no hardware flash has been performed. Long-call live memory, real per-turn owner authentication and hands-free voice learning are still release gates.
+
+## Passive gateway source backup succeeded but staging failed — 2026-11-04
+
+The operator's next guarded gateway rollout attempt printed:
+```text
+KITTY_V6_PROVIDER_PASSIVE_ROLLOUT
+source_backup=created
+rollback=no_gateway_change
+rollout_error=deployment_failed
+```
+
+This distinguishes it from the earlier source-layout refusal. The strict source patcher accepted the live gateway and the host-owned source backup was created. The transaction failed **inside the staging/apply phase before the new realtime.py was atomically installed**. The installer explicitly reported rollback=no_gateway_change; no Open WebUI restart was reported. The old generic deployment_failed label hid whether the failure was helper copy, Python import, temporary candidate copy, or permission/atomic replacement. We cannot assert the precise stage without a stage-specific log.
+
+Updated on main:
+- `server/kitty_gateway_passive_rollout_v6.py` now emits only bounded fixed failure-stage labels (`copy_helpers`, `preimport`, `copy_candidate`, `atomic_replace`, `restart`, `commit_state`) rather than a generic label or traceback.
+- The atomic replace and hash-verified staging-file cleanup now use explicit container uid 0 only for controlled on-disk operations. The regular Open WebUI runtime user and the preimport check remain unchanged. Exact original ownership/group/mode are preserved.
+- A previous completed `rolled_back` manifest is allowed to identify and remove an orphan temp file **only if both the original gateway checksum and staged-file checksum match**; otherwise it refuses without deleting unrelated files.
+- New offline tests cover exact-checksum cleanup and privileged-only atomic operations; the existing full audio-forwarding checks remain in CI.
+
+Operator must not rerun the old revision. On a fresh FETCH_HEAD, an **idle-only** single retry with the updated host-side installer is the planned next operation; if it reports `deployment_failed:<stage>`, stop and provide the short stage string, without disclosing private source, logs, secrets or data. The standalone memory-service private 403 guard remains installed and should not be repeated. The currently operating C5 v38 is unchanged; C5 v39 black captions over Kitty-chan are code/CI-ready but not flashed.
