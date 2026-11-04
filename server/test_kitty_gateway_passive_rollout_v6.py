@@ -84,6 +84,35 @@ class RolloutSafetyTests(unittest.TestCase):
             self.assertEqual(str(cm.exception),"gateway_not_healthy")
             git.assert_not_called()
 
+    def test_fixed_candidate_cleanup_is_hash_verified_and_admin_only(self):
+        expected=d.sha(b"owned staged candidate")
+        with patch.object(d,"docker_exec_admin",return_value=b"") as admin:
+            d.discard_known_candidate(expected)
+            args=admin.call_args.args[0]
+            self.assertIn(expected,args)
+            self.assertIn("assert not p.is_symlink()",args)
+            self.assertIn("p.unlink()",args)
+        for invalid in ("", "g"*64, "a"*63):
+            with self.assertRaises(d.DeployRefusal):
+                d.discard_known_candidate(invalid)
+
+    def test_fixed_candidate_cleanup_never_claims_foreign_file_safe(self):
+        with patch.object(d,"docker_exec_admin",
+                          side_effect=d.DeployRefusal("system_command_failed")):
+            with self.assertRaises(d.DeployRefusal) as cm:
+                d.discard_known_candidate(d.sha(b"expected"))
+            self.assertEqual(str(cm.exception),"staging_file_conflict")
+
+    def test_privileged_docker_exec_does_not_change_runtime_user(self):
+        with patch.object(d,"docker",return_value=b"ok") as docker:
+            self.assertEqual(d.docker_exec_admin("print('ok')"),b"ok")
+            args=docker.call_args.args
+            self.assertEqual(args[:7],("exec","--user","0","-w",
+                                       "/app/backend","open-webui","python3"))
+        with patch.object(d,"docker",return_value=b"ok") as docker:
+            d.docker_exec("print('ok')")
+            self.assertNotIn("--user",docker.call_args.args)
+
     def test_restore_refuses_hash_conflict_or_missing_backup(self):
         with tempfile.TemporaryDirectory() as root:
             backup=Path(root)/"private.py"
