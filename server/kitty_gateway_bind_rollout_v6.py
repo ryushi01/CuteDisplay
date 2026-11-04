@@ -160,6 +160,51 @@ def host_file_stat(path):
     except OSError:
         raise Refusal("host_source_read_denied") from None
 
+ROOT_STAT_HELPER=r'''import hashlib,json,os,stat,sys
+path=sys.argv[1]
+assert os.path.isabs(path) and os.path.realpath(path)==path
+fd=os.open(path,os.O_RDONLY|getattr(os,"O_NOFOLLOW",0))
+try:
+ info=os.fstat(fd)
+ assert stat.S_ISREG(info.st_mode) and info.st_nlink==1
+ digest=hashlib.sha256()
+ total=0
+ while True:
+  chunk=os.read(fd,131072)
+  if not chunk:break
+  total+=len(chunk)
+  assert total<=2000000
+  digest.update(chunk)
+ assert total>0
+ print(json.dumps({"dev":info.st_dev,"ino":info.st_ino,
+   "mode":stat.S_IMODE(info.st_mode),"uid":info.st_uid,"gid":info.st_gid,
+   "sha":digest.hexdigest()}))
+finally:os.close(fd)
+'''
+
+def verified_host_stat(path):
+    """Read host file metadata without requiring user access to a root file.
+
+    Prefer normal unprivileged access; sudo fallback prints fixed JSON only.
+    Neither mode prints the source path or any file contents.
+    """
+    try:
+        return host_file_stat(path)
+    except Refusal as err:
+        if str(err)!="host_source_read_denied":
+            raise
+    try:
+        obj=json.loads(cmd(["sudo","python3","-c",ROOT_STAT_HELPER,path],
+                           timeout=20))
+    except (Refusal,ValueError,UnicodeError,TypeError):
+        raise Refusal("host_source_metadata_denied") from None
+    if (not isinstance(obj,dict)
+            or set(obj)!={"dev","ino","mode","uid","gid","sha"}
+            or any(type(obj[k]) is not int for k in ("dev","ino","mode","uid","gid"))
+            or type(obj["sha"]) is not str or len(obj["sha"])!=64):
+        raise Refusal("host_source_metadata_invalid")
+    return obj
+
 def overwrite_same_inode(path, incoming, expected, original):
     """This runs as root, only while Docker is STOPPED in normal deployment.
 
@@ -315,7 +360,7 @@ def apply():
     ref=git_sha()
     source=mounted_host_source()
     original=source_in_container()
-    hostmeta=host_file_stat(source)
+    hostmeta=verified_host_stat(source)
     if hostmeta["sha"]!=sha(original):
         raise Refusal("host_container_source_mismatch")
     try:updated=patcher_from_git(ref).patch(original.decode("utf-8")).encode()
@@ -379,7 +424,7 @@ def apply():
         if not wait_healthy():raise Refusal("gateway_health_failed")
         phase="verify"
         if (sha(source_in_container())!=tx["after"]
-                or host_file_stat(source)["sha"]!=tx["after"]):
+                or verified_host_stat(source)["sha"]!=tx["after"]):
             raise Refusal("deployed_content_mismatch")
         tx["status"]="installed"
         save(tx)
@@ -396,7 +441,7 @@ def apply():
             # An error before stop leaves the realtime source unchanged.
             # Do not interrupt a healthy call service merely to clean helpers.
             if phase in ("copy_helpers","preimport"):
-                if host_file_stat(source)["sha"]!=tx["before"]:
+                if verified_host_stat(source)["sha"]!=tx["before"]:
                     raise Refusal("source_changed_during_staging")
                 if state()=="running":
                     remove_created(created,tx["helper_hashes"])
@@ -410,7 +455,7 @@ def apply():
                     docker("stop",CONTAINER,timeout=70)
                 if sha(backup.read_bytes())!=tx["before"]:
                     raise Refusal("backup_corrupt")
-                current_sha=host_file_stat(source)["sha"]
+                current_sha=verified_host_stat(source)["sha"]
                 if current_sha==tx["after"]:
                     root_write(source,original,tx["after"],hostmeta)
                 elif current_sha!=tx["before"]:
@@ -434,7 +479,7 @@ def rollback():
     if current_source!=tx["host_source"]:raise Refusal("mount_changed")
     original=Path(tx["backup"]).read_bytes()
     if sha(original)!=tx["before"]:raise Refusal("backup_corrupt")
-    metadata=host_file_stat(current_source)
+    metadata=verified_host_stat(current_source)
     if metadata["sha"]!=tx["after"]:raise Refusal("rollback_conflict")
     for key in ("dev","ino","mode","uid","gid"):
         if metadata[key]!=tx["host_meta"][key]:raise Refusal("host_inode_changed")
