@@ -15,8 +15,12 @@ class DisplayContract(unittest.TestCase):
         source = (ROOT/"firmware/CuteDisplay/C5CallFace.h").read_text()
         start = source.index("static void drawFullScreenKittyFace()")
         face = source[start:]
-        self.assertIn("const int panelY=136;", face)
-        self.assertIn("const int panelH=34;", face)
+        # C5 v39: captions are black glyphs directly over the animated
+        # Kitty face; no opaque dark caption rectangle remains.
+        self.assertIn("const int captionY=40;", face)
+        self.assertIn("richText(rows[i],6,captionY+i*16,1,1,BLACK,316);", face)
+        self.assertNotIn("const int panelY=136;", face)
+        self.assertNotIn("const int panelH=34;", face)
         self.assertNotIn("transcript=callCaptionPrevious", face)
         self.assertIn("uint8_t emotion=", face)
         self.assertIn("const int lx=117+gaze,rx=203+gaze", face)
