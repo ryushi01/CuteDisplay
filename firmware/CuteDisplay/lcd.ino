@@ -2986,6 +2986,8 @@ void c5OTARedraw(){
 }
 static void serviceBrain() {
  CuteLink::Frame f;
+ // Batch high-frequency caption and lip UART frames into one LCD transfer.
+ bool callFrameRedraw=false;
  for(int n=0;n<12&&s3Reader.poll(Serial1,f);++n){
   lastS3=millis();
   if(!s3Online){
@@ -3153,7 +3155,7 @@ static void serviceBrain() {
      }
      if(callCaption.length()+f.payload.length()-1<=768)
       callCaption+=f.payload.substring(1);
-     if(lcdReady)redrawCurrent();
+     if(lcdReady)callFrameRedraw=true;
     }
    }
   }
@@ -3162,7 +3164,7 @@ static void serviceBrain() {
       f.payload[0]>='0'&&f.payload[0]<='9'){
     uint8_t next=(uint8_t)(f.payload[0]-'0');
     callLipAt=millis();
-    if(callLipLevel!=next){callLipLevel=next;if(lcdReady)redrawCurrent();}
+    if(callLipLevel!=next){callLipLevel=next;callFrameRedraw=true;}
    }
   }
    else if(f.type=="AI_BEGIN"){
@@ -3224,6 +3226,7 @@ static void serviceBrain() {
    }
   }else CuteLink::send(Serial1,f.seq,"NACK","Unknown request");
  }
+ if(callFrameRedraw && lcdReady && !C5UARTOTA::active())redrawCurrent();
  uint32_t now=millis();
  if(s3Online&&(uint32_t)(now-lastS3)>BRAIN_LOST_MS){
    callModeActive=false;callStopPending=false;callFaceMood=1;callLipLevel=0;
