@@ -9,6 +9,7 @@ import base64
 import collections
 import io
 import json
+import math
 import os
 import struct
 import wave
@@ -126,7 +127,12 @@ def _request_identify(socket_path, token, audio):
             candidate = obj.get("candidate_speaker_id")
             if not (isinstance(candidate,str) and candidate.startswith("person:") and len(candidate)<64):
                 candidate = "unknown"
-            return {"authorized":"unknown", "candidate":candidate}
+            score=obj.get("candidate_score")
+            if (type(score) not in (float,int) or not math.isfinite(score)
+                    or not 0.960<=score<=1.0):
+                score=None
+            return {"authorized":"unknown", "candidate":candidate,
+                    "candidate_score":score}
         if obj.get("confidence") != "probable":
             return {"authorized":"unknown","candidate":"unknown"}
         sid = obj.get("speaker_id")
@@ -157,6 +163,11 @@ async def identify_turn(url, token, item_id, pcm24, *, timeout=12.0):
         match = {"authorized":"unknown","candidate":"unknown"}
     sid = match.get("authorized","unknown")
     candidate = match.get("candidate","unknown")
-    return {"type":"kitty.speaker.result","item_id":item_id,
+    result={"type":"kitty.speaker.result","item_id":item_id,
             "speaker_id":sid,"confidence":"probable" if sid!="unknown" else "unknown",
             "candidate_speaker_id":candidate}
+    score=match.get("candidate_score")
+    if (candidate!="unknown" and type(score) in (float,int)
+            and math.isfinite(score) and 0.960<=score<=1.0):
+        result["candidate_score"]=score
+    return result
