@@ -408,3 +408,42 @@ git show FETCH_HEAD:server/kitty_gateway_atomic_mount_probe_v6.py | python3 -
 ```
 
 Do not restart the container or edit the mount source before this status is available. If the target is an exact-file bind mount, replace the deployment strategy with a verified host-source transaction and safe rollback; never force a rename over the mounted file. If the target is an ordinary container overlay path, introduce a bounded errno-only atomic rename failure classifier, preserving original source and speaker permissions. The earlier separate Ubuntu memory-service 403 guard and C5 v39 compilation remain unchanged. Voice learning and owner history are still off.
+
+## RO single-file Open WebUI bind confirmed — safe host-inode rollout
+
+Operator read-only probe of the active `open-webui` container confirmed:
+
+```text
+KITTY_V6_GATEWAY_ATOMIC_REPLACE_READ_ONLY
+mount_layout=file_bind
+mount_write_mode=ro
+target_is_mountpoint=yes
+target_is_regular_file=yes
+parent_writable_for_root=yes
+filesystem_readonly=no
+known_staging_candidate=no
+inspect_uid=root
+diagnosis=single_file_mount_possible
+```
+
+**Conclusive blocker:** the live `realtime.py` itself is a single-file READ-ONLY Docker bind mount. `os.replace(candidate, realtime.py)` INSIDE the container cannot work, even under root; earlier errors `deployment_failed:atomic_replace` were expected. Stop trying that path and do NOT disable the RO bind, replace Compose, or recreate the entire container.
+
+New `server/kitty_gateway_bind_rollout_v6.py` is the one-command host-side alternative. It requires exactly one RO single-file bind for the expected container path, pins the live Docker Source internally (never displays the host path), verifies that the host and container source bytes match, validates host metadata dev/inode/ownership/mode and a write-open preflight that DOES NOT change content, saves a private 0700/0600 byte-identical source backup, and applies the tested exact AST passive provider event patch offline. Only absent, byte-identical expected helper modules are staged. After helper import succeeds, it STOPS only `open-webui`, rewrites the ORIGINAL host inode in place with a bounded host-root writer, then STARTS the SAME container and verifies Docker health plus matching host+container source checksum. On unsuccessful startup with an exact file match, it restores the original bytes in-place and restarts, with safe refusal on unknown mutation.
+
+Changes deliberately NOT made: no modified S3/C5 firmware, no change to the protected memory service/403 owner grant, no private owner recall, no automatic speaker profile learning, no Mac model/TTS changes, no SD writes and no model prompt injection. The passive observer simply sees authentic provider transcript/event metadata. This **does not finish V6 speaker authentication or persistent memory**.
+
+CI targeted test `server/test_kitty_gateway_bind_rollout_v6.py` covers RO bind verification, a real local inode-preserving write and back, host mode/owner stability, exact hash mismatches, private backups, root metadata fallback, no-byte-change write preflight, mock full stop/start install and failed-health rollback. Its GitHub Actions step passed on Nov 4. Full combined firmware CI may still be running, and is unrelated to this server-only patch.
+
+**Use only this new script**, when Kitty is fully idle:
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_gateway_bind_rollout_v6.py | python3 - --apply
+```
+
+Expected success markers: `KITTY_V6_READONLY_BIND_GATEWAY_ROLLOUT`, `backup=verified`, `gateway_hook=installed`, `gateway_health=healthy`, `host_inode=preserved`, `provider_forwarding=unchanged`, `private_recall=disabled`, `automatic_voice_learning=disabled`, `firmware_and_SD=unchanged`. If a `rollout_error` or `failed_phase` appears, STOP and return only those fixed labels plus any rollback status. Manual recovery from an interrupted in-place write must preserve the verified private backup; do not rerun old scripts or flash S3/C5.
+
+Current actual hardware C5 remains v38; C5 v39 transparent black conversation captions over Kitty-chan completed its source and combined firmware build tests but is NOT installed on hardware.
+
+After a successful passive gateway rollout, verify normal realtime audio with ONE short call before advancing to independently trusted per-turn owner authentication and memory learning.
