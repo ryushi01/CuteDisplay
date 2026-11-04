@@ -122,6 +122,26 @@ class PostCallLearningTests(unittest.TestCase):
         self.assertFalse(self.worker.finish_call(background=False))
         self.assertEqual(self.saved,0)
 
+    def test_consent_absent_at_call_start_never_retains_microphone_audio(self):
+        self.profile["adaptive_learning_consent"]=False
+        self.assertFalse(self.worker.begin_call(self.call))
+        self.assertFalse(self.offer())
+        self.assertIsNone(self.worker._pending)
+        self.assertFalse(self.worker.finish_call(background=False))
+
+    def test_cancel_during_attestation_validation_cannot_queue_late_sample(self):
+        from unittest import mock
+        self.assertTrue(self.worker.begin_call(self.call))
+        def late_verdict(*args,**kwargs):
+            self.worker.cancel()
+            return ("person:owner","owner")
+        with mock.patch("kitty_owner_voice_postcall_v6.verify_external_attestation",
+                        side_effect=late_verdict):
+            self.assertFalse(self.offer())
+        self.assertIsNone(self.worker._pending)
+        self.assertFalse(self.worker.finish_call(background=False))
+        self.assertEqual(self.saved,0)
+
     def test_stale_samples_are_discarded(self):
         self.worker.begin_call(self.call)
         self.assertTrue(self.offer())
