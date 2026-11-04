@@ -40,7 +40,10 @@ class LiveCallContinuity:
         self.max_context_bytes=max(300,min(2000,int(max_context_bytes)))
         self.recent=deque(maxlen=max(1,min(8,int(recent_turns))))
         self.pinned=deque(maxlen=max(1,min(16,int(pinned_turns))))
-        self.seen=deque(maxlen=48)
+        # Retain exact item IDs for the entire call: an old item must never
+        # become replayable after 48 later turns.
+        self.seen=set()
+        self.max_seen=2048
         self.lock=threading.Lock()
         self.session=""
         self.speaker=""
@@ -49,11 +52,12 @@ class LiveCallContinuity:
         self.speaker=""
         self.recent.clear()
         self.pinned.clear()
-        self.seen.clear()
+        # Seen item IDs remain reserved across speaker/unknown turn changes.
 
     def begin_call(self, trusted_session_id):
         with self.lock:
             self._clear()
+            self.seen.clear()
             self.session=(trusted_session_id
                           if isinstance(trusted_session_id,str)
                           and 8<=len(trusted_session_id)<=100 else "")
@@ -61,6 +65,7 @@ class LiveCallContinuity:
     def end_call(self):
         with self.lock:
             self._clear()
+            self.seen.clear()
             self.session=""
 
     def _trusted(self, attribution, trusted_item_id):
@@ -90,7 +95,10 @@ class LiveCallContinuity:
             self.speaker=speaker
             if item in self.seen:
                 return False
-            self.seen.append(item)
+            if len(self.seen)>=self.max_seen:
+                self._clear()
+                return False
+            self.seen.add(item)
             clean=_clean(transcript)
             if not clean:
                 return False
@@ -104,6 +112,7 @@ class LiveCallContinuity:
         with self.lock:
             identity=self._trusted(attribution,trusted_item_id)
             if identity is None or identity[0]!=self.speaker:
+                self._clear()  # A read from an uncertain/new speaker revokes notes.
                 return ""
             notes=list(self.pinned)
             notes.extend(x for x in self.recent if x not in notes)
