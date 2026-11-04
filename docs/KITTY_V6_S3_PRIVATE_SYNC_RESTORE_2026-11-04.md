@@ -40,3 +40,10 @@ The build does **not** upload or flash either device. When deciding to flash lat
 ## Separate release gates
 
 Re-enabling snapshot sync does not enable private owner recall. Independently trusted per-turn speaker attestation, protected owner grants, and correct context injection must still be integrated before Kitty can safely recall owner-private previous-day conversations. Preserve C5 v38, the working gateway observer and SD authority throughout.
+
+
+## Existing private configuration files found and CI confirmed
+
+Operator read-only `find` on `ai-server` confirmed **eight** existing local `KittySyncPrivateConfig.h` copies: the top-level `~/kitty-v6/private/kitty-sync-deployment/KittySyncPrivateConfig.h` and seven previous locally prepared firmware-release copies (`release-v6-validated-b0ebdf`, `release-live-sync`, `release-v6-sync-7cef7223`, `release-audio-protected`, `release-diagnostic`, `release-v6-mic-fc274c`, `release-v6-frozen-dec472a`). **Do not regenerate or transmit the token or PEM unless later required.** Check in memory that the canonical header has the required macros, expected exact URL, token length and PEM shape; compare field equality with the old release copies without printing values or hashes. A presence-only `find` is not proof these files contain currently valid credentials.
+
+GitHub Actions full firmware workflow run [41795944784](https://github.com/ryushi01/CuteDisplay/actions/runs/41795944784) completed **success** for `d9ad7f9d...`, including the fake-compiler private build safety test and the public S3-only compilation. Later changes (`.gitignore`, documentation) do not affect compiled firmware; the final local credential-bearing build remains **unperformed**. Continue with a read-only local toolchain/header preflight before attempting one private build or an operator-controlled S3-only flash.
