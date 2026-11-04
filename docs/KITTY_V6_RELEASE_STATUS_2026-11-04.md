@@ -144,3 +144,20 @@ helper_initialization=passed
 This establishes that the mounted live gateway matches the recorded candidate, has exactly one marker and one observer call, compiles, and the passive helper can be constructed with a session ID and closed in the current container environment. The validation did **not** send an actual provider event or establish end-to-end observation, live memory retrieval, independent speaker verification, or long-call persistence.
 
 **Next:** one normal, short realtime Kitty call on the currently running S3 and C5 v38 to verify audio, conversational response, and normal end/return to idle. Optional second turn with an interruption; no memory enrollment or private-history test until an independent speaker issuer is connected. After the call, read-only Open WebUI health check; report voice/call behavior. Do not reinstall gateway or reflash either board. If successful, plan an opt-in privacy-safe provider event observation diagnostic and separately integrate the trusted server-issued speaker attestation before authorizing any owner memory.
+
+
+## After-call outcome: live audio healthy; historical recall still pending
+
+The Ubuntu operator confirmed the passive gateway source matched its transaction candidate, the hook marker and call were present once, and helper initialization passed. After a normal Kitty conversation, Open WebUI reported `running healthy` and `kitty-memory-v6.service` was `active`. The operator reported that the call itself works normally but Kitty does not appear to recall conversations from earlier days. This is **expected while private cross-call owner history remains gated**, but it does not establish whether S3 still contains specific memories. The passive provider observer does not perform semantic retrieval, context injection, trusted voice attestation or automatic voice learning.
+
+**Read-only next step:** `server/kitty_v6_memory_readiness_probe.py` inspects the running user service's selected configuration, the newest finalized S3-derived snapshot's five memory-file presence states, and metadata-only row counts of the derived semantic SQLite cache. It does not print secrets, paths, memory texts, voice IDs or transcripts; does not call the memory API, restart services or write files. Its SQLite inspection uses an immutable read-only view (counts may lag an active WAL writer). Operator command:
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_v6_memory_readiness_probe.py | python3 -
+```
+
+Inspect `snapshot`, `summaries`, `conversations`, `index`, `indexed_rows`, `attributed_rows`, and `auto_refresh_enabled` before changing any code. If environment is unreadable, do **not** copy or print memory-service environment variables or tokens; use a separate minimal diagnostic. Six local contract tests passed including absence of private data in output, symlink refusal and non-writing SQLite access. These checks diagnose archive and indexing readiness, not end-to-end speaker-bound recall.
+
+**Release constraint remains unchanged:** Keep the S3 microSD as authority, preserve private histories and voice profiles, do not disable the owner-grant 403 rule, and do not reinstall or flash firmware as part of this diagnostic.
