@@ -298,6 +298,34 @@ finally:os.close(fd)
 sys.stdout.write("verified\n")
 '''
 
+ROOT_OPEN_PREFLIGHT=r'''import hashlib,json,os,stat,sys
+path=sys.argv[1]
+meta=json.loads(sys.argv[2])
+assert os.path.isabs(path) and os.path.realpath(path)==path
+fd=os.open(path,os.O_RDWR|getattr(os,"O_NOFOLLOW",0))
+try:
+ st=os.fstat(fd)
+ assert stat.S_ISREG(st.st_mode) and st.st_nlink==1
+ assert [st.st_dev,st.st_ino,st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode)]==[
+  meta["dev"],meta["ino"],meta["uid"],meta["gid"],meta["mode"]]
+ digest=hashlib.sha256()
+ while True:
+  chunk=os.read(fd,131072)
+  if not chunk:break
+  digest.update(chunk)
+ assert digest.hexdigest()==meta["sha"]
+finally:os.close(fd)
+print("host_write_open_verified")
+'''
+
+def preflight_host_writable(source,metadata):
+    """Check write-access by opening only; no bytes change or truncation."""
+    out=cmd(["sudo","python3","-c",ROOT_OPEN_PREFLIGHT,source,
+             json.dumps(metadata,sort_keys=True)],timeout=18)
+    if out!=b"host_write_open_verified\n":
+        raise Refusal("host_write_preflight_failed")
+
+
 def source_in_container():
     b=docker("exec",CONTAINER,"cat",LIVE,timeout=22)
     if not 1<=len(b)<=2_000_000:raise Refusal("container_source_invalid")
@@ -367,6 +395,9 @@ def apply():
     except (UnicodeError,ValueError,TypeError,SyntaxError):
         raise Refusal("source_shape_incompatible") from None
     if updated==original:raise Refusal("source_unmodified")
+    # Before stopping Open WebUI, prove that the underlying host RO bind
+    # SOURCE is actually writable by host root without changing any bytes.
+    preflight_host_writable(source,hostmeta)
     names={n:github_file(ref,n) for n in HELPERS}
     inventory=helper_inventory()
     created=[]
