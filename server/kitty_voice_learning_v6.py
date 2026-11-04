@@ -111,7 +111,7 @@ def learn_verified_owner_utterance(profile, raw_wav, *, session_id, item_id,
     identity=verify_external_attestation(
         speaker_signer_secret,signed_turn_ticket,session_id=session_id,
         item_id=item_id,transcript=transcript,
-        now=unix_time,audio_sha256=audio_digest)
+        now=unix_time,audio_sha256=audio_digest,purpose="learning")
     if identity != ("person:owner","owner"):
         raise PermissionError("independent_owner_turn_proof_required")
     if not verify_grant(owner_grant_secret,owner_grant,session_id,
