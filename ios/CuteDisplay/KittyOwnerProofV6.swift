@@ -38,6 +38,46 @@ enum KittyOwnerProofV6 {
         try privateKey().publicKey.derRepresentation
     }
 
+    /// Optional, explicit owner REVIEW of one already-captured microphone
+    /// sample for future voice familiarity. The UI must let the owner hear
+    /// the exact sample and consent before calling. This cannot authorize
+    /// private memory or silently enroll a guest.
+    ///
+    /// There is deliberately NO automatic invocation from ordinary BLE
+    /// pairing, background audio or the existing settings workflow.
+    static func signVoiceLearningReview(
+        sessionID: String, itemID: String, audioSHA256: String,
+        transcriptSHA256: String, nonce: String, reviewedAndConsented: Bool
+    ) throws -> String {
+        let allowedID = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        let allowedHash = CharacterSet(charactersIn: "0123456789abcdef")
+        func isASCII(_ value: String, _ allowed: CharacterSet) -> Bool {
+            return value.unicodeScalars.allSatisfy { allowed.contains($0) }
+        }
+        guard reviewedAndConsented,
+              (16...100).contains(sessionID.count),
+              (1...160).contains(itemID.count),
+              (10...128).contains(nonce.count),
+              audioSHA256.count == 64,
+              transcriptSHA256.count == 64,
+              isASCII(sessionID, allowedID),
+              isASCII(itemID, allowedID),
+              isASCII(nonce, allowedID),
+              isASCII(audioSHA256, allowedHash),
+              isASCII(transcriptSHA256, allowedHash) else {
+            throw NSError(domain: "KittyV6", code: 10)
+        }
+        let message = [
+            "kitty-owner-voice-review-v6", sessionID, itemID,
+            audioSHA256, transcriptSHA256, nonce
+        ].joined(separator: "\n")
+        let signature = try privateKey().signature(for: Data(message.utf8))
+        return signature.derRepresentation.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
     static func signChallenge(sessionID: String, challenge: String) throws -> String {
         guard (8...100).contains(sessionID.count),
               !challenge.isEmpty, challenge.count <= 128 else {
