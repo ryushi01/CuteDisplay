@@ -47,3 +47,21 @@ Re-enabling snapshot sync does not enable private owner recall. Independently tr
 Operator read-only `find` on `ai-server` confirmed **eight** existing local `KittySyncPrivateConfig.h` copies: the top-level `~/kitty-v6/private/kitty-sync-deployment/KittySyncPrivateConfig.h` and seven previous locally prepared firmware-release copies (`release-v6-validated-b0ebdf`, `release-live-sync`, `release-v6-sync-7cef7223`, `release-audio-protected`, `release-diagnostic`, `release-v6-mic-fc274c`, `release-v6-frozen-dec472a`). **Do not regenerate or transmit the token or PEM unless later required.** Check in memory that the canonical header has the required macros, expected exact URL, token length and PEM shape; compare field equality with the old release copies without printing values or hashes. A presence-only `find` is not proof these files contain currently valid credentials.
 
 GitHub Actions full firmware workflow run [41795944784](https://github.com/ryushi01/CuteDisplay/actions/runs/41795944784) completed **success** for `d9ad7f9d...`, including the fake-compiler private build safety test and the public S3-only compilation. Later changes (`.gitignore`, documentation) do not affect compiled firmware; the final local credential-bearing build remains **unperformed**. Continue with a read-only local toolchain/header preflight before attempting one private build or an operator-controlled S3-only flash.
+
+
+## Operator-confirmed private S3-only compilation (November 4)
+
+Operator compiled on `ai-server` from detached worktree `57186a4c` using the canonical existing private `KittySyncPrivateConfig.h`. Source was fetched with `FETCH_HEAD` because `origin/main` wasn't an available local ref. The *actual build output* was:
+
+```text
+PASS: private sync settings validated (credentials hidden)
+PASS: no embedded C5 OTA image
+Sketch uses 1620039 bytes (9%) of program storage space. Maximum is 16777216 bytes.
+Global variables use 65068 bytes (19%) of dynamic memory, leaving 262612 bytes for local variables. Maximum is 327680 bytes.
+S3-only compile succeeded: /home/ryushi/.local/share/kitty-v6/private-builds/s3-only-20261104T081701Z-937137/S3-Brain-application.bin
+No flash performed, no C5 image embedded.
+PRIVATE OUTPUT: credential-bearing image and sketch, keep offline; never share.
+S3-only local project prepared. C5 firmware will not be updated.
+```
+
+The source, binary and private Arduino sketch are stored only in the operator's private local directory; **do not commit or attach any of them**. The smaller app size is expected when removing the bundled C5 image. It is **not yet a physical USB flashing success or proof of live sync**. Next read-only verification: compare `SHA256SUMS.txt` against the binary, inspect ESP app magic, source C5 placeholder version/length zero, and confirm token/certificate/URL presence in the compiled binary *as booleans only* without disclosing the values. Before the S3-only flash, retain the known-good firmware and verify the installed partition layout/settings. Use the private generated Arduino sketch via direct S3 USB, never write the app-only binary to flash offset 0 or erase NVS/SD. Afterwards require `[MEMSYNC] configured=1 running=1` and a finalized recent snapshot and healthy ordinary call. Private owner recall remains gated independently.
