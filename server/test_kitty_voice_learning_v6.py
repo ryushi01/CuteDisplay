@@ -164,6 +164,51 @@ class GradualOwnerLearningTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.learn(profile=first,now=later)
 
+    def test_independently_verified_xvector_below_live_threshold_can_teach(self):
+        def xvec(offset):
+            v=[0.0]*512
+            v[0]=1.0
+            v[2]=offset
+            length=math.sqrt(sum(x*x for x in v))
+            return [x/length for x in v]
+        shadow={
+            "consent":"local_explicit_enrollment",
+            "adaptive_learning_consent":True,
+            "owner_enrollment_id":OWNER_PROFILE,
+            "model_id":"speechbrain/spkrec-xvect-voxceleb",
+            "mode":"shadow_only",
+            "memory_authorization":False,
+            "min_genuine_floor":0.965,
+            "verified_learning_floor":0.92,
+            "anchor_embeddings":[xvec(0),xvec(0.02),xvec(0.04)],
+            "adaptive_embeddings":[],
+        }
+        observed=xvec(0.37)  # Genuine drift: about 0.94 from original anchors.
+        ticket,grant=self.proof()
+        result=learn_verified_owner_utterance(
+            shadow,self.audio,session_id=SESSION,item_id=self.item,
+            transcript=self.transcript,signed_turn_ticket=ticket,
+            owner_grant=grant,speaker_signer_secret=SIGNER,
+            owner_grant_secret=OWNER,
+            model_id="speechbrain/spkrec-xvect-voxceleb",
+            owner_profile_id=OWNER_PROFILE,
+            embedding_fn=lambda _:observed,now=self.now)
+        self.assertEqual(len(result["adaptive_embeddings"]),1)
+        self.assertEqual(result["min_genuine_floor"],0.965)
+        self.assertEqual(result["verified_learning_floor"],0.92)
+        self.assertEqual(result["anchor_embeddings"],shadow["anchor_embeddings"])
+        self.assertFalse(result["memory_authorization"])
+        shadow["verified_learning_floor"]=0.90
+        with self.assertRaises(ValueError):
+            learn_verified_owner_utterance(
+                shadow,self.audio,session_id=SESSION,item_id=self.item,
+                transcript=self.transcript,signed_turn_ticket=ticket,
+                owner_grant=grant,speaker_signer_secret=SIGNER,
+                owner_grant_secret=OWNER,
+                model_id="speechbrain/spkrec-xvect-voxceleb",
+                owner_profile_id=OWNER_PROFILE,
+                embedding_fn=lambda _:observed,now=self.now)
+
     def test_expired_attestation_denied(self):
         signed,grant=self.proof(now=self.now)
         with self.assertRaises(PermissionError):
