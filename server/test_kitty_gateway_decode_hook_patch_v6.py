@@ -36,6 +36,23 @@ GATEWAY = GATEWAY.replace(
                 await ws.send_json(event)''',
     '            await ws.send_json(event)'
 )
+# Matches the actual diagnosed provider shape: an initial if/continue
+# followed by event=upstream_message.json() and one browser forward.
+WSMESSAGE_GATEWAY = '''
+class WSMsgType:
+    TEXT = "TEXT"
+async def kitty_route(upstream, ws):
+    async def client_events():
+        pass
+    async def provider_events():
+        async for msg in upstream:
+            if msg.type != WSMsgType.TEXT:
+                continue
+            event = msg.json()
+            await ws.send_json(event)
+    await provider_events()
+'''
+
 DIRECT = GATEWAY.replace(
     '''            try:
                 event = json.loads(raw)
@@ -62,7 +79,78 @@ class _Socket:
         self.events.append(event)
 
 
+class _WSMessage:
+    def __init__(self, obj, kind="TEXT"):
+        self.type=kind
+        self.obj=obj
+    def json(self):
+        return self.obj
+
+class _WSUpstream:
+    def __init__(self, messages):
+        self.messages=messages
+    def __aiter__(self):
+        self.items=iter(self.messages)
+        return self
+    async def __anext__(self):
+        try:
+            return next(self.items)
+        except StopIteration:
+            raise StopAsyncIteration
+
+
 class DecodeHookTests(unittest.IsolatedAsyncioTestCase):
+    def test_live_wsmessage_if_guard_and_later_json_method_can_be_patched(self):
+        self.assertEqual(status(WSMESSAGE_GATEWAY),"compatible")
+        revised=patch(WSMESSAGE_GATEWAY)
+        self.assertIn(MARK,revised)
+        self.assertEqual(revised.count("await ws.send_json(event)"),1)
+        self.assertEqual(revised.count("event = msg.json()"),1)
+        self.assertEqual(revised.count("_kitty_v6_passive.from_provider(event)"),1)
+        compile(revised,"<guarded-live-shape>","exec")
+
+    async def test_realistic_wsmessage_audio_forwarding_identical(self):
+        seen=[]
+        class Passive:
+            def from_provider(self,ev):
+                seen.append(ev.copy())
+        fake=types.ModuleType("kitty_passive_turn_bridge_v6")
+        fake.KittyPassiveTurnBridge=Passive
+        messages=[
+            _WSMessage({"type":"response.output_audio.delta","delta":"a"}),
+            _WSMessage({"type":"conversation.item.input_audio_transcription.completed",
+                        "item_id":"voice-1","transcript":"Mochi Planet"}),
+            _WSMessage({"type":"error","message":"closed"},"BINARY"),
+            _WSMessage({"type":"response.output_audio.delta","delta":"b"}),
+        ]
+        expected=[m.obj for m in messages if m.type=="TEXT"]
+        for source in (WSMESSAGE_GATEWAY,patch(WSMESSAGE_GATEWAY)):
+            scope={}
+            exec(compile(source,"<live-shape>","exec"),scope)
+            socket=_Socket()
+            with mock.patch.dict(sys.modules,
+                                  {"kitty_passive_turn_bridge_v6":fake}):
+                await scope["kitty_route"](_WSUpstream(messages),socket)
+            self.assertEqual(socket.events,expected)
+        self.assertEqual(seen,[expected[1]])
+
+    def test_client_borne_json_and_nested_decode_remain_denied(self):
+        for mutated in (
+            WSMESSAGE_GATEWAY.replace("event = msg.json()",
+                                      "event = browser_message.json()"),
+            WSMESSAGE_GATEWAY.replace("event = msg.json()",
+                                      "event = ws.json()"),
+            WSMESSAGE_GATEWAY.replace("event = msg.json()",
+                                      "event = msg.json()\\n            event = msg.json()"),
+            WSMESSAGE_GATEWAY.replace("if msg.type != WSMsgType.TEXT:",
+                                      "if (msg.type != WSMsgType.TEXT):\\n                event = msg.json()"),
+            WSMESSAGE_GATEWAY.replace("await ws.send_json(event)",
+                                      "await ws.send_json(event)\\n            await ws.send_json(event)"),
+        ):
+            with self.subTest(mutated=mutated[:80]):
+                with self.assertRaises((HookRefusal,SyntaxError)):
+                    patch(mutated)
+
     def test_patches_direct_or_try_decode_once(self):
         for source in (DIRECT,GATEWAY):
             self.assertEqual(status(source),"compatible")
