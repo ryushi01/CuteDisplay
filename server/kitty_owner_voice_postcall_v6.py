@@ -57,6 +57,7 @@ class PostCallOwnerVoiceLearner:
         self._mono=monotonic
         self._lock=threading.Lock()
         self._call=""
+        self._consented=False
         self._pending=None
         self._count=0
         self._outcome="disabled" if not self.enabled else "idle"
@@ -67,10 +68,24 @@ class PostCallOwnerVoiceLearner:
             return self._outcome
 
     def begin_call(self, session_id):
+        # No voice bytes may be retained before an explicit consented profile
+        # exists. This small read happens at call setup, never on PCM forwarding.
+        consented=False
+        if self.enabled and isinstance(session_id,str):
+            try:
+                profile=self._load()
+                consented=(
+                    isinstance(profile,dict)
+                    and profile.get("consent")=="local_explicit_enrollment"
+                    and profile.get("adaptive_learning_consent") is True
+                    and profile.get("model_id")==self._model
+                    and profile.get("owner_enrollment_id")==self._profile_id)
+            except (OSError,ValueError,TypeError,PermissionError,RuntimeError):
+                pass
         with self._lock:
             self._pending=None
-            self._call=session_id if self.enabled and isinstance(
-                session_id,str) else ""
+            self._consented=consented
+            self._call=session_id if consented else ""
             self._count=0
             self._outcome="ready" if self._call else "disabled"
             return bool(self._call)
@@ -82,7 +97,8 @@ class PostCallOwnerVoiceLearner:
         Return only a boolean. No CPU voice-model inference or disk write.
         The signed proof must bind the exact WAV, transcript, owner and turn.
         """
-        if (not self.enabled or not isinstance(microphone_wav,bytes)
+        if (not self.enabled or not self._consented
+                or not isinstance(microphone_wav,bytes)
                 or not wav_quality_ok(microphone_wav)):
             return False
         timestamp=int(self._wall())
@@ -109,6 +125,7 @@ class PostCallOwnerVoiceLearner:
         """Unknown/other speaker, revoked consent or call cancellation."""
         with self._lock:
             self._pending=None
+            self._consented=False
             self._outcome="discarded" if self.enabled else "disabled"
 
     def finish_call(self, *, background=True):
@@ -121,6 +138,7 @@ class PostCallOwnerVoiceLearner:
             pending=self._pending
             self._pending=None
             self._call=""
+            self._consented=False
             if not self.enabled or pending is None:
                 self._outcome="no_verified_sample" if self.enabled else "disabled"
                 return False
