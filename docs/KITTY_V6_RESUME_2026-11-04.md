@@ -53,3 +53,29 @@ git show FETCH_HEAD:server/kitty_live_readiness_v6.py | python3 -
 ```
 
 Review `gateway_inspection` alongside gateway marker statuses. If Docker access fails, diagnose local container privileges separately before touching live audio. If source was readable, inspect a source-only diff privately to stage the missing owner gate. Do **not** replace the existing memory service wholesale, restart Open WebUI, change the C5 v38 firmware or deploy automatic owner recall based solely on these marker scans.
+
+## Actual Docker and gateway confirmation — November 4
+
+The operator's `docker info` failed as the ordinary user and noninteractive `sudo -n` also failed (interactive password needed), causing prior `gateway_inspection=docker_inaccessible_or_container_missing`. Interactive `sudo docker ps` confirmed `open-webui` **running and healthy for two days**; `open-terminal` also runs. Read-only `sudo docker exec -i open-webui python3` read the actual `/app/backend/open_webui/routers/audio/realtime.py` and found:
+- `kitty.memory.refresh`: present
+- `KITTY_INITIAL_PUBLIC_PROFILE_V6`: present
+- `KittySpeakerObserver`: present
+- `kitty.speaker.result`: present
+- `kitty.memory.semantic`: present
+- `KITTY_CANDIDATE_CONTEXT_ITEM_V6`: **absent**
+
+A marker's absence is **not proof** that an alternate implementation does not exist. Working realtime AI, shared memory and C5 v38 are to remain untouched; there is no demonstrated gateway malfunction.
+
+Live memory service status remains `active` and HTTP health `ok`, but its source lacks the new `authorized_semantic_speaker(data,OWNER_PROOF)` marker. This creates a **candidate private-semantic authorization gap**, pending exact live-handler audit. The current GitHub `server/kitty_memory_service.py` enforces signed owner grants before private `/semantic` and `/semantic/context` lookup. Do not replace the entire private service or restart it without a scoped compatibility plan and rollback, and do not treat device API bearer or voice candidate as human authentication.
+
+**Prepared read-only handler-only comparison:** `server/kitty_owner_guard_plan_v6.py` examines the live PID's Python service source, uses GitHub `FETCH_HEAD` as the target version, verifies the legacy split semantic endpoint layout and a generated replacement in memory, checks sibling helper file presence and prints only fixed statuses. It **does not write a candidate or change any service**. CI adds `server/test_kitty_owner_guard_plan_v6.py`, which validates fail-closed compatibility, and keeps the separate S3/C5 compile gate intact.
+
+One next Ubuntu command:
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_owner_guard_plan_v6.py | python3 -
+```
+
+Read `candidate_compiles`, `live_semantic_handlers`, and `dependency_*`; no patch should be applied or service restarted based on this command alone. If the live handlers differ, adjust the proposed patch to the actual private source in a staged, test-only manner with no transcript or token disclosure. Next steps after confirmation: prepare a single targeted backup + patch + offline test + explicit operator-controlled restart/rollback; then verify health and private 403 fail-closed behavior. There is no owner identity issuer wired into actual realtime spoken turns yet.
