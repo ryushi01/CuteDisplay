@@ -53,7 +53,7 @@ class PostCallLearningTests(unittest.TestCase):
         ticket=issue_external_attestation(
             SIGNER,session_id=self.call,item_id=self.item,transcript=text,
             speaker_id=speaker,speaker_role=role,now=self.wall,
-            audio_sha256=hashlib.sha256(data).hexdigest())
+            audio_sha256=hashlib.sha256(data).hexdigest(),purpose="learning")
         grant=issue_grant(OWNER,True,self.call,now=self.wall,ttl=120)
         return ticket,grant
 
