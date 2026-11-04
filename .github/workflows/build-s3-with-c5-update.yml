@@ -63,6 +63,9 @@ jobs:
       - name: Verify one-command gateway rollout protection and rollback logic
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_gateway_passive_rollout_v6 -v
 
+      - name: Diagnose custom provider decode layouts without exposing private gateway source
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_gateway_decode_preflight_v6 -v
+
       - name: Test guarded upstream provider decode hook and audio forwarding
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_gateway_decode_hook_patch_v6 -v
 
