@@ -134,12 +134,22 @@ def identify(wav_b64):
         except Exception as exc:
             print("[KITTY_XVECTOR_CANDIDATE] error=%s" % type(exc).__name__, flush=True)
             return {"speaker_id":"unknown","confidence":"unknown","score":None}
-    # Explicit experimental opt-in. This returns an identity used downstream for
-    # speaker-scoped recall; enable only with acceptance of voice spoofing risk.
+    # The obsolete experimental identity flag must NEVER promote a voice
+    # similarity into an authenticated speaker. Retain candidate diagnostics
+    # for compatibility, but fail closed on authorization.
     if os.environ.get("KITTY_XVECTOR_EXPERIMENTAL_IDENTITY") == "1":
         try:
             from kitty_xvector_shadow_worker_v6 import recognize_candidate
-            return recognize_candidate(raw)
+            hint = recognize_candidate(raw)
+            candidate = hint.get("speaker_id", "unknown")
+            score = hint.get("score")
+            if not (isinstance(candidate,str) and candidate.startswith("person:")
+                    and isinstance(score,(float,int)) and not isinstance(score,bool)
+                    and 0.965 <= score <= 1):
+                candidate,score = "unknown",None
+            return {"speaker_id":"unknown", "confidence":"unknown",
+                    "score":None, "candidate_only":True,
+                    "candidate_speaker_id":candidate, "candidate_score":score}
         except (ImportError, OSError, RuntimeError, ValueError):
             return {"speaker_id":"unknown","confidence":"unknown","score":None}
     # Shadow diagnostics never affect the returned identity or block the
