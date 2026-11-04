@@ -2,6 +2,16 @@
 **Date:** 2026-11-04  
 **Source checkpoint:** `main` after the gradual voice-learning and source-only ownership work.
 
+## Current operator-confirmed baseline: private S3 + C5 v41 (2026-11-04)
+
+The operator confirmed that the private **combined S3 + C5 v41 firmware was flashed and Kitty works**. This supersedes older C5 v38–v40 flash plans below (kept as historical investigation notes). Public source `C5_FIRMWARE_VERSION = 41` is on `main`; [full combined firmware CI run 41809097567](https://github.com/ryushi01/CuteDisplay/actions/runs/41809097567) **passed**.
+
+The tested-in-source v41 design includes five transparent recent conversation lines, stop-only C5 button `CALL_STOP` with bounded retries, and no separate legacy chat bubble during/after full-screen calls. v41 corrects v40's mistaken `NACK CALL_ACTIVE` for otherwise valid delegated model `AI_BEGIN`/`AI_DATA`/`AI_END` UART packets: it ACKs them without displaying a background bubble.
+
+**Validation scope:** the user directly reported a working flashed system, not an exhaustive retest of every button/display/BLE action or absence of sporadic model errors. The previous v40 log had successful OTA, working audio and zero mic drops but also delegated AI stream errors. A new v41 log confirming no `NACK CALL_ACTIVE`, recent nine-file private SD snapshot sync and trusted private owner recall remains separate follow-up work. Do not weaken speaker/owner privacy guards.
+
+**Preserve:** the known-working private v41 binaries and Arduino project offline, original private `KittySyncPrivateConfig.h`, the microSD archive and voice profiles, S3 BLE-off/C5 BLE-on, and prior v40 private rollback. Never commit a credential-bearing image or private header to GitHub. Avoid unnecessary reflashes or Ubuntu gateway reinstall.
+
 ## Verified working hardware / live Ubuntu (preserve)
 
 - S3 Freenove brain realtime microphone/speaker/Wi-Fi/SD and C5 v38 BLE/display are the accepted hardware baseline. No flash in this iteration.
@@ -186,4 +196,4 @@ S3 journal: `job_ack_offset=4146 awaiting=0 summary_queue=0 results_queue=0 back
 
 To prepare a fix with minimal hardware impact, GitHub `main` now has private-local-header support in `tools/build_s3_only_v6.sh`, guarded fake-toolchain tests `server/test_kitty_private_s3_only_build_v6.py`, and `.gitignore` protection for private headers. CI private packaging test passed; no firmware upload has been requested or performed. See [KITTY_V6_S3_PRIVATE_SYNC_RESTORE_2026-11-04.md](KITTY_V6_S3_PRIVATE_SYNC_RESTORE_2026-11-04.md). The S3-only build validates and includes the local credentials and explicitly excludes a C5 OTA image, with a private output directory outside Git. No secret is on GitHub.
 
-**Next action:** On the trusted firmware-build Mac, locate or regenerate the private `KittySyncPrivateConfig.h` without printing or sharing its token/certificate. Once available, run one local S3-only compile and review its output, then perform a separate deliberate S3-only flash if safe. Do not re-run Ubuntu gateway/voice installers or change C5 v38. Later verify `configured=1 running=1`, new finalized S3 snapshot, and memory guard; independent owner speaker proof and secure private recall remain separate unfinished gates.
+**Historical action (superseded):** The S3-only repair preparation mentioned here was followed by an operator-flashed private combined S3+C5 v41 build. The current next actions are read-only v41 call/AI diagnostics and nine-file memory sync verification; do not revert C5 to v38 or flash an old S3-only binary.
