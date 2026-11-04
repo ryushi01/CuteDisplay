@@ -327,3 +327,39 @@ git show FETCH_HEAD:server/kitty_gateway_decode_preflight_v6.py | sudo docker ex
 ```
 
 Based on these fixed labels, build a precise source-shape-specific patcher with regression tests, then **only** attempt a gated rollout. Do not replace realtime.py wholesale or weaken private memory speaker authorization. This remains passive observation-only, not the final independent owner verifier or automatic memory-learning integration.
+
+## Latest private gateway decode diagnosis and compatibility fix — 2026-11-04
+
+Read-only diagnostic on actual Ubuntu `open-webui` reported:
+
+```text
+KITTY_V6_PROVIDER_DECODE_PREFLIGHT_READ_ONLY
+provider_handler=one
+client_handler=one
+provider_loop=one
+provider_forward=one
+provider_loop_body=if
+event_decoder=json_method
+event_decoder_position=later_direct
+event_decoder_input=other
+event_decoder_assignment=direct_assignment
+one_line_decoder=yes
+source_python=valid
+exact_patch_refusal=provider_decode_unrecognized
+```
+
+This clarifies the prior safe refusal: the provider loop contains an early `if` filter and later `event = provider_message.json()`-style method call, not the former narrow first-statement `json.loads(raw)`. Since the legacy diagnostic does not expose the method receiver, the patcher must still **verify it is exactly the async-for upstream message variable**. Never accept `browser_message.json()` or a decoder outside the upstream receive loop.
+
+The new `server/kitty_gateway_decode_hook_patch_v6.py` accepts exactly one direct upstream-loop item `.json()` with zero arguments or a direct `json.loads(loop_item)` and tolerates preceding if-guards when they don't reassign the item or `event`. The injected hook still observes only five fixed provider event types; it doesn't change forwarding, model prompts, memory authorization, SD or C5. `server/test_kitty_gateway_decode_hook_patch_v6.py` covers the diagnosed if + later `.json()` layout, audio-event forwarding bit-for-bit, guards and unknown-source failures. GitHub targeted CI for this test passed.
+
+The single transaction host rollout script `server/kitty_gateway_passive_rollout_v6.py` now returns a fixed, non-sensitive *specific* refusal code if any other private layout variation prevents the patch; it never echoes source or credentials. Because the last two installer attempts failed before creating the transaction manifest, neither changed the Open WebUI gateway, and **no rollback, source cleanup, firmware flash or memory-service redeploy is required**.
+
+When idle, one attempt using the latest fetched `main` is appropriate:
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_gateway_passive_rollout_v6.py | python3 - --apply
+```
+
+Success markers: `gateway_hook=installed`, `gateway_health=healthy`, `provider_forwarding=unchanged`, `private_recall=disabled`, `automatic_voice_learning=disabled`. If it still rejects the private layout, do not rerun; copy only the `rollout_error` label. The C5 v39 black transparent-caption firmware remains source/CI-ready but no hardware flash has been performed. Long-call live memory, real per-turn owner authentication and hands-free voice learning are still release gates.
