@@ -106,7 +106,7 @@ class PostCallOwnerVoiceLearner:
         identity=verify_external_attestation(
             self._signer, attestation, session_id=session_id,
             item_id=item_id, transcript=transcript, now=timestamp,
-            audio_sha256=digest)
+            audio_sha256=digest,purpose="learning")
         if identity!=("person:owner","owner") or not verify_grant(
                 self._owner, owner_grant, session_id, now=timestamp):
             return False
