@@ -59,7 +59,7 @@ def live_source_for_pid(pid, *, proc_root=Path("/proc")):
         return None
     base=proc_root/str(pid)
     try:
-        parts=(base/"cmdline").read_bytes().split(b"\\0")
+        parts=(base/"cmdline").read_bytes().split(bytes([0]))
         names=[os.fsdecode(p) for p in parts if p]
         scripts=[p for p in names if p.endswith("/kitty_memory_service.py")
                  or p=="kitty_memory_service.py"]
