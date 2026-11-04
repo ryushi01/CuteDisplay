@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transparent C5 call captions, v39 baseline and v40 five-line contract."""
+"""Transparent C5 captions: v39 baseline, five-line v40 layout preserved in v41."""
 from pathlib import Path
 import unittest
 
@@ -16,8 +16,8 @@ class TransparentCaptionTests(unittest.TestCase):
         cls.caption=cls.face.split(
             "// v40: five transparent rows",1)[1]
 
-    def test_v40_and_no_opaque_caption_or_status_panel(self):
-        self.assertIn("C5_FIRMWARE_VERSION = 40;",self.version)
+    def test_v41_retains_five_line_transparent_caption(self):
+        self.assertIn("C5_FIRMWARE_VERSION = 41;",self.version)
         self.assertNotIn("panelY",self.caption)
         self.assertNotIn("panelH",self.caption)
         self.assertNotIn("rect(0,136,320,34",self.face)
