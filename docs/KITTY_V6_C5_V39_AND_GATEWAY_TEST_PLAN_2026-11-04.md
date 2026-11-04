@@ -68,3 +68,23 @@ Updated `server/kitty_gateway_provider_scope_v6.py` on GitHub now separately rep
 Re-run the **same read-only command** once after fetching latest GitHub `main`. Use the output to design one exact-AST-guarded, rollback-capable opt-in observer insertion while preserving existing realtime forwarding. Do not enable owner-private recall or hands-free voice-learning from a voice candidate alone.
 
 **C5 v39 CI status:** The combined C5 application and S3 firmware compilation plus caption and privacy contract tests completed successfully in [run 41774229414](https://github.com/ryushi01/CuteDisplay/actions/runs/41774229414). This confirms buildability, not a successful physical v39 OTA. Keep C5 v38 as the known-good rollback until the operator tests the isolated v39 display update.
+
+## Provider-loop match confirmed and guarded passive rollout prepared — November 4
+
+The second operator-run read-only probe on the live Open WebUI container confirmed one named provider_events handler, one async-for-upstream receive loop, one event JSON decode, one provider-to-client forwarding call in that function, and one client_events handler. `event_decode_hook_candidate=yes`; the old whole-file `passive_hook_safe=no` remains expected because many other forwarding sites exist.
+
+New GitHub source: `server/kitty_gateway_decode_hook_patch_v6.py` makes an exact AST-guarded observation-only hook after upstream event decoding without changing any WebSocket forward or memory permissions. `server/kitty_gateway_passive_rollout_v6.py` stages eight source-matched Python helpers, backs up the private live gateway source to a host-only 0700 state directory, atomically modifies only the unique provider source scope, restarts only the Open WebUI container, checks Docker health, and rolls back on failure. The two new targeted test suites passed in CI. No existing memory-service installer is rerun.
+
+One Ubuntu command, only when Kitty is idle:
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_gateway_passive_rollout_v6.py | python3 - --apply
+```
+
+Expected success labels: `source_backup=created`, `gateway_hook=installed`, `gateway_health=healthy`, `provider_forwarding=unchanged`, `private_recall=disabled`, `automatic_voice_learning=disabled`, `firmware_and_SD=unchanged`. If `rollout_error` appears, stop rather than rerun and report the error label and rollback status. Intentional rollback uses the same script with `--rollback` instead of `--apply`, using the original pinned fetched commit.
+
+IMPORTANT: This passive provider observer does not inject prompts, issue owner identity attestations, prove real speaker identity, enable private history, or train voice embeddings. It only establishes the already-tested one-time live upstream event observation hook without changing audio forwarding. V6 end-to-end private verified recall and automatic voice learning remain gated on trusted per-turn provenance and real hardware acceptance.
+
+C5 v39 transparent black captions over the Kitty face were compiled successfully in GitHub workflow run 41774229414. The physical C5 is still v38 until operator flash; prefer a C5-only firmware flash when possible, without modifying S3 private sync settings.
