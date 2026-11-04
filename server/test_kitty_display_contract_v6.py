@@ -11,13 +11,15 @@ class DisplayContract(unittest.TestCase):
         self.assertIn('captionLastQueued="";', source)
         self.assertIn('safe_event', (ROOT/"server/kitty_realtime_gateway_observer_v6.py").read_text())
 
-    def test_face_stays_visible_and_no_previous_caption(self):
+    def test_face_stays_visible_and_rolling_caption_history(self):
         source = (ROOT/"firmware/CuteDisplay/C5CallFace.h").read_text()
         start = source.index("static void drawFullScreenKittyFace()")
         face = source[start:]
-        # C5 v39: captions are black glyphs directly over the animated
-        # Kitty face; no opaque dark caption rectangle remains.
-        self.assertIn("const int captionY=40;", face)
+        # C5 v40: five black-text rows directly over the animated
+        # Kitty face, without an opaque dark rectangle.
+        self.assertIn("const int captionY=2;", face)
+        self.assertIn("CALL_CAPTION_ROWS=5", face)
+        self.assertIn("String transcript=callCaptionHistory;", face)
         self.assertIn("richText(rows[i],6,captionY+i*16,1,1,BLACK,316);", face)
         self.assertNotIn("const int panelY=136;", face)
         self.assertNotIn("const int panelH=34;", face)
