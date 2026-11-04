@@ -284,3 +284,21 @@ Stop on `rollout_error` and share only fixed labels/rollback state. Test suites 
 **DO NOT mark V6 complete:** This establishes a safe upstream event observation point but not trusted human speaker verification, long-term private memory injection, automatic owner-learning, live long-call summaries or actual C5 v39 flash. C5 v39 caption and full S3/C5 compile passed in workflow run 41774229414; physical C5 stays v38 pending test. Keep the 403 memory-service guard and S3 SD authority unchanged.
 
 Recovery and C5 test details: docs/KITTY_V6_C5_V39_AND_GATEWAY_TEST_PLAN_2026-11-04.md.
+
+## Gateway rollout chmod failure and guarded recovery — 2026-11-04
+
+Operator attempted the first `kitty_gateway_passive_rollout_v6.py --apply` inside the Ubuntu private checkout. It stopped at `os.chmod(backup,0o600)` on the root-owned file created by `sudo docker cp open-webui:/app/backend/open_webui/routers/audio/realtime.py <private-host-path>`.
+
+The observed traceback was `PermissionError: [Errno 1] Operation not permitted` at line 255. This happened **before the gateway Python source patch, helper installation, transaction manifest write, or Docker container restart**. The existing live Open WebUI gateway was left unchanged by this attempt. The temporary, root-owned backup remains inside the invoking user's private local state directory and should not be uploaded to GitHub or arbitrarily deleted.
+
+Fix committed to GitHub main: `server/kitty_gateway_passive_rollout_v6.py` now reads the existing container source through `sudo docker exec open-webui cat ...` without printing it, and saves the original bytes directly with the unprivileged host user's `os.open(O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW, 0600)`, fsync, and SHA-256 verification. No `sudo chown`, chmod of a root-owned Docker copy, or shell cleanup step is needed. Also catches host permission errors with a bounded error label instead of an unsolicited traceback.
+
+Focused GitHub Actions test `server/test_kitty_gateway_passive_rollout_v6.py` confirms host-file ownership, mode 0600, single-use backup creation, invalid-source rejection, and unchanged recovery rules. The user should only retry from the newest fetched GitHub main after Kitty is idle:
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_gateway_passive_rollout_v6.py | python3 - --apply
+```
+
+Successful rollout still means **passive transcription-event observation only**, not live trusted human speaker authorization, owner-private automatic recall or hands-free voice learning. Preserve the working S3 SD/archive, the live `kitty-memory-v6.service` signed-owner 403 guard, C5 v38 hardware and the staged C5 v39 display code. If the corrected rollout reports `live_provider_layout_incompatible` or another fixed refusal label, stop and use that result to tighten the AST matcher; do not disable security gates or repeat old installers.
