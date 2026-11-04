@@ -170,7 +170,10 @@ def move_candidate(expect_before, expect_after):
     code+=f"assert candidate.is_file() and not candidate.is_symlink()\n"
     code+=f"assert hashlib.sha256(original.read_bytes()).hexdigest()=={expect_before!r}\n"
     code+=f"assert hashlib.sha256(candidate.read_bytes()).hexdigest()=={expect_after!r}\n"
-    code+="os.chmod(candidate,stat.S_IMODE(original.stat().st_mode))\n"
+    code+="orig=original.stat()\n"
+    code+="os.chmod(candidate,stat.S_IMODE(orig.st_mode))\n"
+    code+="if (candidate.stat().st_uid,candidate.stat().st_gid)!=(orig.st_uid,orig.st_gid):\n"
+    code+=" os.chown(candidate,orig.st_uid,orig.st_gid)\n"
     code+="os.replace(candidate,original)\n"
     docker_exec(code,timeout=18)
 
