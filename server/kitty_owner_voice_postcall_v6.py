@@ -111,7 +111,7 @@ class PostCallOwnerVoiceLearner:
                 self._owner, owner_grant, session_id, now=timestamp):
             return False
         with self._lock:
-            if not self._call or self._call!=session_id:
+            if not self._consented or not self._call or self._call!=session_id:
                 return False
             # The most recent independently verified utterance is preferred;
             # never accumulate an unbounded history of raw recordings.
@@ -126,6 +126,7 @@ class PostCallOwnerVoiceLearner:
         with self._lock:
             self._pending=None
             self._consented=False
+            self._call=""
             self._outcome="discarded" if self.enabled else "disabled"
 
     def finish_call(self, *, background=True):
