@@ -73,6 +73,21 @@ class BindRolloutTests(unittest.TestCase):
                 d.overwrite_same_inode(str(target),b"patched",before["sha"],before)
             self.assertEqual(target.read_bytes(),b"third-party change")
 
+    def test_host_writable_preflight_never_changes_source_bytes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target=Path(folder)/"realtime.py"
+            target.write_bytes(b"untouched private source")
+            meta=d.host_file_stat(str(target))
+            proc=subprocess.run(
+                [sys.executable,"-c",d.ROOT_OPEN_PREFLIGHT,
+                 str(target),json.dumps(meta)],
+                stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
+            self.assertEqual(proc.returncode,0,
+                             proc.stderr.decode(errors="replace")[:250])
+            self.assertEqual(proc.stdout,b"host_write_open_verified\n")
+            self.assertEqual(target.read_bytes(),b"untouched private source")
+            self.assertEqual(d.host_file_stat(str(target)),meta)
+
     def test_python_host_root_writer_does_not_replace_target_inode(self):
         with tempfile.TemporaryDirectory() as folder:
             target=Path(folder)/"realtime.py"
@@ -161,6 +176,7 @@ class BindRolloutTests(unittest.TestCase):
                     d,"patcher_from_git",return_value=SimpleNamespace(
                     patch=lambda src:src+"# passive observation only\n")),patch.object(
                     d,"helper_inventory",side_effect=fake_inventory),patch.object(
+                    d,"preflight_host_writable",return_value=None),patch.object(
                     d,"root_write",side_effect=fake_root),patch.object(
                     d,"docker",side_effect=fake_docker),patch.object(
                     d,"wait_healthy",side_effect=lambda:next(wellness)),patch.object(
