@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from kitty_live_readiness_v6 import (
-    GATEWAY_MARKERS, MEMORY_MARKERS, gateway_markers, live_source_for_pid,
+    GATEWAY_MARKERS, MEMORY_MARKERS, gateway_markers, gateway_probe, live_source_for_pid,
     source_markers, probe, main, memory_health, user_unit_info,
 )
 
@@ -26,8 +26,13 @@ class FakeRunner:
         self.calls.append(argv)
         if argv[:3]==["systemctl","--user","show"]:
             result=("ActiveState=active"+chr(10)+"MainPID=123"+chr(10)) if self.active else None
+        elif argv[:2]==["docker","inspect"]:
+            result="true"
         elif argv[:3]==["docker","exec","open-webui"]:
-            result=json.dumps(self.gateway) if self.gateway is not None else None
+            if len(argv)>3 and argv[3] in ("python","python3"):
+                result=json.dumps(self.gateway) if self.gateway is not None else None
+            else:
+                result=None
         else:
             raise AssertionError("unexpected action")
         return types.SimpleNamespace(returncode=0 if result is not None else 1,
@@ -87,8 +92,24 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual(gateway_markers(runner=runner),markers)
         self.assertEqual(gateway_markers(runner=FakeRunner()),{
             key:"unknown" for key in GATEWAY_MARKERS})
-        self.assertEqual(len(runner.calls),1)
-        self.assertEqual(runner.calls[0][:3],["docker","exec","open-webui"])
+        self.assertEqual(runner.calls[0][:2],["docker","inspect"])
+        self.assertEqual(runner.calls[1][:3],["docker","exec","open-webui"])
+        self.assertEqual(gateway_probe(runner=runner)[1],"inspected")
+
+    def test_gateway_failure_has_fixed_reason_only(self):
+        class NoDocker:
+            def __call__(self, argv, **kwargs):
+                return types.SimpleNamespace(returncode=1,stdout="",
+                                             stderr="PASSWORD=DO_NOT_PRINT")
+        markers,reason=gateway_probe(runner=NoDocker())
+        self.assertEqual(reason,"docker_inaccessible_or_container_missing")
+        self.assertEqual(set(markers.values()),{"unknown"})
+        self.assertNotIn("PASSWORD",reason)
+
+        unavailable=FakeRunner(gateway=None)
+        markers,reason=gateway_probe(runner=unavailable)
+        self.assertEqual(reason,"source_missing_or_unreadable")
+        self.assertEqual(set(markers.values()),{"unknown"})
 
     def test_health_uses_only_localhost_without_bearer(self):
         opener=FakeOpener()
