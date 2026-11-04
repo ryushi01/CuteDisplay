@@ -88,3 +88,23 @@ Roll back only if required; preserve backup contents privately. The scripts and 
 C5 version 39 is committed on GitHub: transparent, pure-black two-line conversation captions over the live full-screen Kitty-chan artwork at y=40 and y=56 (no opaque bottom caption panel), plus a transparent status label. The full face renderer, UTF-8 wrapping, 16 moods and lip sync remain unchanged. The active hardware is still C5 v38 until an operator tests v39. CI targeted C5 caption and earlier display-contract checks passed; the full C5/S3 build must separately complete. Prefer C5 USB-only testing when available. If using S3-packaged C5 UART OTA, preserve the Ubuntu/S3 private sync configuration by using a local trusted build rather than flashing public CI binaries without credentials.
 
 Passive memory gateway bridge source and tests: `kitty_passive_turn_bridge_v6.py`, `kitty_gateway_provider_scope_v6.py`. Exact upstream provider event scope in the private live `realtime.py` has not yet been checked, and no live Open WebUI changes were made. The bridge cannot authorize private history from a probable X-vector score and remains gated on an independent trusted per-turn attestation. One read-only gateway check and complete isolated test steps are in [KITTY_V6_C5_V39_AND_GATEWAY_TEST_PLAN_2026-11-04.md](KITTY_V6_C5_V39_AND_GATEWAY_TEST_PLAN_2026-11-04.md).
+
+## Confirmed read-only single-file gateway bind and inode-safe deployment
+
+Live read-only Docker check: `mount_layout=file_bind`, `mount_write_mode=ro`, `target_is_mountpoint=yes`, `target_is_regular_file=yes`, `parent_writable_for_root=yes`, `filesystem_readonly=no`, `known_staging_candidate=no`. This definitively explains why the **old** gateway installer fails at `atomic_replace`. Do not rerun `kitty_gateway_passive_rollout_v6.py --apply` or force Docker file replacement.
+
+Replacement on GitHub: `server/kitty_gateway_bind_rollout_v6.py`. It verifies the exact single-file RO mount and host/container matching SHA-256; tests host source write access without modifying bytes; saves the unmodified gateway in an invoking-user 0700/0600 private host backup; offline patches exactly the unique upstream provider event decode; pre-imports only absent exact-matched helper modules; STOPS the existing `open-webui` container; writes only the host bind SOURCE **in place, preserving device/inode, owner, group, mode**; STARTS that same container; checks health and both host/container checksums. Failures with a verifiable original/candidate SHA restore the original bytes in the same inode and restart. Bounded partial prefix writes are recognized and restored when verifiably from this transaction. Unknown external edits stop for manual recovery rather than risk overwriting user work. No existing Compose configuration, mounted volume, memory service, S3/C5 firmware, SD archive, model/TTS or voice profiles are altered.
+
+The targeted offline test `server/test_kitty_gateway_bind_rollout_v6.py` passed, including root-writer actual local file operations, RO source selection, write-open with no byte change, inode+owner+permissions, private backup creation, full simulated Docker stop/start deployment, failed-health rollback, partial-write recovery, and unrelated external-edit refusal. This CI test does not certify operation on the actual private host source; success is confirmed only by running the guarded installer.
+
+One **new** command, when Kitty is idle (it briefly stops/starts Open WebUI, not the memory service):
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_gateway_bind_rollout_v6.py | python3 - --apply
+```
+
+Expected labels: `KITTY_V6_READONLY_BIND_GATEWAY_ROLLOUT`, `backup=verified`, `gateway_hook=installed`, `gateway_health=healthy`, `host_inode=preserved`, `provider_forwarding=unchanged`, `private_recall=disabled`, `automatic_voice_learning=disabled`, `firmware_and_SD=unchanged`. On `rollout_error` or `failed_phase`, **do not rerun**; share the short statuses and rollback result. The script also has `--rollback` for intentional return to the exact saved original when installed and content checks still match.
+
+**This rollout installs passive provider-event observation, not secure owner speaker verification, private historical memory release or hands-free persistent adaptive learning.** Those V6 acceptance gates remain. C5 v39 black captions over Kitty's unobscured face are compiled but physically untested; C5 hardware still runs v38.
