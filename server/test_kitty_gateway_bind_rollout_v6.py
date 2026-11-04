@@ -106,6 +106,45 @@ class BindRolloutTests(unittest.TestCase):
             self.assertEqual(after["uid"],meta["uid"])
             self.assertEqual(after["mode"],meta["mode"])
 
+    def test_exact_partial_prefix_write_can_be_restored_in_place(self):
+        import struct
+        with tempfile.TemporaryDirectory() as folder:
+            target=Path(folder)/"realtime.py"
+            original=b"initial gateway script\n"*100
+            updated=b"patched passive script\n"*110
+            target.write_bytes(original)
+            meta=d.host_file_stat(str(target))
+            boundary=170
+            target.write_bytes(updated[:boundary]+original[boundary:])
+            command=[sys.executable,"-c",d.ROOT_PARTIAL_RECOVERY,
+                     str(target),json.dumps(meta)]
+            payload=struct.pack(">I",len(original))+original+updated
+            proc=subprocess.run(command,input=payload,
+                                stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            self.assertEqual(proc.returncode,0,
+                             proc.stderr.decode(errors="replace")[:250])
+            self.assertEqual(proc.stdout,b"partial_write_recovered\n")
+            self.assertEqual(target.read_bytes(),original)
+            self.assertEqual(d.host_file_stat(str(target))["ino"],meta["ino"])
+
+    def test_partial_recovery_refuses_unrelated_inplace_edits(self):
+        import struct
+        with tempfile.TemporaryDirectory() as folder:
+            target=Path(folder)/"realtime.py"
+            original=b"old version"*90
+            updated=b"new version"*90
+            external=b"unrelated third-party edit"*45
+            target.write_bytes(original)
+            meta=d.host_file_stat(str(target))
+            target.write_bytes(external)
+            payload=struct.pack(">I",len(original))+original+updated
+            proc=subprocess.run([sys.executable,"-c",d.ROOT_PARTIAL_RECOVERY,
+                                 str(target),json.dumps(meta)],
+                                input=payload,stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+            self.assertNotEqual(proc.returncode,0)
+            self.assertEqual(target.read_bytes(),external)
+
     def test_root_writer_rejects_wrong_expected_hash_without_changes(self):
         with tempfile.TemporaryDirectory() as folder:
             target=Path(folder)/"realtime.py"
