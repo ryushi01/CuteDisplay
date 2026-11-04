@@ -18,9 +18,28 @@
 - The older `KittySpeakerObserver.authorized_recall` now fails closed in GitHub source; currently deployed private gateway still uses its own customized source. The legacy X-vector experimental-identity branch is now candidate-only in GitHub source.
 - Source-only voice-review Secure Enclave helper, server approval issuer, post-call learner and profile compare-and-swap store. No iPhone UI or real per-turn issuer yet.
 
-## One guarded Ubuntu speaker-safety stage (operator action)
+## Ubuntu speaker-safety stage — DEPLOYED SUCCESSFULLY (operator-confirmed)
 
 The new `server/kitty_v6_voice_stage_deploy.py` is a **single transaction**, not a wholesale overwrite. It finds the actual running user memory service source, requires the already-installed owner guard, checks the exact live CPU-speaker branch structure, backs up the speaker module, copies only missing matching opt-in helper modules, restarts **only** `kitty-memory-v6.service` and checks health and both private semantic denial statuses. On failure it attempts a source rollback + service recovery. It refuses unknown source layouts, modified existing helpers or a partially installed prior transaction. It does not change the live Docker gateway, Mac AI/TTS, S3/C5 firmware, SD archive, voice-profile files, owner secrets or feature flags. All new learning functionality stays **off** pending proper trusted-session binding.
+
+**Actual live result from the Ubuntu operator on 2026-11-04 (this supersedes the run instructions below):**
+
+```text
+KITTY_V6_VOICE_SAFETY_STAGE
+backup=created
+candidate_identity_guard=patched
+optional_helpers_staged=14
+memory_service=healthy
+private_403=verified
+candidate_only_safety=staged
+live_owner_auto_learning=off
+open_webui_audio=untouched
+esp32_firmware=untouched
+```
+
+**No re-run needed.** The transaction successfully backed up and patched the compatible live X-vector identity branch, staged 14 optional modules, restarted the user memory service and verified that private semantic requests without owner proof still get HTTP 403. The rollback transaction remains private on the Ubuntu machine. **Gateway/audio and all ESP32 firmware remain unchanged; no genuine speaker verifier, automatic voice learning, or owner-private automatic recall is activated.**
+
+The previous one-command installer instructions below are retained for disaster recovery documentation only. **Do not repeat the installer on this live host**, where it intentionally rejects an existing installed transaction.
 
 When Kitty is idle:
 
@@ -62,4 +81,4 @@ Roll back only if required; preserve backup contents privately. The scripts and 
 5. **S3 performance under one consolidated acceptance session:** check internal heap minimum, loop stack high-water mark, mic/speaker drops, UART ACK timeouts and network reconnection. S3 flash only if an actual firmware fix is justified. C5 v38 never OTA for unrelated server work.
 6. **Release gate:** all relevant server tests green, desired source revision recorded, no private files in GitHub, one recoverable Ubuntu deployment and a single meaningful real-hardware acceptance report.
 
-**Current state:** Server owner-grant guard is installed and working; source-only adaptive learning and trust plumbing are tested. **V6 is not yet finished end-to-end.** Do not automatically enable owner-private recall or hands-free voice learning just to meet a schedule.
+**Current state, after operator-confirmed deployment:** The Ubuntu memory-service owner-grant guard and candidate-only X-vector safety stage are both installed, health-checked and verified. The 14 optional voice modules are staged but NOT activated. The live gateway is still customized and unchanged; progressive voice training, trusted per-turn identity, owner-private live recall, and uninterrupted long-call memory still need end-to-end integration and hardware acceptance. **V6 is not finished end-to-end.** Never elevate a mere speaker candidate to human authentication.
