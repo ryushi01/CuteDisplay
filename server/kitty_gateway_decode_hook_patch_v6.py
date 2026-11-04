@@ -83,17 +83,23 @@ def _target(tree):
     if (len(loop.orelse)>0 or loop.target.id in ("event","ws")
             or len([n for n in _own_nodes(target) if _is_forward(n)])!=1):
         raise HookRefusal("provider_forward_ambiguous")
-    # Only direct loop-body event=decoder.loads(raw) is acceptable.
-    decode=[n for n in loop.body if _direct_decode(n,loop.target.id)]
-    if len(decode)!=1:
+    # Both direct event=json.loads(raw) and a single immediate try/except
+    # decoder are safe: the event still originates from the upstream loop.
+    first=loop.body[0] if loop.body else None
+    if isinstance(first,ast.Try):
+        group=first.body
+    elif isinstance(first,ast.TryStar):
+        group=first.body
+    else:
+        group=loop.body
+    if not group or not _direct_decode(group[0],loop.target.id):
         raise HookRefusal("provider_decode_unrecognized")
-    stmt=decode[0]
-    if any(not isinstance(x,ast.Expr) or x is not loop.body[0]
-           for x in (loop.body[0],)) and stmt is not loop.body[0]:
-        # Any preceding try/filter means decode is not the obvious origin.
-        raise HookRefusal("provider_decode_not_first")
-    if stmt is not loop.body[0]:
-        raise HookRefusal("provider_decode_not_first")
+    stmt=group[0]
+    # Other decodes, including nested fallbacks, mean ambiguous origin.
+    all_decodes=[n for n in _own_nodes(target)
+                 if _direct_decode(n,loop.target.id)]
+    if len(all_decodes)!=1:
+        raise HookRefusal("provider_decode_ambiguous")
     if stmt.end_lineno is None or stmt.end_lineno!=stmt.lineno:
         raise HookRefusal("multiline_decode_unrecognized")
     return target,loop,stmt
@@ -134,7 +140,7 @@ def patch(source):
         +indent+"try:\n"
         +indent+"    from kitty_passive_turn_bridge_v6 import KittyPassiveTurnBridge as _KittyV6Passive\n"
         +indent+"    _kitty_v6_passive = _KittyV6Passive()\n"
-        +indent+"except (ImportError, ValueError, TypeError, RuntimeError):\n".replace("except ",indent+"except ",1)
+        +indent+"except (ImportError, ValueError, TypeError, RuntimeError):\n"
         +indent+"    _kitty_v6_passive = None\n"
     )
     # For performance, parse only five provider event types. No audio delta
@@ -149,6 +155,8 @@ def patch(source):
         +i+"        _kitty_v6_passive = None\n"
     )
     # Edits are performed from bottom upward to keep precise AST offsets.
+    if insert_init_after>=decode.lineno:
+        raise HookRefusal("unexpected_declaration_order")
     inserts={insert_init_after:[init],decode.end_lineno:[hook]}
     for index in sorted(inserts,reverse=True):
         lines[index:index]=inserts[index]
