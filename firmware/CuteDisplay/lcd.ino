@@ -3174,7 +3174,10 @@ static void serviceBrain() {
   }
    else if(f.type=="AI_BEGIN"){
     if(callModeActive || callStopPending){
-     CuteLink::send(Serial1,f.seq,"NACK","CALL_ACTIVE");
+     // The S3's delegated chat still uses the legacy AI_* UART ACK
+     // flow-control channel. Keep the transcript/bubble invisible in Call
+     // Mode, but do not NACK or abort the underlying successful AI reply.
+     CuteLink::send(Serial1,f.seq,"ACK","AI");
     }else if(!lcdReady){CuteLink::send(Serial1,f.seq,"NACK","DISPLAY");}
    else{
      callHidesNormalChat=false;
@@ -3186,10 +3189,16 @@ static void serviceBrain() {
    }
   }
   else if(f.type=="AI_DATA"){
-    if(callModeActive || callStopPending || !aiScrollMode || !lcdReady ||
-       f.payload.isEmpty() || f.payload.length()>80){
-    CuteLink::send(Serial1,f.seq,"NACK","AI_STATE");
-   }else{
+    if(f.payload.isEmpty() || f.payload.length()>80){
+     CuteLink::send(Serial1,f.seq,"NACK","AI_STATE");
+    }else if(callModeActive || callStopPending){
+     // Consume/ACK the delegated text for UART flow control only. Full
+     // screen Call Mode is rendered independently via CALL_TEXT and audio.
+     // Never append this data to the ordinary bubble or restart typewriter.
+     CuteLink::send(Serial1,f.seq,"ACK","AI");
+    }else if(!aiScrollMode || !lcdReady){
+     CuteLink::send(Serial1,f.seq,"NACK","AI_STATE");
+    }else{
     // Sliding display buffer: keep UTF-8 boundaries and enough lines to scroll.
     if(message.length()+f.payload.length()>1800){
      size_t drop=message.length()+f.payload.length()-1500;
@@ -3206,7 +3215,8 @@ static void serviceBrain() {
   }
    else if(f.type=="AI_END"){
     if(callModeActive || callStopPending){
-     CuteLink::send(Serial1,f.seq,"NACK","CALL_ACTIVE");
+     // Finish the display transport without exposing normal chat UI.
+     CuteLink::send(Serial1,f.seq,"ACK","AI");
     }else{
      if(aiScrollMode){aiStreamFinished=true;aiFinishedAt=millis();}
      CuteLink::send(Serial1,f.seq,"ACK","AI");
