@@ -207,7 +207,14 @@ def apply():
     if not lib.healthy():
         raise StageError("memory_service_unhealthy")
     if STATE_FILE.exists():
-        raise StageError("prior_transaction_exists")
+        try:
+            last=json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except (OSError,ValueError):
+            raise StageError("prior_transaction_unreadable") from None
+        # Only a COMPLETED rollback can be safely followed by a new attempt.
+        # An interrupted or still-installed transaction must be recovered.
+        if last.get("status")!="rolled_back":
+            raise StageError("prior_transaction_exists")
     target=service.parent/SPEAKER_NAME
     check_target(target)
     before=target.read_bytes()
