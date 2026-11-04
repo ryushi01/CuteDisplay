@@ -258,21 +258,16 @@ static void drawFullScreenKittyFace(){
  if(connecting){
   for(int i=0;i<3;i++)oval(147+i*12,141,2+(i==(int)(animPhase%3)),2,CF_PURPLE);
  }
- // Thin bottom status capsule. Only 20px high; face remains full-screen.
+ // C5 v39: status text uses transparent rendering over Kitty's body.
+ // No opaque status capsule or black band obscures the animated face.
  String label=listening?"LISTENING":thinking?"THINKING":
               speaking?"SPEAKING":connecting?"CONNECTING":"CALL";
- int width=label.length()*6+24;
- // Lower-left capsule, deliberately away from the center lip-sync mouth.
- int x=11;
- oval(x+8,160,8,8,CF_INK);oval(x+width-8,160,8,8,CF_INK);
- rect(x+8,152,width-16,17,CF_INK);
- textAt(label,x+12,155,1,CF_WHITE);
- // Compact caption overlay: the animated mascot stays visible behind and
- // above the lower text panel. Show only the active reply, not the prior one.
+ textAt(label,15,154,1,BLACK);
+ // Transparent 2-line live caption on the light forehead, above the eyes.
+ // Keep Kitty-chan fully visible as the real framebuffer background.
+ // The framebuffer is redrawn each frame, so no caption-clear panel is needed.
  if(!callCaption.isEmpty()){
-  const int panelY=136;
-  const int panelH=34;
-  rect(0,panelY,320,panelH,CF_INK);
+  const int captionY=40;
   String rows[2];String current="";int used=0;
   auto appendRow=[&](const String &value){
    rows[0]=rows[1];
@@ -291,7 +286,7 @@ static void drawFullScreenKittyFace(){
   }
   if(!current.isEmpty())appendRow(current);
   for(int i=0;i<2;i++)if(!rows[i].isEmpty())
-   richText(rows[i],6,panelY+5+i*14,1,1,CF_WHITE,316);
+   richText(rows[i],6,captionY+i*16,1,1,BLACK,316);
  }
 
 }
