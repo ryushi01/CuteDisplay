@@ -54,6 +54,9 @@ jobs:
       - name: Inspect read-only gateway turn shape without exposing private source
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_gateway_turn_shape_v6 -v
 
+      - name: Verify no-VAD upstream-only attested gateway event adapter
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_gateway_turn_adapter_v6 -v
+
       - name: Check speaker attribution and display contracts
         run: |
           python3 -m unittest discover -s server -p 'test_kitty_attribution_pipeline_contract_v6.py' -v
