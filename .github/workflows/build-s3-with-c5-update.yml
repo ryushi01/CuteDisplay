@@ -113,6 +113,9 @@ jobs:
       - name: Test guarded voice safety deployment and rollback
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_v6_voice_stage_deploy -v
 
+      - name: Verify private S3-only sync packaging and public CI credential exclusion
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_private_s3_only_build_v6 -v
+
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
