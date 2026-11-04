@@ -33,6 +33,21 @@ class BindRolloutTests(unittest.TestCase):
                 with self.assertRaises(d.Refusal):
                     d.mounted_host_source()
 
+    def test_root_metadata_fallback_reveals_no_source_data(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target=Path(folder)/"gateway.py"
+            target.write_bytes(b"private = 'do not print'\n")
+            expected=d.host_file_stat(str(target))
+            fake_output=json.dumps(expected).encode()
+            with patch.object(d,"host_file_stat",
+                              side_effect=d.Refusal("host_source_read_denied")),patch.object(
+                              d,"cmd",return_value=fake_output) as command:
+                result=d.verified_host_stat(str(target))
+            self.assertEqual(result,expected)
+            self.assertNotIn("private",str(result))
+            self.assertEqual(command.call_args.args[0][:3],
+                             ["sudo","python3","-c"])
+
     def test_same_inode_and_owner_after_exact_in_place_update(self):
         with tempfile.TemporaryDirectory() as folder:
             original=Path(folder)/"realtime.py"
