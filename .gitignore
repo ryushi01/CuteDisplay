@@ -15,3 +15,8 @@ release/
 gateway/private-config.json
 gateway/private-*.json
 gateway/.venv/
+
+# Never track S3 device-sync credentials or locally compiled credential-bearing images
+**/KittySyncPrivateConfig.h
+s3-only-candidate/
+prepared-firmware/
