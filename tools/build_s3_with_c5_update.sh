@@ -35,7 +35,7 @@ except (OSError, UnicodeError, TypeError, ValueError):
     sys.exit("REFUSED: private synchronization header invalid (values hidden)")
 print("PASS: private sync settings validated (values hidden)")
 PY
-  OUT="${KITTY_RELEASE_OUT:-$HOME/.local/share/kitty-v6/private-builds/combined-$(date -u +%Y%m%dT%H%M%SZ)-$}"
+  OUT="${KITTY_RELEASE_OUT:-$HOME/.local/share/kitty-v6/private-builds/combined-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
   python3 - "$ROOT" "$OUT" <<'PY'
 from pathlib import Path
 import sys
