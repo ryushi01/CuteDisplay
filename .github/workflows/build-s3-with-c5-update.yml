@@ -42,6 +42,9 @@ jobs:
       - name: Verify read-only live Ubuntu readiness preflight
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_live_readiness_v6 -v
 
+      - name: Verify read-only owner semantic service patch compatibility plan
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_owner_guard_plan_v6 -v
+
       - name: Check speaker attribution and display contracts
         run: |
           python3 -m unittest discover -s server -p 'test_kitty_attribution_pipeline_contract_v6.py' -v
