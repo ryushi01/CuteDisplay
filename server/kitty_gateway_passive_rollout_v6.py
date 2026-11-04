@@ -126,6 +126,31 @@ def save_manifest(data):
         if os.path.exists(name):os.unlink(name)
 
 
+def backup_gateway_as_host_user(backup):
+    """Copy private source without docker cp's root-owned host-file bug.
+
+    The parent is already the invoking Ubuntu user's private 0700 folder.
+    Never print or log the content.
+    """
+    raw=docker("exec",CONTAINER,"cat",str(LIVE),timeout=35)
+    if not 1<=len(raw)<=2_000_000:
+        raise DeployRefusal("gateway_source_unreadable")
+    flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
+    if hasattr(os,"O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd=os.open(backup,flags,0o600)
+        with os.fdopen(fd,"wb") as private_copy:
+            private_copy.write(raw)
+            private_copy.flush()
+            os.fsync(private_copy.fileno())
+        if sha(backup.read_bytes())!=sha(raw):
+            raise DeployRefusal("backup_verification_failed")
+    except OSError:
+        raise DeployRefusal("backup_write_failed") from None
+    return raw
+
+
 def helper_status(names):
     # Return fixed destination hashes only; never read or echo private data.
     check="import json,hashlib,stat\nfrom pathlib import Path\n"
@@ -251,26 +276,7 @@ def apply():
     folder=STORE/leaf
     folder.mkdir(mode=0o700)
     backup=folder/"realtime.py"
-    # docker cp often creates root-owned host files even when docker is
-    # invoked by an unprivileged Ubuntu account via sudo. Instead, read
-    # the exact container file through stdout and CREATE the private backup
-    # as the current host user, mode 0600 from the first byte written.
-    original=docker("exec",CONTAINER,"cat",str(LIVE),timeout=35)
-    if not 1<=len(original)<=2_000_000:
-        raise DeployRefusal("gateway_source_unreadable")
-    flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
-    if hasattr(os,"O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        fd=os.open(backup,flags,0o600)
-        with os.fdopen(fd,"wb") as private_copy:
-            private_copy.write(original)
-            private_copy.flush()
-            os.fsync(private_copy.fileno())
-    except OSError:
-        raise DeployRefusal("backup_write_failed") from None
-    if sha(backup.read_bytes())!=sha(original):
-        raise DeployRefusal("backup_verification_failed")
+    original=backup_gateway_as_host_user(backup)
     try:
         source=original.decode("utf-8")
         revised=module.patch(source)
