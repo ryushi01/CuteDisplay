@@ -83,6 +83,9 @@ jobs:
             server.test_kitty_gateway_speaker_guard_v6 \
             server.test_kitty_live_rolling_context_v6 -v
 
+      - name: Ensure legacy X-vector identity mode cannot authorize an owner
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_xvector_legacy_identity_guard_v6 -v
+
       - name: Reject voice-probable private recall and validate candidate-only familiarity transport
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_realtime_gateway_observer_v6 server.test_kitty_realtime_speaker_v6 -v
 
