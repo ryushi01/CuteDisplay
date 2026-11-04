@@ -526,7 +526,10 @@ bool voiceButtonLastRaw=HIGH,voiceButtonStable=HIGH,voiceButtonSession=false,voi
 bool callModeActive=false;
 // Transient full-screen call artwork state; normal user settings are untouched.
 static String callCaption;
-static String callCaptionPrevious;
+static String callCaptionHistory; // bounded completed turns in RAM only
+static bool callStopPending=false;
+static uint32_t callStopRequestedAt=0,callStopLastSent=0;
+static uint8_t callStopAttempts=0;
 static uint8_t callFaceMood=1; // target mood; 0..7
 static uint8_t callFacePreviousMood=1;
 static uint32_t callFaceTransitionStart=0;
@@ -552,6 +555,7 @@ String message = "こんにちわ";
 bool bubbleEnabled = false; // Normal scrolling remains the default.
 bool bubbleTypewriter = true;
 bool aiScrollMode=false;
+bool callHidesNormalChat=false; // transient; never persisted to NVS
 bool aiStreamFinished=true;
 static constexpr unsigned long AI_RETURN_DELAY_MS=120000UL;
 unsigned long aiFinishedAt=0;
@@ -1779,8 +1783,9 @@ size_t bubbleCharacterCount(const String &s);
 static bool mascotIsSpeaking() {
   // Keep eyes continuously open during the entire news bubble,
   // including page-transition pauses; never fall back to sleepy blink mid-speech.
-  return (bubbleEnabled && bubbleTypewriter || aiScrollMode)
-      && revealedCharacters < bubbleCharacterCount(message);
+  return !callModeActive && !callHidesNormalChat &&
+      (bubbleEnabled && bubbleTypewriter || aiScrollMode) &&
+      revealedCharacters < bubbleCharacterCount(message);
 }
 
 static void drawSpeakingMouth() {
@@ -2157,7 +2162,7 @@ void drawMessage() {
  int a=asciiMessageScale(), j=jpMessageScale();
  int height=max(7*a,16*j);
  int multilineHeight=height+(richLineCount(message)-1)*(height+4);
- if(bubbleEnabled || aiScrollMode){drawSpeechBubble();drawMascot();}
+ if((bubbleEnabled && !callHidesNormalChat) || aiScrollMode){drawSpeechBubble();drawMascot();}
  else {drawMascot();richText(message,scrollX,max(0,(LCD_H-multilineHeight)/2),a,j,themeColor(),contentRight());}
  drawBatteryOverlay();
  drawConnectivityHUD();
@@ -2207,9 +2212,12 @@ void drawMessage() {
 }
 void showMessage(String s) {
  s.trim(); if(s.isEmpty())return;
- aiScrollMode=false;aiStreamFinished=true;aiFinishedAt=0;
  normalDisplayMessage=s;
  noteStateChanged();
+ // Do not animate the ordinary bubble behind an active full-screen call.
+ if(callModeActive || callStopPending)return;
+ callHidesNormalChat=false;
+ aiScrollMode=false;aiStreamFinished=true;aiFinishedAt=0;
  message=s;
  revealedCharacters=0;lastBubbleReveal=millis();
  int width=richWidth(s,asciiMessageScale(),jpMessageScale());
@@ -2950,8 +2958,9 @@ static void serviceBrain() {
    continue;
   }
   if(f.type=="HELLO"){
-   callModeActive=false;callFaceMood=1;callLipLevel=0;
-   // Remote reboot: require a NEW successful round trip.
+    callModeActive=false;callStopPending=false;callFaceMood=1;callLipLevel=0;
+    callCaption="";callCaptionHistory="";
+    // Remote reboot: require a NEW successful round trip.
    lastProbeAck=0;
    resetCmdParts();
    lastAcceptedChunkSeq=0;lastAcceptedChunkResponse="";
@@ -2995,9 +3004,23 @@ static void serviceBrain() {
   else if(f.type=="ACTIVITY"){
    String next=f.payload.substring(0,18);
    bool wasActive=callModeActive;
-   if(next.startsWith("CALL_"))callModeActive=next!="CALL_OFF" && next!="CALL_ERROR";
-   else if(next.isEmpty())callModeActive=false;
-   if(!callModeActive){callFaceMood=1;callFacePreviousMood=1;callFaceTransitionStart=0;callLipLevel=0;callCaption="";callCaptionPrevious="";}
+    // Ignore obsolete S3 speaking/listening frames after C5 has requested
+    // an explicit stop. Only authoritative OFF/ERROR/idle clears the gate.
+    if(callStopPending && next.startsWith("CALL_") &&
+       next!="CALL_OFF" && next!="CALL_ERROR")continue;
+    if(callStopPending && (next=="CALL_OFF" || next=="CALL_ERROR" ||
+                           !next.startsWith("CALL_"))){
+      callStopPending=false;callStopAttempts=0;
+    }
+    if(next.startsWith("CALL_"))callModeActive=next!="CALL_OFF" && next!="CALL_ERROR";
+    else if(next.isEmpty())callModeActive=false;
+    if(callModeActive && !wasActive){
+      // Stop any old AI/bubble animation instead of resuming it at call end.
+      callHidesNormalChat=true;aiScrollMode=false;aiStreamFinished=true;
+      aiFinishedAt=0;scrolling=false;message=normalDisplayMessage;
+      revealedCharacters=bubbleCharacterCount(message);
+    }
+    if(!callModeActive){callFaceMood=1;callFacePreviousMood=1;callFaceTransitionStart=0;callLipLevel=0;callCaption="";callCaptionHistory="";}
    if(next!=kittyActivity || wasActive!=callModeActive){
     kittyActivity=next;if(lcdReady)redrawCurrent();
    }
@@ -3037,7 +3060,25 @@ static void serviceBrain() {
    if(callModeActive && f.payload.length()>=2 && f.payload.length()<=80){
     const char mode=f.payload[0];
     if(mode=='0' || mode=='1'){
-     if(mode=='0'){callCaptionPrevious=callCaption;callCaption="";}
+     if(mode=='0'){
+      String first=f.payload.substring(1);
+      // A 0-frame replaces an interim streaming caption. Keep the old one
+      // only when the new beginning is a different utterance.
+      if(!callCaption.isEmpty() && !first.isEmpty() &&
+         !callCaption.startsWith(first) && !first.startsWith(callCaption)){
+       if(!callCaptionHistory.isEmpty())callCaptionHistory+='\n';
+       callCaptionHistory+=callCaption;
+       if(callCaptionHistory.length()>1024){
+        size_t trim=callCaptionHistory.length()-800;
+        while(trim<callCaptionHistory.length() &&
+              ((uint8_t)callCaptionHistory[trim]&0xC0)==0x80)trim++;
+        callCaptionHistory.remove(0,trim);
+        int boundary=callCaptionHistory.indexOf('\n');
+        if(boundary>=0)callCaptionHistory.remove(0,boundary+1);
+       }
+      }
+      callCaption="";
+     }
      if(callCaption.length()+f.payload.length()-1<=768)
       callCaption+=f.payload.substring(1);
      if(lcdReady)redrawCurrent();
@@ -3052,10 +3093,13 @@ static void serviceBrain() {
     if(callLipLevel!=next){callLipLevel=next;if(lcdReady)redrawCurrent();}
    }
   }
-  else if(f.type=="AI_BEGIN"){
-   if(!lcdReady){CuteLink::send(Serial1,f.seq,"NACK","DISPLAY");}
+   else if(f.type=="AI_BEGIN"){
+    if(callModeActive || callStopPending){
+     CuteLink::send(Serial1,f.seq,"NACK","CALL_ACTIVE");
+    }else if(!lcdReady){CuteLink::send(Serial1,f.seq,"NACK","DISPLAY");}
    else{
-    aiScrollMode=true;aiStreamFinished=false;aiFinishedAt=0;aiFirstVisibleLine=0;
+     callHidesNormalChat=false;
+     aiScrollMode=true;aiStreamFinished=false;aiFinishedAt=0;aiFirstVisibleLine=0;
     message="";revealedCharacters=0;lastBubbleReveal=millis();
     aiScrollStarted=millis();aiLastScrollStep=millis();
     drawMessage();
@@ -3063,7 +3107,8 @@ static void serviceBrain() {
    }
   }
   else if(f.type=="AI_DATA"){
-   if(!aiScrollMode||!lcdReady||f.payload.isEmpty()||f.payload.length()>80){
+    if(callModeActive || callStopPending || !aiScrollMode || !lcdReady ||
+       f.payload.isEmpty() || f.payload.length()>80){
     CuteLink::send(Serial1,f.seq,"NACK","AI_STATE");
    }else{
     // Sliding display buffer: keep UTF-8 boundaries and enough lines to scroll.
@@ -3080,9 +3125,13 @@ static void serviceBrain() {
     CuteLink::send(Serial1,f.seq,"ACK","AI");
    }
   }
-  else if(f.type=="AI_END"){
-   if(aiScrollMode){aiStreamFinished=true;aiFinishedAt=millis();}
-   CuteLink::send(Serial1,f.seq,"ACK","AI");
+   else if(f.type=="AI_END"){
+    if(callModeActive || callStopPending){
+     CuteLink::send(Serial1,f.seq,"NACK","CALL_ACTIVE");
+    }else{
+     if(aiScrollMode){aiStreamFinished=true;aiFinishedAt=millis();}
+     CuteLink::send(Serial1,f.seq,"ACK","AI");
+    }
   }
   else if(f.type=="CMDHEX")receiveCmdChunk(f);
   else if(f.type=="GET_STATUS")replyStatus(f.seq);
@@ -3105,8 +3154,9 @@ static void serviceBrain() {
  }
  uint32_t now=millis();
  if(s3Online&&(uint32_t)(now-lastS3)>BRAIN_LOST_MS){
-  callModeActive=false;callFaceMood=1;callLipLevel=0;
-  s3Online=false;
+   callModeActive=false;callStopPending=false;callFaceMood=1;callLipLevel=0;
+   callCaption="";callCaptionHistory="";
+   s3Online=false;
   lastProbeAck=0;
   pendingProbeSeq=0;
   Serial.println("[UART] S3 RX timeout: bidirectional link lost");
@@ -3416,8 +3466,9 @@ void loop(){
    lastSpeakingFrame=millis();
    drawMessage();
  }
- if((bubbleEnabled && bubbleTypewriter || aiScrollMode)
-    && revealedCharacters<bubbleCharacterCount(message)
+  if(!callModeActive && !callHidesNormalChat &&
+     (bubbleEnabled && bubbleTypewriter || aiScrollMode) &&
+     revealedCharacters<bubbleCharacterCount(message)
     && millis()-lastBubbleReveal>=(aiScrollMode?65UL:BUBBLE_LETTER_MS)){
   lastBubbleReveal=millis();revealedCharacters++;drawMessage();
  }
@@ -3437,8 +3488,9 @@ void loop(){
  };
  if(mascotVisible || callModeActive)untilDue(lastMascotAnimation+MASCOT_ANIMATION_MS);
  if(scrolling)untilDue(lastScroll+55UL);
- if((bubbleEnabled && bubbleTypewriter || aiScrollMode) &&
-    revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+(aiScrollMode?65UL:BUBBLE_LETTER_MS));
+  if(!callModeActive && !callHidesNormalChat &&
+     (bubbleEnabled && bubbleTypewriter || aiScrollMode) &&
+     revealedCharacters<bubbleCharacterCount(message))untilDue(lastBubbleReveal+(aiScrollMode?65UL:BUBBLE_LETTER_MS));
  if(mascotVisible && mascotIsSpeaking())untilDue(lastSpeakingFrame+105UL);
  if(chargeNoticeUntil)untilDue(lastBatteryOverlayFrame+220UL);
  if(userButtonStable==LOW)sleepMs=min(sleepMs,(uint32_t)8);
