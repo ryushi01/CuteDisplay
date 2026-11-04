@@ -2879,6 +2879,11 @@ static void suspendNormalChatForCall(){
  scrolling=false;aiFirstVisibleLine=0;
  message=normalDisplayMessage;
  revealedCharacters=bubbleCharacterCount(message);
+ // Reset stale AI scroll geometry as well as its content. The idle screen
+ // must never reveal the prior conversational bubble after a full-screen call.
+ int right=contentRight();
+ int width=richWidth(message,asciiMessageScale(),jpMessageScale());
+ scrollX=max(0,(right-width)/2);
  lastBubbleReveal=millis();
 }
 
