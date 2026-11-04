@@ -23,10 +23,13 @@ class KittyPassiveTurnBridge:
     """Lightweight event observation; all I/O and AI responses stay in gateway."""
 
     def __init__(self, *, issuer_secret=None, owner_grant_secret=None,
-                 enable_familiarity=False):
+                 enable_familiarity=False, wall_clock=None):
+        # The clock can be injected by offline tests; it is never an inbound
+        # client, S3 or model supplied timestamp.
+        clock_args={"wall_clock":wall_clock} if callable(wall_clock) else {}
         self._turns=GatewayTurnAdapter(attested_call=AttestedLiveCall(
             attestation_secret=issuer_secret,
-            owner_grant_secret=owner_grant_secret))
+            owner_grant_secret=owner_grant_secret, **clock_args))
         self._familiarity=CandidateFamiliarity() if enable_familiarity is True else None
         if self._familiarity is not None:
             self._familiarity.begin_call()
