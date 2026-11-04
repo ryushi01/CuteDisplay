@@ -21,6 +21,7 @@ import time
 from kitty_live_rolling_context_v6 import LiveCallContinuity
 
 AUDIENCE = "kitty-verified-spoken-turn-v6"
+LEARNING_AUDIENCE = "kitty-verified-voice-learning-v6"
 RESERVED_OWNER_LOCAL_ID = "person:attested_owner_local"
 ITEM = re.compile(r"[A-Za-z0-9_-]{1,160}\Z")
 PERSON = re.compile(r"person:[A-Za-z0-9_-]{1,48}\Z")
@@ -53,7 +54,7 @@ def _digest(transcript):
 
 def issue_external_attestation(secret, *, session_id, item_id, transcript,
                                speaker_id, speaker_role, now=None, ttl=10,
-                               audio_sha256=None):
+                               audio_sha256=None, purpose="turn"):
     """Issuer-side protocol helper ONLY; caller must verify a human separately.
 
     This function is not a speaker classifier and is never invoked by the
@@ -70,12 +71,14 @@ def issue_external_attestation(secret, *, session_id, item_id, transcript,
             or (audio_sha256 is not None and (
                 not isinstance(audio_sha256, str)
                 or not AUDIO_HASH.fullmatch(audio_sha256)))
+            or purpose not in ("turn", "learning")
+            or (purpose == "learning" and audio_sha256 is None)
             or digest is None or type(ttl) is not int
             or not 1 <= ttl <= MAX_TICKET_TTL):
         raise ValueError("invalid attestation")
     now = int(time.time() if now is None else now)
     fields = {
-        "aud": AUDIENCE,
+        "aud": AUDIENCE if purpose == "turn" else LEARNING_AUDIENCE,
         "sid": session_id,
         "item": item_id,
         "digest": digest,
@@ -95,13 +98,16 @@ def issue_external_attestation(secret, *, session_id, item_id, transcript,
 
 
 def verify_external_attestation(secret, ticket, *, session_id, item_id,
-                                transcript, now=None, audio_sha256=None):
-    """Return signed speaker/role, optionally bound to the exact audio bytes."""
+                                transcript, now=None, audio_sha256=None,
+                                purpose="turn"):
+    """Return signed speaker/role ONLY for the explicitly named purpose."""
     digest = _digest(transcript)
     if (not isinstance(secret, bytes) or len(secret) < 32
             or not isinstance(ticket, str) or len(ticket) > 1024
             or not isinstance(session_id, str) or not SESSION.fullmatch(session_id)
             or not isinstance(item_id, str) or not ITEM.fullmatch(item_id)
+            or purpose not in ("turn","learning")
+            or (purpose == "learning" and audio_sha256 is None)
             or digest is None
             or (audio_sha256 is not None and (
                 not isinstance(audio_sha256, str)
@@ -118,7 +124,8 @@ def verify_external_attestation(secret, ticket, *, session_id, item_id,
             return None
         obj = json.loads(_decode(body))
         now = int(time.time() if now is None else now)
-        if (not isinstance(obj, dict) or obj.get("aud") != AUDIENCE
+        audience=AUDIENCE if purpose=="turn" else LEARNING_AUDIENCE
+        if (not isinstance(obj, dict) or obj.get("aud") != audience
                 or obj.get("sid") != session_id or obj.get("item") != item_id
                 or obj.get("digest") != digest
                 or (obj.get("audio_sha256") is not None and
