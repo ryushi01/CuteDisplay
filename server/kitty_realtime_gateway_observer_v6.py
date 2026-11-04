@@ -14,14 +14,28 @@ except ImportError:
     from kitty_realtime_speaker_session_v6 import SpeakerSession
     from kitty_realtime_turn_gate_v6 import MemoryTurnGate
 
+try:
+    from .kitty_voice_familiarity_hints_v6 import CandidateFamiliarity
+except ImportError:
+    try:
+        from kitty_voice_familiarity_hints_v6 import CandidateFamiliarity
+    except ImportError:
+        CandidateFamiliarity = None
+
 class KittySpeakerObserver:
     def __init__(self, send_to_s3, *, session=None, enabled=False,
-                 url=None, token=None, on_candidate=None, on_candidate_clear=None):
+                 url=None, token=None, on_candidate=None, on_candidate_clear=None,
+                 familiarity_enabled=False):
         self.enabled = enabled is True
         self.on_candidate = on_candidate
         self.on_candidate_clear = on_candidate_clear
         self.candidate_hint = None
         self.candidate_expires = 0.0
+        self.familiarity = (CandidateFamiliarity() if
+            self.enabled and familiarity_enabled is True
+            and CandidateFamiliarity is not None else None)
+        if self.familiarity is not None:
+            self.familiarity.begin_call()
         self.url = url if url is not None else os.environ.get("KITTY_SEMANTIC_SERVICE_URL", "")
         self.token = token if token is not None else os.environ.get("KITTY_MEMORY_TOKEN", "")
         self.session = session or SpeakerSession()
@@ -42,6 +56,8 @@ class KittySpeakerObserver:
             self.session.close()
             self.session = self._session_factory()
             self.pending_stopped_item = None
+            if self.familiarity is not None:
+                self.familiarity.interrupted()
 
     def observe_upstream(self, event):
         if not self.enabled or not isinstance(event, dict):
@@ -80,6 +96,8 @@ class KittySpeakerObserver:
                                   self._send_recognition, timeout=12.0)
         elif kind == "error":
             self.gate.invalidate()
+            if self.familiarity is not None:
+                self.familiarity.interrupted()
 
     async def _send_recognition(self, event):
         if (not isinstance(event, dict) or self.epoch is None or
@@ -116,6 +134,18 @@ class KittySpeakerObserver:
         if candidate == "person:shana" and sid == "unknown":
             safe_event["candidate_speaker_id"] = candidate
             safe_event["candidate_provenance"] = "voice_probable"
+        # Optional non-authorizing familiarity metadata. A matching CPU
+        # candidate must never become an authenticated owner speaker ID.
+        if self.familiarity is not None:
+            familiarity = self.familiarity.observe(
+                provider_item_id=item,
+                speaker_candidate=candidate,
+                score=event.get("candidate_score"),
+                recognizer_source="trusted_gateway_cpu",
+                echo_or_overlap=event.get("playback_active",False))
+            if familiarity is not None and sid=="unknown":
+                safe_event["candidate_familiarity"] = familiarity["familiarity"]
+                safe_event["private_memory_authorized"] = False
         try:
             await self.send_to_s3(safe_event)
             if "candidate_speaker_id" in safe_event:
@@ -125,31 +155,24 @@ class KittySpeakerObserver:
             print("[KITTY_SPEAKER_DELIVERY] error=%s" % type(exc).__name__, flush=True)
 
     def authorized_recall(self, turn_id, speaker_id, provenance):
-        """Return a turn token only for a matching CPU-observed voice identity.
+        """Legacy probable-voice recall is permanently disabled.
 
-        A self-introduction or device-submitted name cannot authorize recall.
-        The caller must recheck the returned epoch after the async lookup.
+        The independently signed exact-turn owner/guest bridge is separate.
+        A voice embedding, BLE pairing or recognized name is never an
+        authorization credential for historical/private semantic memory.
         """
-        if (not self.enabled or provenance != "voice_probable"
-                or not isinstance(turn_id, str)
-                or not isinstance(speaker_id, str)
-                or self.epoch is None):
-            print("[KITTY_RECALL_DIAG] request=skipped reason=no_authorized_turn", flush=True)
-            return None
-        if not self.gate.allow_recall(self.epoch, turn_id, speaker_id):
-            print("[KITTY_RECALL_DIAG] request=skipped reason=turn_gate", flush=True)
-            return None
-        print("[KITTY_RECALL_DIAG] request=accepted provenance=voice_probable", flush=True)
-        return self.epoch
+        print("[KITTY_RECALL_DIAG] request=skipped reason=trusted_turn_proof_required",
+              flush=True)
+        return None
 
     def complete_recall(self, epoch, turn_id, speaker_id, context):
-        """Consume a single result for the exact same speaker and turn."""
-        if not self.enabled:
-            return ""
-        return self.gate.consume_context(epoch, turn_id, speaker_id, context)
+        """Do not release private context through the old voice-probable gate."""
+        return ""
 
     def close(self):
         self.gate.invalidate()
+        if self.familiarity is not None:
+            self.familiarity.end_call()
         self.candidate_hint = None
         self.candidate_expires = 0.0
         self.session.close()
