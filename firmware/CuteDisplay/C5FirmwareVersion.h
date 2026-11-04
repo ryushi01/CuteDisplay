@@ -32,4 +32,6 @@
 // caption strip or status panel.
 // v40: five transparent UTF-8 transcript rows with rolling speaker turns;
 // immediate, idempotent physical-button call stop and no background AI bubble.
-static constexpr uint32_t C5_FIRMWARE_VERSION = 40;
+// v41: keep realtime delegated AI UART flow-control ACKs while suppressing
+// the legacy background bubble; v40 NACK CALL_ACTIVE broke successful replies.
+static constexpr uint32_t C5_FIRMWARE_VERSION = 41;
