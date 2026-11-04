@@ -2,8 +2,51 @@
 # Build the current C5 application and embed it in the S3 Brain firmware.
 # Runs on macOS or a GitHub Actions Linux runner; never flashes a USB device.
 set -euo pipefail
+umask 077
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${KITTY_RELEASE_OUT:-$ROOT/release}"
+PRIVATE_HEADER="${KITTY_SYNC_PRIVATE_HEADER:-}"
+if [ -n "$PRIVATE_HEADER" ]; then
+  if [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${CI:-}" = "true" ]; then
+    echo "REFUSED: never build credential-bearing firmware in CI" >&2; exit 1
+  fi
+  python3 - "$PRIVATE_HEADER" <<'PY'
+from pathlib import Path
+import json, re, sys
+p=Path(sys.argv[1])
+if not p.is_file() or p.is_symlink() or p.stat().st_size > 65536:
+    sys.exit("REFUSED: private configuration unavailable or unsafe")
+try:
+    raw=p.read_text(encoding="utf-8")
+    values={}
+    for name in ("KITTY_SYNC_V6_URL", "KITTY_SYNC_V6_DEVICE_TOKEN", "KITTY_SYNC_V6_CA_PEM"):
+        rows=re.findall(r"^#define\s+"+name+r"\s+(.+)$", raw, re.M)
+        if len(rows)!=1:
+            raise ValueError("invalid private macro count")
+        values[name]=json.loads(rows[0].strip())
+    url=values["KITTY_SYNC_V6_URL"]
+    token=values["KITTY_SYNC_V6_DEVICE_TOKEN"]
+    ca=values["KITTY_SYNC_V6_CA_PEM"]
+    if (url!="https://ragnarok-project.com/kitty-v6/sync"
+            or not isinstance(token,str) or len(token)<32 or any(c.isspace() for c in token)
+            or not isinstance(ca,str) or "-----BEGIN CERTIFICATE-----" not in ca
+            or "-----END CERTIFICATE-----" not in ca):
+        raise ValueError("invalid private configuration")
+except (OSError, UnicodeError, TypeError, ValueError):
+    sys.exit("REFUSED: private synchronization header invalid (values hidden)")
+print("PASS: private sync settings validated (values hidden)")
+PY
+  OUT="${KITTY_RELEASE_OUT:-$HOME/.local/share/kitty-v6/private-builds/combined-$(date -u +%Y%m%dT%H%M%SZ)-$}"
+  python3 - "$ROOT" "$OUT" <<'PY'
+from pathlib import Path
+import sys
+repo=Path(sys.argv[1]).resolve()
+output=Path(sys.argv[2]).expanduser().resolve()
+if output==repo or repo in output.parents:
+    sys.exit("REFUSED: private firmware output inside Git checkout")
+PY
+else
+  OUT="${KITTY_RELEASE_OUT:-$ROOT/release}"
+fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 C5_FQBN="esp32:esp32:esp32c5:FlashSize=16M,PSRAM=enabled,PartitionScheme=custom"
@@ -80,16 +123,10 @@ echo "PASS: automatic C5 OTA allowed only when version is newer and devices are 
 echo "[3/5] Embed C5 v$VERSION in S3 firmware"
 mkdir -p "$WORK/CuteDisplayBrain"
 cp -R "$ROOT/firmware/CuteDisplayBrain/." "$WORK/CuteDisplayBrain/"
-# Local private sync credentials must never appear in GitHub Actions artifacts.
-# This option is intended only for a trusted offline/local build machine.
-if [ -n "${KITTY_SYNC_PRIVATE_HEADER:-}" ]; then
-  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
-    echo "Refusing private credential injection in public CI" >&2; exit 1
-  fi
-  test -f "$KITTY_SYNC_PRIVATE_HEADER" || {
-    echo "Missing private sync configuration header" >&2; exit 1;
-  }
-  cp "$KITTY_SYNC_PRIVATE_HEADER" "$WORK/CuteDisplayBrain/KittySyncPrivateConfig.h"
+# Never inherit any unreviewed local header from the source checkout.
+rm -f "$WORK/CuteDisplayBrain/KittySyncPrivateConfig.h"
+if [ -n "$PRIVATE_HEADER" ]; then
+  cp "$PRIVATE_HEADER" "$WORK/CuteDisplayBrain/KittySyncPrivateConfig.h"
   chmod 600 "$WORK/CuteDisplayBrain/KittySyncPrivateConfig.h"
 fi
 cp "$PARTITIONS" "$WORK/CuteDisplayBrain/partitions.csv"
@@ -109,8 +146,15 @@ arduino-cli compile --clean --fqbn "$S3_FQBN" \
 test -s "$WORK/build-s3/CuteDisplayBrain.ino.bin"
 mkdir -p "$OUT/CuteDisplayBrain"
 cp -R "$WORK/CuteDisplayBrain/." "$OUT/CuteDisplayBrain/"
-# Never distribute the plaintext header alongside the release sources.
-rm -f "$OUT/CuteDisplayBrain/KittySyncPrivateConfig.h"
+# Public CI artifacts never contain private headers. Only a private local
+# build outside the checkout keeps it so rebuilding the Arduino IDE project
+# does not silently disable the sync client again.
+if [ -n "$PRIVATE_HEADER" ]; then
+  chmod 700 "$OUT" "$OUT/CuteDisplayBrain"
+  chmod 600 "$OUT/CuteDisplayBrain/KittySyncPrivateConfig.h"
+else
+  rm -f "$OUT/CuteDisplayBrain/KittySyncPrivateConfig.h"
+fi
 cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
   "$OUT/CuteDisplay-CombinedFirmware.bin"
 cp "$WORK/build-s3/CuteDisplayBrain.ino.bin" \
@@ -121,7 +165,7 @@ CuteDisplay combined firmware build: S3 Brain + C5 v$VERSION
 =======================================================
 Realtime voice transport was hardware-validated at commit 78d4abd9.
 NEW: C5 v$VERSION panoramic Kitty Call Face is experimental.
-Preserve the previous tested S3+C5 v22 archive for recovery.
+Preserve the currently working S3 + C5 v38 build for recovery.
 
 NORMAL UPLOAD (existing C5 OTA-capable firmware v1 or later):
 1. Open CuteDisplayBrain/CuteDisplayBrain.ino FROM THIS ARTIFACT.
@@ -208,4 +252,22 @@ git -C "$ROOT" rev-parse HEAD > "$OUT/SOURCE_COMMIT.txt"
 
 echo "[5/5] Combined firmware available at: $OUT"
 ls -lh "$OUT/"*.bin
+if [ -n "$PRIVATE_HEADER" ]; then
+  chmod 600 "$OUT/CuteDisplay-CombinedFirmware.bin" "$OUT/S3-Brain-includes-C5-v${VERSION}-application.bin" "$OUT/C5-v${VERSION}-application.bin"
+  cat >> "$OUT/READ_ME_FIRST.txt" <<'EOF'
+
+PRIVATE LOCAL BUILD (not for public distribution)
+- This compiled S3 application and the private Arduino sketch contain a
+  device bearer token and trust anchor. Keep both off public servers/CI.
+- The locally generated CuteDisplayBrain Arduino IDE project RETAINS
+  KittySyncPrivateConfig.h. Do not remove it when compiling/uploading.
+- Upload S3 only using matching 16MB dual OTA partitions, preserve flash
+  NVS and microSD. On reboot the S3 automatically updates C5 v38 to v39.
+- After upload check 'memory sync status' -> configured=1 running=1 and
+  the UART C5 firmware version -> 39. Test normal voice, iPhone BLE,
+  lip-sync and two-line transparent captions.
+EOF
+  echo "PRIVATE COMBINED: S3 + C5 v$VERSION compiled with sync settings."
+  echo "Keep private output and binaries secret; do not publish or attach."
+fi
 echo "Open $OUT/CuteDisplayBrain/CuteDisplayBrain.ino in Arduino IDE"
