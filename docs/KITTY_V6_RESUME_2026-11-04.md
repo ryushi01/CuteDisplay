@@ -227,3 +227,26 @@ Targeted GitHub Actions steps **`Verify secure owner-voice adaptive learning fro
 **Remaining for actual everyday behavior** (do not misstate source tests as deployed functionality): independently verified microphone identity (real positive/negative impostor evaluation), a trusted bridge between actual provider item and corresponding microphone bytes, optional reviewed owner enrollment/consent UI and server endpoint, and safe opt-in staging in the private Open WebUI gateway's observed event-loop shape. Current human-reviewed per-sample training is **not hands-free**; ordinary probable recognition can provide safe familiarity hints but cannot silently update verified owner profiles or authorize private facts. Do not enable owner-private automatic recall, grant issuing from `voice_probable`, or a background automatic learner without trusted provenance.
 
 **Safety/operation:** Keep original SD archive, voice anchors, BLE on C5 v38, current S3 realtime and Open WebUI running. No hardware flashing or new full service rebuild is requested for this checkpoint.
+
+## Ubuntu voice-safety stage applied successfully — 2026-11-04
+
+The operator ran the single-use `git show FETCH_HEAD:server/kitty_v6_voice_stage_deploy.py | python3 - --apply` on the live Ubuntu VM and received exactly:
+
+```text
+KITTY_V6_VOICE_SAFETY_STAGE
+backup=created
+candidate_identity_guard=patched
+optional_helpers_staged=14
+memory_service=healthy
+private_403=verified
+candidate_only_safety=staged
+live_owner_auto_learning=off
+open_webui_audio=untouched
+esp32_firmware=untouched
+```
+
+**Supersedes any earlier suggestion to run this installer:** the transaction is installed. Do not rerun `--apply`, which intentionally refuses a prior installed transaction. Private transaction backup remains in the operator's Ubuntu state directory. No rollback indicated. GitHub Actions run `41770785455` completed with success (including targeted deployment/rollback, owner voice, and X-vector security tests, plus firmware build), but CI does not constitute a physical firmware flash or live biometric accuracy test.
+
+Live memory-service owner grant/403 authorization remains operational, X-vector experimental voice matching is candidate-only, and the 14 new optional modules are present. **No Open WebUI gateway integration, private historical recall, hands-free verified learning, consented owner review UI or S3/C5 firmware change occurred.** This is a reliable release checkpoint, not end-to-end V6 completion.
+
+Next work, in priority order: (1) integrate bounded extractive same-call context into the private gateway with exact provider item tracking, without private lookup or model/audio changes; (2) establish real speaker-independent, per-turn authorization and optional owner review via trusted microphone audio binding; (3) gated private history recall and consenting adaptive learning, after real guest/playback/liveness tests; (4) one uninterrupted multiperson long call with log/heap/UART acceptance. Avoid repetitive server status checks, new firmware flashing, or re-installation of the completed voice safety stage.
