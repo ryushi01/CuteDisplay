@@ -126,15 +126,22 @@ DO NOT flash at offset 0x0.
 This build script never uploads to a board or performs a C5 OTA.
 Do not use the combined firmware release script to prepare an S3-only update.
 No hardware validation or flash partition/NVS preservation is implied.
-EOF
-echo "S3-only compile succeeded: $OUT/S3-Brain-application.bin"
-echo "No flash performed, no C5 image embedded.
 Sync private configuration: $([ -n "$PRIVATE_HEADER" ] && echo included || echo absent).
-$([ -n "$PRIVATE_HEADER" ] && printf '%s' "PRIVATE BUILD: contains credential-bearing S3 binary and Arduino source.
+EOF
+if [ -n "$PRIVATE_HEADER" ]; then
+  cat >> "$OUT/README.txt" <<'EOF'
+PRIVATE BUILD: contains credential-bearing S3 binary and Arduino source.
 Keep this directory private. Do not attach, publish, upload to GitHub Actions, or share.
 To upload: open CuteDisplayBrain/CuteDisplayBrain.ino from this private output
 in Arduino IDE with ESP32S3 Dev Module, 16MB Flash, OPI PSRAM, Custom
 partitions (included partitions.csv), USB CDC On Boot enabled, Loop/Arduino
 Core 1, Events Core 0, CPU 240MHz. Upload only S3; DO NOT erase NVS/SD.
 Check memory sync status after boot. C5 version remains unchanged.
-" || true)"
+EOF
+fi
+echo "S3-only compile succeeded: $OUT/S3-Brain-application.bin"
+echo "No flash performed, no C5 image embedded."
+if [ -n "$PRIVATE_HEADER" ]; then
+  echo "PRIVATE OUTPUT: credential-bearing image and sketch, keep offline; never share."
+  echo "S3-only local project prepared. C5 firmware will not be updated."
+fi
