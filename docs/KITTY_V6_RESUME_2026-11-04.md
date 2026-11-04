@@ -262,3 +262,25 @@ The new v39 caption tests and revised previous display contract are green as of 
 GitHub release/test details: [KITTY_V6_C5_V39_AND_GATEWAY_TEST_PLAN_2026-11-04.md](KITTY_V6_C5_V39_AND_GATEWAY_TEST_PLAN_2026-11-04.md).
 
 **Still incomplete for V6:** real gateway provider turn hook, trusted per-turn human speaker issuer and iPhone enrollment/review UI, consented live voice-learning path, live long-call continuity and owner cross-call privacy acceptance. The previous Ubuntu memory-service owner grant/HTTP403 and 14 staged modules are confirmed; no need to re-install them. Current source-only tests are not a live acceptance certificate.
+
+## Live provider decode hook confirmed — gated Ubuntu deployment ready
+
+Operator output from the active Open WebUI container (Nov 4): one `provider_events` async function, one `async for ... in upstream` receive path, one JSON event decode, and one browser `ws.send_json(event)` call inside that function; a separate `client_events` handler exists. The newer probe reported `event_decode_hook_candidate=yes`. The older broad whole-file `passive_hook_safe=no` remains expected because other forwarding sites exist. No live changes were made by either probe.
+
+New main-source rollout: `server/kitty_gateway_decode_hook_patch_v6.py` injects one passive observer immediately after a structurally verified upstream JSON decode. This observes only limited event types and never changes any WebSocket forwarding, session prompts, private owner authorization, speaker enrollment or background learning. Ambiguous/customized sources fail closed.
+
+`server/kitty_gateway_passive_rollout_v6.py` is a one-command HOST installer: pins FETCH_HEAD, privately backs up the actual live realtime.py outside GitHub, stages eight exact-matched optional Python modules into open-webui, atomically replaces only validated source, restarts only open-webui, checks Docker healthy and attempts hash-checked rollback on failure. No prior Ubuntu memory service owner-guard installer is rerun. Source, secrets, bearer tokens, transcripts and voiceprints must never be uploaded to GitHub.
+
+Operator command (when Kitty idle):
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_gateway_passive_rollout_v6.py | python3 - --apply
+```
+
+Stop on `rollout_error` and share only fixed labels/rollback state. Test suites `server/test_kitty_gateway_decode_hook_patch_v6.py` and `server/test_kitty_gateway_passive_rollout_v6.py` passed in targeted CI before presenting the command. Expected successful labels: `gateway_hook=installed`, `gateway_health=healthy`, `provider_forwarding=unchanged`, `private_recall=disabled`, `automatic_voice_learning=disabled`, `firmware_and_SD=unchanged`.
+
+**DO NOT mark V6 complete:** This establishes a safe upstream event observation point but not trusted human speaker verification, long-term private memory injection, automatic owner-learning, live long-call summaries or actual C5 v39 flash. C5 v39 caption and full S3/C5 compile passed in workflow run 41774229414; physical C5 stays v38 pending test. Keep the 403 memory-service guard and S3 SD authority unchanged.
+
+Recovery and C5 test details: docs/KITTY_V6_C5_V39_AND_GATEWAY_TEST_PLAN_2026-11-04.md.
