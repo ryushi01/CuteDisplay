@@ -152,6 +152,7 @@ class AttestedLiveCall:
         self._waiting = {}
         self._seen = set()
         self._current = None
+        self._generation = 0
         self._closed = False
 
     @property
@@ -159,6 +160,7 @@ class AttestedLiveCall:
         return self._session_id
 
     def _clear_notes(self):
+        self._generation += 1
         self._waiting.clear()
         self._continuity.begin_call(self._session_id)
         self._current = None
@@ -167,6 +169,7 @@ class AttestedLiveCall:
         """Invalidate pending retrieval on a new speaker; retain notes until verified."""
         self._stopped = None
         self._waiting.clear()  # Never apply a late verdict during another utterance.
+        self._generation += 1
         self._current = None
 
     def upstream_speech_stopped(self, item_id):
@@ -245,7 +248,8 @@ class AttestedLiveCall:
                                         trusted_item_id=item_id):
             self._clear_notes()
             return False
-        self._current = (item_id, attribution)
+        self._generation += 1
+        self._current = (item_id, attribution, role, transcript)
         return True
 
     def context_for_verified_turn(self, item_id):
@@ -254,6 +258,45 @@ class AttestedLiveCall:
             return ""
         return self._continuity.context_for_turn(
             self._current[1], trusted_item_id=item_id)
+
+    async def owner_history_for_verified_turn(self, item_id, service_url,
+                                              service_token, owner_grant, *,
+                                              lookup=None):
+        """Optional owner-only historical lookup, async and late-result safe.
+
+        A session owner grant alone is NEVER enough. The exact current item
+        must already have a valid independent per-transcript attestation and
+        the grant must still verify at request time and completion time.
+        Do not await this helper in a realtime audio/WebSocket event callback.
+        """
+        current = self._current
+        if (self._closed or not self._owner_secret
+                or current is None or current[0] != item_id
+                or current[2] != "owner"):
+            return ""
+        from kitty_owner_session_v6 import verify_grant
+        if not verify_grant(self._owner_secret, owner_grant, self._session_id,
+                            now=self._wall_clock()):
+            return ""
+        from kitty_semantic_async_client_v6 import (
+            owner_semantic_context, _local_memory_endpoint)
+        if (not _local_memory_endpoint(service_url)
+                or not isinstance(service_token, str) or not service_token):
+            return ""
+        generation = self._generation
+        query = current[3]
+        try:
+            executor = lookup if lookup is not None else owner_semantic_context
+            response = await executor(service_url, service_token, query,
+                                      self._session_id, owner_grant)
+        except (OSError, ValueError, TypeError, TimeoutError, RuntimeError):
+            return ""
+        if (self._closed or self._generation != generation
+                or self._current is not current
+                or not verify_grant(self._owner_secret, owner_grant,
+                                    self._session_id, now=self._wall_clock())):
+            return ""
+        return response[:1800] if isinstance(response, str) else ""
 
     def unknown_turn(self):
         """Guest, uncertain speaker, barge-in or cancellation; drop private notes."""
