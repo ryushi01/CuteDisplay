@@ -58,7 +58,7 @@ jobs:
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_gateway_turn_adapter_v6 -v
 
       - name: Verify secure owner-voice adaptive learning from confirmed turns
-        run: PYTHONPATH=server python3 -m unittest server.test_kitty_voice_adaptation_policy_v6 server.test_kitty_voice_learning_v6 server.test_kitty_owner_voice_postcall_v6 server.test_kitty_owner_voice_profile_store_v6 server.test_kitty_voice_adaptive_scoring_v6 server.test_kitty_xvector_adaptive_candidates_v6 -v
+        run: PYTHONPATH=server python3 -m unittest server.test_kitty_voice_adaptation_policy_v6 server.test_kitty_voice_learning_v6 server.test_kitty_owner_voice_postcall_v6 server.test_kitty_owner_voice_profile_store_v6 server.test_kitty_voice_adaptive_scoring_v6 server.test_kitty_xvector_adaptive_candidates_v6 server.test_kitty_xvector_adaptive_store_v6 -v
 
       - name: Check speaker attribution and display contracts
         run: |
