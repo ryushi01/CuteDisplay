@@ -2870,6 +2870,78 @@ static void receiveCmdChunk(const CuteLink::Frame &f){
 static void toS3(const char *type,const String &value=""){
  CuteLink::send(Serial1,++c5Seq,type,value);
 }
+
+static void suspendNormalChatForCall(){
+ // Keep normal bubble preferences, but discard the active old typewriter
+ // and AI page so they cannot continue behind Call Mode or resume afterward.
+ callHidesNormalChat=true;
+ aiScrollMode=false;aiStreamFinished=true;aiFinishedAt=0;
+ scrolling=false;aiFirstVisibleLine=0;
+ message=normalDisplayMessage;
+ revealedCharacters=bubbleCharacterCount(message);
+ lastBubbleReveal=millis();
+}
+
+// Poll before UART caption rendering, Wi-Fi probes and network housekeeping.
+// Call stop occurs on the debounced PRESS, not release. A long press cannot
+// accidentally become manual PTT or suppress the stop.
+static void pollVoiceButton(uint32_t now){
+ if(C5UARTOTA::active())return;
+ bool raw=digitalRead(PIN_VOICE_BUTTON);
+ if(raw!=voiceButtonLastRaw){voiceButtonChangedAt=now;voiceButtonLastRaw=raw;}
+ if((uint32_t)(now-voiceButtonChangedAt)>=20 && raw!=voiceButtonStable){
+  voiceButtonStable=raw;
+  if(raw==LOW){
+   voiceButtonHeldAt=now;
+   voiceButtonHoldStarted=false;
+   voiceButtonSession=s3Online;
+   if(callModeActive || callStopPending){
+    voiceButtonSession=false;voiceButtonHoldStarted=true;
+    if(s3Online){
+     // STOP is idempotent on S3; stale requests cannot start a new call.
+     toS3("CALL_STOP");
+     callStopPending=true;callStopRequestedAt=now;
+     callStopLastSent=now;callStopAttempts=1;
+    }
+    callModeActive=false;callFaceMood=1;callLipLevel=0;
+    callCaption="";callCaptionHistory="";kittyActivity="";
+    suspendNormalChatForCall();
+    if(lcdReady)redrawCurrent();
+   }
+  }else{
+   if(voiceButtonSession && s3Online && !callStopPending){
+    if(voiceButtonHoldStarted){
+     if(!callModeActive)toS3("VOICE_STOP");
+    }else if(!callModeActive){
+     toS3("CALL_TOGGLE");
+     callModeActive=true;
+     callFaceMood=1;callFaceMoodSince=now;callLipLevel=0;
+     callCaption="";callCaptionHistory="";
+     suspendNormalChatForCall();
+     if(lcdReady)redrawCurrent();
+    }
+   }
+   voiceButtonSession=false;voiceButtonHoldStarted=false;
+   voiceButtonHeldAt=0;
+  }
+ }
+ if(voiceButtonStable==LOW && voiceButtonSession &&
+    !voiceButtonHoldStarted && !callModeActive && !callStopPending &&
+    (uint32_t)(now-voiceButtonHeldAt)>=320UL){
+  voiceButtonHoldStarted=true;
+  if(s3Online){
+   toS3("VOICE_INTERRUPT");
+   toS3("VOICE_START");
+  }
+ }
+ // Retry a bounded number of times if UART drops the first stop frame.
+ if(callStopPending && s3Online && callStopAttempts<4 &&
+    (uint32_t)(now-callStopLastSent)>=650UL){
+  toS3("CALL_STOP");
+  callStopLastSent=now;callStopAttempts++;
+ }
+}
+
 static void sendBrainProbe(uint32_t now){
  lastProbeSent=now;
  pendingProbeSeq=++c5Seq;
@@ -3216,6 +3288,8 @@ void setup(){
  nextWiFiAttempt=0;
 }
 void loop(){
+ // React to physical call stop before reading caption/UART frames.
+ pollVoiceButton(millis());
  serviceBrain();
 #if KITTY_C5_BLE_MIGRATION_ENABLED
  static bool lastAppSessionSignaled=false;
@@ -3347,42 +3421,6 @@ void loop(){
    wifiToastUntil=millis()+2300UL;
   }
   if(lcdReady)redrawCurrent();
- }
- // Dedicated BOOT GPIO28: short tap toggles Call Mode ON/OFF.
- // Long hold (>=320 ms) is legacy manual PTT only while Call Mode is OFF.
- // No press-down interruption: otherwise short taps cancel the current speech.
- bool voiceRaw=digitalRead(PIN_VOICE_BUTTON);
- if(voiceRaw!=voiceButtonLastRaw){voiceButtonChangedAt=now;voiceButtonLastRaw=voiceRaw;}
- if(now-voiceButtonChangedAt>=35 && voiceRaw!=voiceButtonStable){
-  voiceButtonStable=voiceRaw;
-  if(voiceRaw==LOW){
-   voiceButtonHeldAt=now;
-   voiceButtonHoldStarted=false;
-   voiceButtonSession=s3Online;
-  }else{
-   if(voiceButtonSession && s3Online){
-    if(voiceButtonHoldStarted){
-     if(!callModeActive)toS3("VOICE_STOP");
-    }else{
-     toS3("CALL_TOGGLE");
-     // Optimistic local state for the very next press, corrected by S3 ACTIVITY.
-     callModeActive=!callModeActive;
-     callFaceMood=1;callFaceMoodSince=now;callLipLevel=0;
-     if(lcdReady)redrawCurrent();
-    }
-   }
-   voiceButtonSession=false;
-   voiceButtonHoldStarted=false;
-   voiceButtonHeldAt=0;
-  }
- }
- if(voiceButtonStable==LOW && voiceButtonSession && !voiceButtonHoldStarted &&
-    (uint32_t)(now-voiceButtonHeldAt)>=320UL){
-  voiceButtonHoldStarted=true;
-  if(s3Online && !callModeActive){
-   toS3("VOICE_INTERRUPT");
-   toS3("VOICE_START");
-  }
  }
  if(now-lastBatteryRead>=BATTERY_SAMPLE_MS){
   lastBatteryRead=now;
