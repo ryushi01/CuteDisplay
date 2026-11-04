@@ -65,6 +65,102 @@ def _provider_receive_clues(func):
     return uses_upstream
 
 
+def _decoded_event_assignment(node):
+    """Identify an assignment to the event object from a JSON decode.
+
+    This is a structural clue, not proof of which socket supplied its bytes.
+    """
+    if isinstance(node,ast.Assign):
+        targets=node.targets
+        value=node.value
+    elif isinstance(node,ast.AnnAssign):
+        targets=[node.target]
+        value=node.value
+    else:
+        return False
+    if value is None or not any(isinstance(t,ast.Name) and t.id=="event"
+                                for t in targets):
+        return False
+    if isinstance(value,ast.Await):
+        value=value.value
+    return (isinstance(value,ast.Call) and isinstance(value.func,ast.Attribute)
+            and value.func.attr in ("loads","load","receive_json",
+                                    "recv_json","json"))
+
+
+def _kind_of_upstream_receive(func):
+    """Fixed categories only; do not display variables, code or credentials."""
+    modes=set()
+    for n in _own_nodes(func):
+        if isinstance(n,ast.AsyncFor):
+            value=n.iter
+            if isinstance(value,ast.Name) and value.id=="upstream":
+                modes.add("async_for_upstream")
+            elif isinstance(value,ast.Call):
+                call=value.func
+                if (isinstance(call,ast.Attribute)
+                        and isinstance(call.value,ast.Name)
+                        and call.value.id in ("upstream","provider")):
+                    modes.add("async_for_provider_method")
+        elif isinstance(n,ast.Call):
+            call=n.func
+            if (isinstance(call,ast.Attribute)
+                    and isinstance(call.value,ast.Name)
+                    and call.value.id in ("upstream","provider")
+                    and call.attr in ("recv","receive","receive_json",
+                                      "recv_json","iter_json","iter_text")):
+                modes.add("provider_receive_method")
+        elif isinstance(n,ast.Await):
+            call=n.value
+            if (isinstance(call,ast.Call) and isinstance(call.func,ast.Attribute)
+                    and call.func.attr in ("recv","receive","receive_json",
+                                           "recv_json")
+                    and isinstance(call.func.value,ast.Attribute)
+                    and call.func.value.attr in ("ws","websocket")):
+                modes.add("nested_provider_socket")
+    return modes
+
+
+def _gateway_topology(source, tree):
+    """Read-only shape metadata. No raw source, paths, names or hashes returned."""
+    funcs=[n for n in ast.walk(tree) if isinstance(n,ast.AsyncFunctionDef)]
+    providers=[f for f in funcs if f.name=="provider_events"]
+    if len(providers)!=1:
+        return {
+            "named_provider_handler":_count_label(len(providers)),
+            "provider_receive_shape":"not_verified",
+            "provider_json_event_decodes":"not_verified",
+            "provider_ws_event_forwards":"not_verified",
+            "provider_transcript_literal":"not_verified",
+            "event_decode_hook_candidate":"no",
+        }
+    func=providers[0]
+    nodes=list(_own_nodes(func))
+    receivers=_kind_of_upstream_receive(func)
+    decoded=sum(_decoded_event_assignment(n) for n in nodes)
+    forwarded=sum(_is_send_event(n) for n in nodes)
+    transcript=TRANSCRIPT in (ast.get_source_segment(source,func) or "")
+    shape=(
+        "async_for_upstream" if "async_for_upstream" in receivers else
+        "upstream_method" if "provider_receive_method" in receivers else
+        "async_for_method" if "async_for_provider_method" in receivers else
+        "nested_socket" if "nested_provider_socket" in receivers else
+        "unrecognized")
+    # This is a CANDIDATE only. A later patch still requires exact AST guards
+    # and a dry-run; no source is modified, and no owner identity is inferred.
+    candidate=(len(receivers)==1 and decoded==1 and forwarded>=1
+               and sum(f.name=="client_events" for f in funcs)==1)
+    return {
+        "named_provider_handler":"one",
+        "provider_receive_shape":shape,
+        "provider_receive_modes":_count_label(len(receivers)),
+        "provider_json_event_decodes":_count_label(decoded),
+        "provider_ws_event_forwards":_count_label(forwarded),
+        "provider_transcript_literal":"present" if transcript else "absent",
+        "event_decode_hook_candidate":"yes" if candidate else "no",
+    }
+
+
 def analyze(source):
     if not isinstance(source,str):
         return {"source":"unavailable","syntax":"unknown",
@@ -97,7 +193,9 @@ def analyze(source):
     unique_scopes={(f.lineno,f.end_lineno) for f,n in candidates}
     safe=(len(unique_scopes)==1 and len(candidates)==1
           and sum(1 for f in funcs if f.name=="client_events")==1)
+    extra=_gateway_topology(source,tree)
     return {
+        **extra,
         "source":"readable",
         "syntax":"valid",
         "async_handlers":_count_label(len(funcs)),
