@@ -120,3 +120,17 @@ The first November 4 Ubuntu deployment is complete and remains the **only** serv
 **Critically not implemented:** A trustworthy external issuer that independently confirms which human produced a specific observed microphone turn; gateway registration, per-item attestation exchange and safe provider-context injection; app-based enrollment/call control wiring; durable owner-verified SD writes. Those must be built and security-reviewed before any private automatic recall is enabled. The live gateway's public memory refresh, candidate speaker observer, realtime audio, C5 v38 and Mac model/TTS are intentionally unchanged. No live turn should be labeled verified just because a model guesses a voice or the owner signs in somewhere.
 
 **Next integration step:** inspect the exact private running `realtime.py` turn-event branches using a read-only source-shape report (no raw source, secrets or transcripts) and identify the independent speaker-verifier trust interface. Stage a version-checked, disabled-by-default patch against a copy before enabling any context injection; CI alone cannot validate the private running gateway. Prefer one staged deployment and one realistic multiperson conversation test when the independent issuer actually exists. No further memory-service command or S3 flash is currently needed.
+
+## Live gateway integration shape preflight — November 4
+
+A final status-only, read-only gateway probe was added: `server/kitty_gateway_turn_shape_v6.py` and `server/test_kitty_gateway_turn_shape_v6.py`. It inspects the **actual** private Open WebUI `realtime.py` inside the existing container for nested async turn event loops, provider/client forwarding counts, VAD + completed transcription event markers and any current attestation bridge reference. It never prints source, transcripts, credentials, environment or client message payloads, and performs no import/patch/restart. The CI test runs before any firmware compile.
+
+The Ubuntu operator uses one grouped command, without changing the checkout branch:
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_gateway_turn_shape_v6.py | sudo docker exec -i open-webui python3 -
+```
+
+The resulting `KITTY_V6_GATEWAY_TURN_SHAPE_READ_ONLY` status output is safe to share for version-matched staging design. **Do not assume** that a source marker means a working runtime issuer, or deploy the attested bridge merely because the source parses. The external independently trusted identity-verifier/signer is still not installed, and owner-only private recall remains off. Do not reflash either S3 or C5 for this Ubuntu-side analysis.
