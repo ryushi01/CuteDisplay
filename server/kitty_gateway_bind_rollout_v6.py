@@ -393,26 +393,34 @@ def apply():
     except Exception:
         print("failed_phase="+phase,flush=True)
         try:
-            # The original is only rewritten when the inode/dev still match
-            # and the file's hash matches the candidate, or a partial write
-            # is known to have occurred during this transaction.
-            if state()!="exited":
-                docker("stop",CONTAINER,timeout=70)
-            if sha(backup.read_bytes())!=tx["before"]:
-                raise Refusal("backup_corrupt")
-            before=host_file_stat(source)["sha"]
-            if before==tx["after"]:
-                root_write(source,original,tx["after"],hostmeta)
-            elif before==tx["before"]:
-                pass
+            # An error before stop leaves the realtime source unchanged.
+            # Do not interrupt a healthy call service merely to clean helpers.
+            if phase in ("copy_helpers","preimport"):
+                if host_file_stat(source)["sha"]!=tx["before"]:
+                    raise Refusal("source_changed_during_staging")
+                if state()=="running":
+                    remove_created(created,tx["helper_hashes"])
+                    tx["status"]="rolled_back"
+                    save(tx)
+                    print("rollback=no_gateway_change",flush=True)
+                else:
+                    raise Refusal("container_state_changed")
             else:
-                raise Refusal("rollback_conflict")
-            tx["status"]="rolled_back"
-            save(tx)
-            docker("start",CONTAINER,timeout=70)
-            if not wait_healthy():raise Refusal("rollback_gateway_unhealthy")
-            remove_created(created,tx["helper_hashes"])
-            print("rollback=completed",flush=True)
+                if state()!="exited":
+                    docker("stop",CONTAINER,timeout=70)
+                if sha(backup.read_bytes())!=tx["before"]:
+                    raise Refusal("backup_corrupt")
+                current_sha=host_file_stat(source)["sha"]
+                if current_sha==tx["after"]:
+                    root_write(source,original,tx["after"],hostmeta)
+                elif current_sha!=tx["before"]:
+                    raise Refusal("rollback_conflict")
+                tx["status"]="rolled_back"
+                save(tx)
+                docker("start",CONTAINER,timeout=70)
+                if not wait_healthy():raise Refusal("rollback_gateway_unhealthy")
+                remove_created(created,tx["helper_hashes"])
+                print("rollback=completed",flush=True)
         except Exception:
             print("rollback=manual_recovery_required",flush=True)
         raise Refusal("deployment_failed:"+phase) from None
