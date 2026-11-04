@@ -57,22 +57,45 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(emitted), 1)
         obj.close()
 
-    async def test_server_observed_turn_only_and_one_shot_recall(self):
+    async def test_legacy_voice_probable_recall_is_permanently_disabled(self):
         async def send(event):
             return None
-        obj = KittySpeakerObserver(send, enabled=True, token="test")
-        epoch = obj.gate.begin("item_123")
-        obj.epoch = epoch
-        obj.gate.accept_speaker(epoch, "item_123", "person:camille", "probable")
-        self.assertIsNone(obj.authorized_recall("item_123", "person:camille", "explicit_introduction"))
-        self.assertIsNone(obj.authorized_recall("other", "person:camille", "voice_probable"))
-        self.assertIsNone(obj.authorized_recall("item_123", "person:aki", "voice_probable"))
-        token = obj.authorized_recall("item_123", "person:camille", "voice_probable")
-        self.assertEqual(token, epoch)
-        self.assertEqual(obj.complete_recall(token, "item_123", "person:camille", "private context"), "private context")
-        self.assertEqual(obj.complete_recall(token, "item_123", "person:camille", "duplicate"), "")
-        obj.gate.invalidate()
-        self.assertIsNone(obj.authorized_recall("item_123", "person:camille", "voice_probable"))
+        obj = KittySpeakerObserver(send,enabled=True,token="test")
+        epoch=obj.gate.begin("item_123")
+        obj.epoch=epoch
+        self.assertTrue(obj.gate.accept_speaker(
+            epoch,"item_123","person:camille","probable"))
+        for provenance in ("voice_probable","session_verified",
+                           "explicit_introduction"):
+            self.assertIsNone(obj.authorized_recall(
+                "item_123","person:camille",provenance))
+        self.assertEqual(obj.complete_recall(
+            epoch,"item_123","person:camille","private context"),"")
+        obj.close()
+
+    async def test_candidate_familiarity_never_issues_private_identity(self):
+        emitted=[]
+        async def send(event):
+            emitted.append(event)
+        obj=KittySpeakerObserver(send,enabled=True,token="test",
+                                 familiarity_enabled=True)
+        for i in range(1,4):
+            item="item"+str(i)
+            epoch=obj.gate.begin(item)
+            obj.epoch=epoch
+            obj._active_item=item
+            await obj._send_recognition({
+                "type":"kitty.speaker.result","item_id":item,
+                "speaker_id":"unknown","confidence":"unknown",
+                "candidate_speaker_id":"person:shana",
+                "candidate_score":0.972})
+        self.assertEqual(len(emitted),3)
+        self.assertEqual(emitted[-1].get("candidate_familiarity"),
+                         "strong_hint")
+        self.assertFalse(emitted[-1]["private_memory_authorized"])
+        self.assertEqual(emitted[-1]["speaker_id"],"unknown")
+        self.assertIsNone(obj.authorized_recall(
+            "item3","person:shana","voice_probable"))
         obj.close()
 
     async def test_cancelled_turn_rejects_late_recall_result(self):
@@ -83,8 +106,8 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         observer.epoch = epoch
         self.assertTrue(observer.gate.accept_speaker(
             epoch, "turn_one", "person:camille", "probable"))
-        self.assertEqual(observer.authorized_recall(
-            "turn_one", "person:camille", "voice_probable"), epoch)
+        self.assertIsNone(observer.authorized_recall(
+            "turn_one", "person:camille", "voice_probable"))
         # A new utterance begins while the CPU HTTP request is outstanding.
         observer.observe_upstream({"type": "input_audio_buffer.speech_started"})
         self.assertEqual(observer.complete_recall(
