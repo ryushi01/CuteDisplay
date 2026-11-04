@@ -349,8 +349,12 @@ static void processFace(const CuteLink::Frame &f){
   // C5 radios are disabled; ignore any stale C5 radio telemetry.
  } else if(f.type=="BATTERY"){
   Serial.printf("[C5] BATTERY %s\n",f.payload.c_str());
+ } else if(f.type=="CALL_STOP"){
+  // Idempotent C5 stop; delayed retries must never start a new call.
+  if(BrainRealtimeDirect::active())BrainRealtimeDirect::stop();
+  forceActivityResend=true;
  } else if(f.type=="CALL_TOGGLE"){
-  // C5 left short tap starts or stops native Open WebUI Call Mode.
+  // Legacy short tap starts native Open WebUI Call Mode.
   bool turningOn=!BrainRealtimeDirect::active();
   if(turningOn && BrainTTS::running)BrainTTS::interrupt();
   bool busy=BrainVoiceSTT::running || BrainAI::busy ||
