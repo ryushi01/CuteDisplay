@@ -1,5 +1,13 @@
 # Kitty V6 — C5 v41 full-screen delegated AI transport fix
 
+## Latest operator checkpoint — v41 flashed and Kitty working
+
+**2026-11-04 — user confirmed:** The private combined S3 + C5 v41 firmware has been flashed and Kitty works in conversation. Treat this installed version as the **new accepted working baseline** for subsequent changes. C5 firmware source version is `41` on GitHub `main`; the full v41 GitHub Actions combined firmware run [41809097567](https://github.com/ryushi01/CuteDisplay/actions/runs/41809097567) passed.
+
+**Validation limits:** This is a direct report of successful flash and normal operation, not a fresh diagnostic log confirming the C5 UART OTA version banner, all five caption rows, physical button stop latency, absence of every delegated `NACK CALL_ACTIVE`, private memory sync completeness, or automatic personalized recall. Keep those as targeted follow-ups instead of reopening the already-working firmware baseline. The earlier v40 failure evidence remains below as a historical diagnostic, not the current installed state.
+
+**Privacy / rollback:** Keep the known working v41 private build and earlier v40 rollback build offline. The released local S3 sketch and binary embed private synchronization credentials; never push them to GitHub, upload public CI artifacts, or attach them to support tickets/chats. Preserve microSD authority, NVS, iPhone BLE, voice profiles and existing gateway/AI/TTS topology. Future source changes require a new C5 OTA version only if the C5 image itself changes.
+
 ## Operator hardware results (S3 + C5 v40 combined private release)
 
 - C5 v40 UART OTA was validated by the physical board: `[S3 OTA] C5 reports v40, OTA slot=6553600 bytes`, then `[S3 OTA] SUCCESS: new display firmware confirmed after reboot`.
@@ -23,4 +31,4 @@ No S3 BrainAI or Open WebUI streaming behavior changed. Version was bumped from 
 - Hardware validation still needed: after a **single** new combined firmware upload via S3 (no full-flash erase, preserve NVS/microSD, C5 OTA v41), verify `[S3 OTA] ... v41 ... SUCCESS`, that responses no longer trigger `NACK CALL_ACTIVE` nor `[AI] Stream ended with an error`, and that ordinary chat remains absent during fullscreen Call Mode but resumes on a new normal message after exit. Also retest physical C5 stop, five-line captions, iPhone BLE and S3 memory sync (`memory sync status`).
 - If AI still sometimes says it cannot proceed without the UART errors, diagnose separately from new short `[AI]`, `[CALL]`, `[CALL NET]` metadata surrounding the occurrence; do not remove safety gates or reset SD data.
 
-**Release warning:** A passed CI build is not a validated physical deployment. Build locally with the canonical private sync header; public CI binaries omit credentials. Do not re-use C5 v40 combined release when testing this fix.
+**Release checkpoint:** The operator has since confirmed a successful v41 combined firmware flash and normal Kitty operation. This does not establish exhaustive hardware regression success; targeted checks above remain relevant. Build future private combined releases only with the canonical local sync header; public CI binaries omit credentials.
