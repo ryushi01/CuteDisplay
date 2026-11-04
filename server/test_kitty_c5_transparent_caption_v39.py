@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Static C5 v39 caption safety: preserve Kitty face, remove solid caption mask."""
+"""Transparent C5 call captions, v39 baseline and v40 five-line contract."""
 from pathlib import Path
-import re
 import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -15,35 +14,37 @@ class TransparentCaptionTests(unittest.TestCase):
         cls.face=FACE.read_text(encoding="utf-8")
         cls.version=VERSION.read_text(encoding="utf-8")
         cls.caption=cls.face.split(
-            "// Transparent 2-line live caption on the light forehead",1)[1]
+            "// v40: five transparent rows",1)[1]
 
-    def test_c5_v39_and_no_opaque_caption_or_status_panel(self):
-        self.assertIn("C5_FIRMWARE_VERSION = 39;",self.version)
+    def test_v40_and_no_opaque_caption_or_status_panel(self):
+        self.assertIn("C5_FIRMWARE_VERSION = 40;",self.version)
         self.assertNotIn("panelY",self.caption)
         self.assertNotIn("panelH",self.caption)
         self.assertNotIn("rect(0,136,320,34",self.face)
         self.assertNotIn("rect(x+8,152,width-16,17,CF_INK)",self.face)
 
-    def test_caption_has_black_text_directly_over_kitty_framebuffer(self):
-        self.assertIn("const int captionY=40;",self.caption)
+    def test_black_text_directly_over_kitty_framebuffer(self):
+        self.assertIn("const int captionY=2;",self.caption)
+        self.assertIn("CALL_CAPTION_ROWS=5",self.caption)
         self.assertIn("richText(rows[i],6,captionY+i*16,1,1,BLACK,316);",self.caption)
         self.assertNotIn("richText(rows[i],6,captionY+i*16,1,1,CF_WHITE",self.caption)
         self.assertNotIn("rect(",self.caption)
         self.assertIn("textAt(label,15,154,1,BLACK);",self.face)
 
-    def test_wrap_and_unicode_preserved(self):
+    def test_wrap_utf8_and_rolling_history(self):
         for expected in (
-            "decodeUTF8(callCaption,pos)",
+            "decodeUTF8(transcript,pos)",
             "utfWidth(cp,1,1)",
-            "current+=callCaption.substring(begin,pos)",
+            "current+=transcript.substring(begin,pos)",
             "if(used+glyph>304",
-            "String rows[2]",
-            "rows[0]=rows[1]",
-            "rows[1]=value",
+            "String rows[CALL_CAPTION_ROWS]",
+            "rows[CALL_CAPTION_ROWS-1]=value",
+            "String transcript=callCaptionHistory",
+            "transcript+=callCaption",
         ):
             self.assertIn(expected,self.caption)
 
-    def test_expression_lips_and_call_state_still_present(self):
+    def test_expression_lips_and_call_state_preserved(self):
         for expected in (
             "drawFullScreenKittyFace()",
             "const bool speaking=kittyActivity==",
