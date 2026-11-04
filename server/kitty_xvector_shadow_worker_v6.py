@@ -214,6 +214,44 @@ def _run(audio):
     finally:
         _GATE.release()
 
+
+def embed_verified_postcall(audio):
+    """One bounded CPU embedding AFTER a verified owner call, never on I2S.
+
+    This function does not issue an identity proof. It is safe to use only via
+    the post-call worker after a separate trusted exact-turn audio attestation.
+    Returns a derived vector, not raw PCM or a speaker authorization.
+    """
+    if not isinstance(audio,bytes) or len(audio)>300000 or len(audio)<1024:
+        raise ValueError("invalid_postcall_audio")
+    if not _GATE.acquire(blocking=False):
+        raise RuntimeError("speaker_cpu_busy")
+    try:
+        with _LOCK:
+            _init()
+            with wave.open(io.BytesIO(audio),"rb") as wav:
+                if (wav.getframerate(),wav.getnchannels(),wav.getsampwidth()) != (16000,1,2):
+                    raise ValueError("invalid_postcall_format")
+                seconds=wav.getnframes()/16000
+                if not 1.5<=seconds<=8.0:
+                    raise ValueError("invalid_postcall_duration")
+                import numpy as np
+                import torch
+                values=np.frombuffer(wav.readframes(wav.getnframes()),
+                                     dtype="<i2").astype("float32")/32768.0
+            with torch.inference_mode():
+                tensor=_MODEL.encode_batch(torch.from_numpy(values).unsqueeze(0))
+            vector=tensor.detach().cpu().numpy().reshape(-1).astype("float64")
+            if len(vector)!=512:
+                raise ValueError("unexpected_xvector_dimension")
+            norm=float(np.linalg.norm(vector))
+            if not norm>1e-8:
+                raise ValueError("invalid_xvector_embedding")
+            return (vector/norm).tolist()
+    finally:
+        _GATE.release()
+
+
 def submit(audio):
     if os.environ.get("KITTY_XVECTOR_SHADOW_ENABLED")!="1":
         return False
