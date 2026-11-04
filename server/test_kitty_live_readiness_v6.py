@@ -25,7 +25,7 @@ class FakeRunner:
     def __call__(self, argv, **kwargs):
         self.calls.append(argv)
         if argv[:3]==["systemctl","--user","show"]:
-            result="ActiveState=active\\nMainPID=123\\n" if self.active else None
+            result=("ActiveState=active"+chr(10)+"MainPID=123"+chr(10)) if self.active else None
         elif argv[:3]==["docker","exec","open-webui"]:
             result=json.dumps(self.gateway) if self.gateway is not None else None
         else:
@@ -65,12 +65,12 @@ class ReadinessTests(unittest.TestCase):
             pid=root/"123"
             pid.mkdir()
             source=root/"kitty_memory_service.py"
-            source.write_text("AUTHORIZED SECRET VALUE\\n",encoding="utf-8")
+            source.write_text("AUTHORIZED SECRET VALUE"+chr(10),encoding="utf-8")
             (pid/"cmdline").write_bytes(
-                b"python3\\0kitty_memory_service.py\\0--port\\08766\\0")
+                b"python3"+bytes([0])+b"kitty_memory_service.py"+bytes([0])+b"--port"+bytes([0])+b"8766"+bytes([0]))
             (pid/"cwd").symlink_to(root)
             self.assertEqual(live_source_for_pid(123,proc_root=root),source)
-            (pid/"cmdline").write_bytes(b"python3\\0other.py\\0")
+            (pid/"cmdline").write_bytes(b"python3"+bytes([0])+b"other.py"+bytes([0]))
             self.assertIsNone(live_source_for_pid(123,proc_root=root))
 
     def test_marker_report_contains_only_allowlisted_keys(self):
