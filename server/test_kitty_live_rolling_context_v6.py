@@ -80,6 +80,33 @@ class LiveContinuityTests(unittest.TestCase):
         self.assertIn("draw Kitty",context)
         self.assertNotIn("steal Kitty",context)
 
+    def test_replayed_first_item_after_120_more_turns_is_denied(self):
+        old=trusted(item="first")
+        self.assertTrue(self.memory.observe(
+            "We decided the owner keeps the SD archive.",
+            old,trusted_item_id="first"))
+        for i in range(1,121):
+            self.assertTrue(self.memory.observe(
+                "Tell me something new.",
+                trusted(item="i"+str(i)),trusted_item_id="i"+str(i)))
+        self.assertFalse(self.memory.observe(
+            "I decided to overwrite the old decision.",
+            old,trusted_item_id="first"))
+        current=self.memory.context_for_turn(
+            trusted(item="i120"),trusted_item_id="i120")
+        self.assertIn("SD archive",current)
+        self.assertNotIn("overwrite",current)
+
+    def test_wrong_speaker_read_revokes_old_notes(self):
+        self.assertTrue(self.memory.observe(
+            "We agreed to keep the private source isolated.",
+            trusted(item="first"),trusted_item_id="first"))
+        self.assertEqual(self.memory.context_for_turn(
+            trusted(speaker="person:bob",item="second"),
+            trusted_item_id="second"),"")
+        self.assertEqual(self.memory.context_for_turn(
+            trusted(item="first"),trusted_item_id="first"),"")
+
     def test_japanese_utf8_budget_and_no_empty_injection(self):
         t="覚えてください。今度の設定では "+("安全なメモリーを検証する。"*60)
         self.assertTrue(self.memory.observe(t,trusted(),trusted_item_id="turn-1"))
