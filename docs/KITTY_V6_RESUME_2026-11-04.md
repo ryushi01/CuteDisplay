@@ -302,3 +302,28 @@ git show FETCH_HEAD:server/kitty_gateway_passive_rollout_v6.py | python3 - --app
 ```
 
 Successful rollout still means **passive transcription-event observation only**, not live trusted human speaker authorization, owner-private automatic recall or hands-free voice learning. Preserve the working S3 SD/archive, the live `kitty-memory-v6.service` signed-owner 403 guard, C5 v38 hardware and the staged C5 v39 display code. If the corrected rollout reports `live_provider_layout_incompatible` or another fixed refusal label, stop and use that result to tighten the AST matcher; do not disable security gates or repeat old installers.
+
+## Passive gateway rollout refused before mutation — live layout mismatch (Nov 4)
+
+Operator's second `kitty_gateway_passive_rollout_v6.py --apply` attempt returned only:
+
+```text
+KITTY_V6_PROVIDER_PASSIVE_ROLLOUT
+rollout_error=live_provider_layout_incompatible
+```
+
+This is the **intended fail-closed offline AST patch refusal**: the installer backed up the private host-only gateway source, but rejected it inside `module.patch(source)` **before copying helper modules, writing its transaction manifest, altering live realtime.py or restarting the Open WebUI container**. Thus no deploy/rollback action is needed. Existing memory-service signed-owner/HTTP403 protection and source-only C5 v39 caption change remain unaffected. No firmware flashed.
+
+The previous read-only topology probe confirmed one provider_events handler, one async upstream loop, one event decoder and one provider forward in that loop, but it did **not** prove the stricter patcher's required specific placement and `json.loads(loop_item)` argument shape.
+
+New `server/kitty_gateway_decode_preflight_v6.py` is read-only, prints a closed set of labels about decode call argument provenance (upstream item, upstream-item attribute, separate name, expression), assignment type, nesting/position, single-line status, and an inferred refusal category. It never prints the live gateway code, prompts, service paths, transcripts or tokens. Synthetic fixture CI test `server/test_kitty_gateway_decode_preflight_v6.py` passed.
+
+Run exactly once when convenient (no service restart, backup or file writes):
+
+```bash
+cd ~/kitty-v6/private/kitty-sync-deployment/live-sync-build
+git fetch origin main
+git show FETCH_HEAD:server/kitty_gateway_decode_preflight_v6.py | sudo docker exec -i open-webui python3 -
+```
+
+Based on these fixed labels, build a precise source-shape-specific patcher with regression tests, then **only** attempt a gated rollout. Do not replace realtime.py wholesale or weaken private memory speaker authorization. This remains passive observation-only, not the final independent owner verifier or automatic memory-learning integration.
