@@ -159,17 +159,20 @@ class AttestedLiveCall:
         return self._session_id
 
     def _clear_notes(self):
+        self._waiting.clear()
         self._continuity.begin_call(self._session_id)
         self._current = None
 
     def upstream_speech_started(self):
         """Invalidate pending retrieval on a new speaker; retain notes until verified."""
         self._stopped = None
+        self._waiting.clear()  # Never apply a late verdict during another utterance.
         self._current = None
 
     def upstream_speech_stopped(self, item_id):
         if self._closed or not isinstance(item_id, str) or not ITEM.fullmatch(item_id):
             self._stopped = None
+            self._clear_notes()
             return False
         if item_id in self._seen:
             self._stopped = None
@@ -180,14 +183,18 @@ class AttestedLiveCall:
         return True
 
     def upstream_transcript_completed(self, item_id, transcript):
-        if (self._closed or item_id != self._stopped
-                or _digest(transcript) is None
+        if (self._closed or self._stopped is None
+                or not isinstance(item_id, str) or not ITEM.fullmatch(item_id)
+                or item_id != self._stopped or _digest(transcript) is None
                 or item_id in self._seen
                 or len(self._seen) >= MAX_TURNS_PER_CALL):
             self._stopped = None
             self._clear_notes()
             return False
         self._stopped = None
+        if self._secret is None:
+            self._clear_notes()
+            return False
         if len(self._waiting) >= MAX_WAITING_TURNS:
             self._waiting.clear()
             self._clear_notes()
