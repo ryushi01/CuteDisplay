@@ -78,8 +78,12 @@ jobs:
       - name: Test optional passive gateway bridge
         run: PYTHONPATH=server python3 -m unittest server.test_kitty_passive_turn_bridge_v6 server.test_kitty_gateway_provider_scope_v6 -v
 
-      - name: Verify C5 v39 transparent black conversation captions
-        run: PYTHONPATH=server python3 -m unittest server.test_kitty_c5_transparent_caption_v39 -v
+      - name: Verify C5 v40 five-line transparent captions and responsive Call Mode
+        run: |
+          PYTHONPATH=server python3 -m unittest \
+            server.test_kitty_c5_transparent_caption_v39 \
+            server.test_kitty_c5_call_mode_v40 \
+            server.test_kitty_display_contract_v6 -v
 
       - name: Check speaker attribution and display contracts
         run: |
