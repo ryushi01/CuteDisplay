@@ -172,8 +172,8 @@ class PostCallOwnerVoiceLearner:
             owner_grant_secret=self._owner, model_id=self._model,
             owner_profile_id=self._profile_id, embedding_fn=self._embed,
             other_profiles=others, now=admission_dt)
-        # The storage callback must save atomically and preserve the protected
-        # originals, with an external file/DB lock shared with live identify.
-        if self._save(result) is not True:
+        # The storage callback must CAS the original profile under the same
+        # file/DB lock used by live identify, rechecking consent and anchors.
+        if self._save(profile, result) is not True:
             return False
         return True
