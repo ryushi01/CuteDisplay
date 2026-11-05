@@ -2,7 +2,7 @@
 import asyncio
 import unittest
 from kitty_semantic_async_client_v6 import (
-    semantic_context, shared_context, owner_semantic_context,
+    semantic_context, shared_context, shared_context_for_query, owner_semantic_context,
     _local_memory_endpoint, _NoRedirect,
 )
 
@@ -89,6 +89,39 @@ class AsyncSemanticTests(unittest.IsolatedAsyncioTestCase):
             "unix:///run/kitty-semantic/kitty-memory.sock"))
         self.assertIsNone(_NoRedirect().redirect_request(
             None,None,302,"Found",{},"https://evil.example"))
+
+    async def test_approved_query_uses_only_local_memory_service(self):
+        requests = []
+        def fake(url, token, timeout, query):
+            requests.append((url, token, query))
+            return "Mochi Planet has sugar trees"
+        result = await shared_context_for_query(
+            "http://127.0.0.1:8766", "device", "Mochi Planet",
+            request_fn=fake)
+        self.assertIn("Mochi Planet", result)
+        self.assertEqual(requests, [
+            ("http://127.0.0.1:8766", "device", "Mochi Planet")])
+
+        def forbidden(*_):
+            raise AssertionError("unsafe public query sent")
+        for url, query in (
+                ("https://external.example", "Mochi"),
+                ("http://127.0.0.1:8766", ""),
+                ("http://127.0.0.1:8766", "Mochi" * 100),
+                ("http://127.0.0.1:8766", None)):
+            self.assertEqual(
+                await shared_context_for_query(
+                    url, "device", query, request_fn=forbidden), "")
+
+    async def test_public_query_timeout_fails_closed(self):
+        def slow(*args):
+            import time
+            time.sleep(0.15)
+            return "late public data"
+        result = await shared_context_for_query(
+            "http://127.0.0.1:8766", "device", "Mochi",
+            timeout=0.05, request_fn=slow)
+        self.assertEqual(result, "")
 
     async def test_not_sent_to_remote_memory_server(self):
         def forbidden(*args):
