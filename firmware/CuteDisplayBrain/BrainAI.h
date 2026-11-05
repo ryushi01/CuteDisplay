@@ -213,24 +213,29 @@ inline void processSSELine(String line){
    report("STREAMING");
    Serial.printf("[AI PERF] First token in %lums\n",(unsigned long)(firstTokenAt-requestStarted));
   }
-  // A single SSE delta can exceed 512 bytes, especially in multilingual output.
-  // Keep buffering bounded without treating a large, valid delta as an error.
-  size_t offset=0;
-  while(offset<chunk.length() && !failed && !cancelRequested){
-   if(staged.length()>=384)releaseText(true);
-   if(failed||cancelRequested)break;
-   size_t available=512-staged.length();
-   size_t take=min(available,chunk.length()-offset);
-   if(offset+take<chunk.length()){
-    while(take>0 && (((uint8_t)chunk[offset+take]&0xC0)==0x80))--take;
+  // Dedicated Call Mode captions and tool results do not need the old
+  // AI_* UART bubble. Skip that optional transport for delegated turns;
+  // otherwise a lost hidden-display ACK would invalidate HTTP=200 output.
+  if(!callDelegated){
+   // A single SSE delta can exceed 512 bytes, especially in multilingual output.
+   // Keep buffering bounded without treating a large, valid delta as an error.
+   size_t offset=0;
+   while(offset<chunk.length() && !failed && !cancelRequested){
+    if(staged.length()>=384)releaseText(true);
+    if(failed||cancelRequested)break;
+    size_t available=512-staged.length();
+    size_t take=min(available,chunk.length()-offset);
+    if(offset+take<chunk.length()){
+     while(take>0 && (((uint8_t)chunk[offset+take]&0xC0)==0x80))--take;
+    }
+    if(!take){failed=true;break;}
+    staged+=chunk.substring(offset,offset+take);
+    offset+=take;
+    releaseText(false);
    }
-   if(!take){failed=true;break;}
-   staged+=chunk.substring(offset,offset+take);
-   offset+=take;
-   releaseText(false);
+   // First phrase appears immediately rather than waiting for 64 bytes.
+   if(emittedBytes==0 && staged.length()>=12)releaseText(true);
   }
-  // First phrase appears immediately rather than waiting for 64 bytes.
-  if(emittedBytes==0 && staged.length()>=12)releaseText(true);
  }
  cJSON_Delete(root);
 }
@@ -274,7 +279,7 @@ inline void run(void*){
   report(WiFi.status()!=WL_CONNECTED?"WIFI_ERROR":"CONFIG_ERROR");
   if(delegated){callResultText="";callResultOK=false;callResultReady=true;callDelegated=false;}
   if(delegated){callResultText="";callResultOK=false;callResultReady=true;callDelegated=false;}
-  sendPacket("AI_END","");
+  if(!delegated)sendPacket("AI_END","");
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
  // Background SNTP begins at Wi-Fi connection and refreshes hourly.
@@ -282,12 +287,12 @@ inline void run(void*){
  if(!BrainClock::valid()){
   Serial.println("[AI TIME] Clock not ready; wait for background SNTP synchronization");
   report("CLOCK_ERROR");
-  sendPacket("AI_END","");
+  if(!delegated)sendPacket("AI_END","");
   busy=false;worker=nullptr;vTaskDelete(nullptr);return;
  }
  init();
  if(!delegated){loadHistory();expireHistory();}
- sendPacket("AI_BEGIN","");
+ if(!delegated)sendPacket("AI_BEGIN","");
  failed=false;doneSeen=false;sseBuffer="";staged="";currentAnswer="";
  requestStarted=millis();firstTokenAt=0;lastTextFlush=millis();
  report("CONNECTING");
@@ -491,7 +496,7 @@ inline void run(void*){
   callDelegated=false;
  }
  currentAnswer="";
- sendPacket("AI_END","");
+ if(!delegated)sendPacket("AI_END","");
  Serial.printf("[AI PERF] Generated UART bytes=%lu acked=%lu packets=%lu total=%lums\n",
   (unsigned long)emittedBytes,(unsigned long)ackedBytes,(unsigned long)packetCount,
   (unsigned long)(millis()-requestStarted));
