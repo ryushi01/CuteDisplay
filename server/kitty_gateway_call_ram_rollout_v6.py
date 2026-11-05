@@ -174,10 +174,12 @@ def install():
     }, sort_keys=True).encode())
     created = False
     stopped = False
+    write_started = False
     try:
         if inventory == "absent":
-            copy_helper(g, helper)
+            # Allow exact-hash cleanup even if the import self-check fails.
             created = True
+            copy_helper(g, helper)
         # Recheck live bind and full bytes before taking the call backend down.
         if g.mounted_host_source() != path or g.source_in_container() != original:
             raise Refusal("gateway_changed_during_preflight")
@@ -186,6 +188,7 @@ def install():
         stopped = True
         if g.state() != "exited":
             raise Refusal("container_not_stopped")
+        write_started = True
         g.root_write(path, candidate, g.sha(original), meta)
         g.docker("start", g.CONTAINER, timeout=75)
         stopped = False
@@ -207,13 +210,16 @@ def install():
         print("audio_firmware_sd=unchanged", flush=True)
     except Exception:
         print("install_error=rollback_attempted", flush=True)
-        # A partial in-place write, unexpected module error or a bad startup
-        # must not overwrite any unrelated source change.
+        # A failure before the gateway source write must NOT stop a healthy
+        # container solely to clean the optional helper.
         try:
-            if g.state() != "exited":
-                g.docker("stop", g.CONTAINER, timeout=75)
-            g.recover_partial_write(path, original, candidate, meta)
-            g.docker("start", g.CONTAINER, timeout=75)
+            if write_started:
+                if g.state() != "exited":
+                    g.docker("stop", g.CONTAINER, timeout=75)
+                g.recover_partial_write(path, original, candidate, meta)
+                g.docker("start", g.CONTAINER, timeout=75)
+            elif stopped and g.state() == "exited":
+                g.docker("start", g.CONTAINER, timeout=75)
             if not g.wait_healthy():
                 raise Refusal("rollback_container_unhealthy")
             if created:
