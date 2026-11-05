@@ -19,8 +19,9 @@ DEVICE_TOKEN = os.environ.get("KITTY_SYNC_DEVICE_TOKEN", "")
 MEMORY_TOKEN = os.environ.get("KITTY_MEMORY_TOKEN", "")
 UPSTREAM_HOST = "127.0.0.1"
 UPSTREAM_PORT = 8766
-# Durable chunk writes fsync before ACK. Allow for occasional storage latency.
-UPSTREAM_TIMEOUT_SECONDS = 8
+# Durable chunk writes fsync before ACK. Leave margin for the S3's 12-second
+# HTTP timeout; never wait longer than the caller is configured to wait.
+UPSTREAM_TIMEOUT_SECONDS = 9
 
 
 def valid_config():
@@ -31,12 +32,17 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     def reply(self, status, payload):
         data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError):
+            # S3 may disconnect at its own timeout while our upstream fsync
+            # is still running. It retries the idempotent snapshot operation.
+            self.close_connection = True
 
     def do_GET(self):
         if self.path == "/health":
@@ -74,13 +80,14 @@ class Handler(BaseHTTPRequestHandler):
             data = response.read(MAX_BODY + 1)
             if response.status not in (200, 400, 401, 413, 503) or len(data) > MAX_BODY:
                 raise ValueError("invalid upstream response")
-            self.send_response(response.status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+            # The client may have disconnected while the upstream persisted
+            # this chunk. The reply handler suppresses only a broken socket.
+            return self.reply(response.status, json.loads(data))
+        except TimeoutError:
+            print("[KITTY_SYNC] upstream_timeout", flush=True)
+            return self.reply(502, {"error": "memory_api_unavailable"})
         except (OSError, ValueError, http.client.HTTPException):
+            print("[KITTY_SYNC] upstream_connection_error", flush=True)
             return self.reply(502, {"error": "memory_api_unavailable"})
         finally:
             conn.close()
