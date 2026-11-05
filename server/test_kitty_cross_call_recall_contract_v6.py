@@ -44,9 +44,10 @@ class CrossCallRecallContract(unittest.TestCase):
     def test_recall_diagnostics_do_not_log_memory_or_identity(self):
         source=(Path(__file__).resolve().parents[1] /
                 "server/kitty_realtime_gateway_observer_v6.py").read_text()
-        self.assertIn("request=skipped reason=no_authorized_turn", source)
-        self.assertIn("request=skipped reason=turn_gate", source)
-        self.assertIn("request=accepted provenance=voice_probable", source)
+        # Legacy voice-probable recall was intentionally revoked. The only
+        # diagnostic is a fixed denial; never report accepted private recall.
+        self.assertIn("request=skipped reason=trusted_turn_proof_required", source)
+        self.assertNotIn("request=accepted provenance=voice_probable", source)
         for line in source.splitlines():
             if "[KITTY_RECALL_DIAG]" in line:
                 self.assertNotIn("speaker_id", line)
