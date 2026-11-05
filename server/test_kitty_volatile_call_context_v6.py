@@ -97,11 +97,15 @@ class VolatileCallContextTests(unittest.TestCase):
     def test_bounded_growth_and_no_secret_replay(self):
         c=VolatileCallContext()
         c.on_provider_event(session())
+        last_update=None
         for n in range(200):
-            result=c.on_provider_event(user(n,"We decided "+("Telescope " * 100)))
+            update=c.on_provider_event(user(n,"We decided %d " % n + ("Telescope " * 100)))
+            if update is not None:
+                last_update=update
         self.assertLessEqual(c.buffered_turns,10)
         self.assertLess(c.bytes_used,2800)
-        self.assertLess(len(result["session"]["instructions"].encode("utf-8")),27000)
+        self.assertIsNotNone(last_update)
+        self.assertLess(len(last_update["session"]["instructions"].encode("utf-8")),27000)
         self.assertIsNone(c.on_provider_event(user(220,"My API key is alpha beta gamma")))
 
     def test_provider_error_disables_optional_feature_only(self):
