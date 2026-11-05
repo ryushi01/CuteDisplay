@@ -43,9 +43,9 @@ class ShareableMemoryTests(unittest.TestCase):
         self.assertEqual(read_shareable(self.root), [])
 
     def test_large_approved_note_does_not_hide_later_shorter_note(self):
-        self.write("first\\tshared\\t" + "A" * 300 + "\\n"
-                   "oversized\\tshared\\t" + "B" * 300 + "\\n"
-                   "small\\tshared\\tRemember the orange kite\\n")
+        self.write("first\tshared\t" + "A" * 300 + "\n"
+                   "oversized\tshared\t" + "B" * 300 + "\n"
+                   "small\tshared\tRemember the orange kite\n")
         context = shareable_context(self.root, max_chars=350)
         self.assertIn("A" * 300, context)
         self.assertNotIn("B" * 300, context)
