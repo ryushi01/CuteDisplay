@@ -137,9 +137,14 @@ def recall(query, limit=4):
 class Handler(BaseHTTPRequestHandler):
     def _reply(self,status,obj):
         blob=json.dumps(obj,ensure_ascii=False).encode()
-        self.send_response(status);self.send_header("Content-Type","application/json; charset=utf-8")
-        self.send_header("Content-Length",str(len(blob)))
-        self.end_headers();self.wfile.write(blob)
+        try:
+            self.send_response(status);self.send_header("Content-Type","application/json; charset=utf-8")
+            self.send_header("Content-Length",str(len(blob)))
+            self.end_headers();self.wfile.write(blob)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # A timed-out gateway may have dropped the socket after a durable
+            # snapshot chunk was written. The client can retry its upload.
+            self.close_connection=True
     def do_GET(self):
         if self.path=="/health":return self._reply(200,{"ok":True,"pending":WRITE_Q.qsize()})
         self._reply(404,{"error":"not_found"})
