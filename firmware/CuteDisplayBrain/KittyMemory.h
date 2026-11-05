@@ -1554,7 +1554,7 @@ inline void task(void*){
          k2!="note" && !v2.isEmpty()){
        File scoped2=SD_MMC.open("/kitty/speaker_claims_v6.tsv",FILE_APPEND);
        if(scoped2){
-        scoped2.printf("%lu\\t%s\\t%s\\t%s\\t%s\\n",
+        scoped2.printf("%lu\t%s\t%s\t%s\t%s\n",
          (unsigned long)ts,e.speaker,sanitize(k2,31).c_str(),
          sanitize(v2,112).c_str(),e.source);
         scoped2.close();
