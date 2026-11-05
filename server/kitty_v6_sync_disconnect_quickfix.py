@@ -71,21 +71,24 @@ def update_source(name, live):
     changed = False
     if name == "kitty_memory_service.py":
         spans = (
-            ('    def _reply(self,status,obj):', '    def do_GET(self):'),
+            ('    def _reply(self,status,obj):', '    def _reply(self,status,obj):', '    def do_GET(self):'),
         )
     else:
         spans = (
-            ('    def reply(self, status, payload):', '    def do_GET(self):'),
-            ('            self.send_response(response.status)', '        finally:\n'),
+            ('    def reply(self, status, payload):', '    def reply(self, status, payload):', '    def do_GET(self):'),
+            ('            self.send_response(response.status)',
+             '            # The client may have disconnected while the upstream persisted',
+             '        finally:\n'),
         )
         live, applied = replace_exact(
             live, "UPSTREAM_TIMEOUT_SECONDS = 8\n",
             "UPSTREAM_TIMEOUT_SECONDS = 9\n", name)
         changed |= applied
 
-    for start, end in spans:
+    for old_start, new_start, end in spans:
         live, applied = replace_exact(
-            live, region(old, start, end), region(new, start, end), name)
+            live, region(old, old_start, end),
+            region(new, new_start, end), name)
         changed |= applied
 
     compile(live, name, "exec")
