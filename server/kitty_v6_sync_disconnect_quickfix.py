@@ -144,8 +144,9 @@ def main():
     for service, _, _, _, _ in pending:
         print(service + " active=" +
               command("systemctl", "--user", "is-active", service).strip())
-        print(service + " enabled=" +
-              command("systemctl", "--user", "is-enabled", service).strip())
+        enabled = subprocess.run(["systemctl", "--user", "is-enabled", service],
+                                 capture_output=True, text=True, timeout=10)
+        print(service + " enabled=" + enabled.stdout.strip())
     try:
         print(command("loginctl", "show-user", os.environ["USER"], "-p", "Linger").strip())
     except (subprocess.SubprocessError, KeyError):
