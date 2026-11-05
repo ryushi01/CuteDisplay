@@ -140,7 +140,7 @@ def copy_helper(g, helper):
     if helper_inventory(g) != g.sha(helper):
         raise Refusal("container_helper_sha_mismatch")
     g.docker("exec", "-w", "/app/backend", g.CONTAINER, "python3", "-c",
-             "from kitty_volatile_call_context_v6 import ResponseBoundCallContext\n"
+             "from kitty_response_bound_call_context_v6 import ResponseBoundCallContext\n"
              "assert ResponseBoundCallContext().note_count == 0\n",
              timeout=18)
 
