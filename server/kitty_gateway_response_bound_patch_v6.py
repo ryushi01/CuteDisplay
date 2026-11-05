@@ -167,7 +167,11 @@ def patch(source):
         + init_indent + "    _kitty_v6_callnotes = None\n"
     )
     provider_hook = (
-        provider_indent + "if _kitty_v6_callnotes is not None and isinstance(event, dict):\n"
+        provider_indent + "if (_kitty_v6_callnotes is not None and isinstance(event, dict)\n"
+        + provider_indent + "        and event.get('type') in (\n"
+        + provider_indent + "            'conversation.item.input_audio_transcription.completed',\n"
+        + provider_indent + "            'response.output_audio_transcript.done',\n"
+        + provider_indent + "            'response.audio_transcript.done', 'error')):\n"
         + provider_indent + "    try:\n"
         + provider_indent + "        _kitty_v6_callnotes.on_provider_event(event)\n"
         + provider_indent + "    except Exception:\n"
