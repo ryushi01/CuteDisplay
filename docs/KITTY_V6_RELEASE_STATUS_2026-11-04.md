@@ -2,6 +2,16 @@
 **Date:** 2026-11-04  
 **Source checkpoint:** `main` after the gradual voice-learning and source-only ownership work.
 
+## Accepted working hardware baseline — November 5, 2026
+
+**Latest operator report:** “so far everything work.” The private combined **S3 brain + C5 v41** firmware was flashed and Kitty is operating as expected. Treat this as the **accepted hardware-tested baseline**, preserve current functionality, and build future changes incrementally from GitHub `main`. This supersedes earlier conditional v41 staging and v38/v39/v40 flash instructions in this historical document.
+
+**Version/source:** `firmware/CuteDisplay/C5FirmwareVersion.h` remains `C5_FIRMWARE_VERSION = 41`; do **not** bump the firmware version solely for a documentation checkpoint. Source changes for the current combined firmware and tests have already landed directly on `main`. Full C5+S3 CI [run 41809097567](https://github.com/ryushi01/CuteDisplay/actions/runs/41809097567) completed successfully. GitHub `feature/kitty-semantic-v6-cpu` was inspected and is fully contained in `main` (ahead 0); no extra code merge or rewrite is required. The open PR list was empty. Do not merge abandoned historical feature/recovery branches wholesale into the new baseline.
+
+**Preserve this tested setup:** C5-hosted iPhone BLE and full-screen five-line animated Kitty UI; reliable C5 Call Stop, no background bubble, v41 delegated `AI_*` UART ACK repair; S3-hosted 24 kHz realtime mic/speaker, Wi-Fi, and microSD memory authority; existing Ubuntu Open WebUI/gateway/memory service; currently configured AI/TTS services. Keep private combined firmware binaries, the Arduino project with `KittySyncPrivateConfig.h`, OTA rollback images, microSD archive, speaker profiles and NVS safe. **Never commit private firmware images or sync tokens/certificates** to GitHub.
+
+**Evidence scope:** This is a broad user confirmation of working behavior; it is not a new detailed log-based audit of the nine-file synchronization, formal owner speaker attestation, or every memory guard. Do not weaken security/privacy or require unnecessary tests/reflashes merely to record the working state. Investigate only if a new issue is observed.
+
 ## Current operator-confirmed baseline: private S3 + C5 v41 (2026-11-04)
 
 The operator confirmed that the private **combined S3 + C5 v41 firmware was flashed and Kitty works**. This supersedes older C5 v38–v40 flash plans below (kept as historical investigation notes). Public source `C5_FIRMWARE_VERSION = 41` is on `main`; [full combined firmware CI run 41809097567](https://github.com/ryushi01/CuteDisplay/actions/runs/41809097567) **passed**.
