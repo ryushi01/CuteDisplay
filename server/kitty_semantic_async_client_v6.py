@@ -155,8 +155,9 @@ async def owner_semantic_context(url, token, query, session_id, owner_grant,
         return ""
 
 
-def _read_shared_context(url, token, timeout):
-    body=b"{}"
+def _read_shared_context(url, token, timeout, query=None):
+    body=(json.dumps({"query":query},ensure_ascii=False).encode("utf-8")
+          if query is not None else b"{}")
     headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"}
     if url.startswith("unix:///run/kitty-semantic/"):
         conn=_UnixHTTPConnection(url[len("unix://"):],timeout)
@@ -190,4 +191,27 @@ async def shared_context(url, token, *, timeout=0.35,
             asyncio.to_thread(request_fn,url,token,limit),timeout=limit)
     except (TimeoutError,OSError,ValueError,TypeError,KeyError,
             json.JSONDecodeError,urllib.error.URLError):
+        return ""
+
+
+async def shared_context_for_query(url, token, query, *, timeout=0.35,
+                                   request_fn=_read_shared_context):
+    """Best-effort approved-public recall only; never private identity lookup.
+
+    This is an optional per-turn helper and must be called from a separately
+    scheduled task, never directly on the realtime WebSocket/audio hot path.
+    No query data or results are stored by this client.
+    """
+    if (not isinstance(query, str) or not query.strip()
+            or len(query) > 300 or not _local_memory_endpoint(url)
+            or not isinstance(token, str) or not token):
+        return ""
+    try:
+        limit = min(max(float(timeout), 0.05), ALLOWED_TIMEOUT)
+        value = await asyncio.wait_for(
+            asyncio.to_thread(request_fn, url, token, limit, query),
+            timeout=limit)
+        return value[:640] if isinstance(value, str) else ""
+    except (TimeoutError, OSError, ValueError, TypeError, KeyError,
+            json.JSONDecodeError, urllib.error.URLError):
         return ""

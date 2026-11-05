@@ -47,16 +47,62 @@ def read_shareable(snapshot_root):
         return []
 
 
-def shareable_context(snapshot_root, *, max_chars=640):
-    """Produce bounded non-personal context; no speaker IDs or archive search."""
+# Query scoring is intentionally local, lexical and dependency-free. It never
+# searches conversation archives, summaries, speaker claims or owner facts.
+# No query keeps the previously tested approved-shared startup behavior.
+_WORDS = re.compile(r"[a-z0-9]{3,}|[\u3040-\u30ff\u3400-\u9fff]{2,}", re.I)
+_STOP = frozenset({
+    "about", "after", "again", "also", "and", "are", "asked", "been",
+    "before", "can", "could", "did", "does", "for", "from", "have",
+    "how", "into", "its", "know", "like", "more", "much", "name",
+    "our", "please", "recall", "remember", "remind", "said", "say",
+    "she", "should", "some", "tell", "that", "the", "their",
+    "them", "there", "these", "they", "this", "those", "was",
+    "were", "what", "when", "where", "which", "who", "why",
+    "will", "with", "would", "you", "your",
+})
+
+
+def _rank_approved(items, query):
+    """Return only approved notes matching meaningful query terms.
+
+    Ranking cannot authenticate a speaker or promote archived claims. When
+    the query is too vague/no match, return no queried memories rather than
+    silently exposing unrelated approved notes.
+    """
+    if not isinstance(query, str) or not 1 <= len(query) <= 300:
+        return []
+    terms = set(_WORDS.findall(query.casefold())) - _STOP
+    if not terms:
+        return []
+    scored = []
+    for order, (ident, body) in enumerate(items):
+        haystack = body.casefold()
+        words = set(_WORDS.findall(haystack))
+        score = sum((1 + min(len(term), 12) / 12) for term in terms
+                    if term in words or (
+                        len(term) >= 3 and term in haystack))
+        if score:
+            scored.append((-score, order, ident, body))
+    scored.sort()
+    return [(ident, body) for _, _, ident, body in scored]
+
+
+def shareable_context(snapshot_root, *, max_chars=640, query=None):
+    """Read bounded *approved public* SD notes; optionally rank by question.
+
+    The original query-less behavior is preserved for realtime session start.
+    A question never expands the source allowlist or authorizes private data.
+    """
     items = read_shareable(snapshot_root)
+    if query is not None:
+        items = _rank_approved(items, query)
     lines = []
     total = 0
     for _, text in items:
         entry = "- " + text
         if total + len(entry) + 1 > max_chars:
-            # A long approved item must not hide later shorter approved
-            # memories. Keep the first-fit deterministic and bounded.
+            # An oversized approved entry never hides a later smaller one.
             continue
         lines.append(entry)
         total += len(entry) + 1
