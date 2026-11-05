@@ -76,6 +76,52 @@ class ServiceContextContract(unittest.TestCase):
             self.assertEqual(body, {"error": "verified_owner_session_required"})
             recalled.assert_not_called()
 
+    def test_public_query_only_searches_latest_approved_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = Path(tmp) / "snapshot-00001" / "kitty"
+            snap.mkdir(parents=True)
+            (snap / "shareable_memories_v6.tsv").write_text(
+                "a\tshared\t" + "A" * 300 + "\n"
+                "b\tshared\tMochi Planet has sugar trees\n"
+                "c\tprivate\tSomeone else's private secret\n")
+            (snap / "conversations.tsv").write_text(
+                "123\tMy private comet is Silver\tSure\n")
+            (snap / "speaker_claims_v6.tsv").write_text(
+                "123\tperson:owner\tcomet\tSilver\tvoice_probable\n")
+            with patch.dict(os.environ, {"KITTY_SD_SNAPSHOT_ROOT": tmp}):
+                status, result = self.request(
+                    "/shared/context", {"query": "What grows on Mochi Planet?"})
+                self.assertEqual(status, 200)
+                self.assertIn("sugar trees", result["context"])
+                self.assertNotIn("A" * 300, result["context"])
+                status, result = self.request(
+                    "/shared/context", {"query": "Silver comet"})
+                self.assertEqual(status, 200)
+                self.assertEqual(result["context"], "")
+                status, result = self.request(
+                    "/shared/context", {"query": "private secret"})
+                self.assertEqual(status, 200)
+                self.assertEqual(result["context"], "")
+                status, result = self.request(
+                    "/shared/context", {})
+                self.assertEqual(status, 200)
+                self.assertIn("A" * 300, result["context"])
+
+    def test_public_context_requires_memory_service_bearer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = Path(tmp) / "snapshot-00001" / "kitty"
+            snap.mkdir(parents=True)
+            (snap / "shareable_memories_v6.tsv").write_text(
+                "ok\tshared\tMochi Planet\n")
+            with patch.dict(os.environ, {"KITTY_SD_SNAPSHOT_ROOT": tmp}):
+                status, _ = self.request(
+                    "/shared/context", {"query": "Mochi"}, token="invalid")
+                self.assertEqual(status, 401)
+                status, response = self.request(
+                    "/shared/context", {"query": 3})
+                self.assertEqual(status, 400)
+                self.assertEqual(response["error"], "invalid_public_query")
+
     def test_legacy_personal_writes_disabled_by_default(self):
         with patch.dict(os.environ, {"KITTY_LEGACY_MEMORY_DB_ENABLED": "0"}):
             for route in ("/turn", "/remember", "/forget", "/recall"):
