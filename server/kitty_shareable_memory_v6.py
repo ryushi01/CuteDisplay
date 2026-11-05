@@ -55,7 +55,9 @@ def shareable_context(snapshot_root, *, max_chars=640):
     for _, text in items:
         entry = "- " + text
         if total + len(entry) + 1 > max_chars:
-            break
+            # A long approved item must not hide later shorter approved
+            # memories. Keep the first-fit deterministic and bounded.
+            continue
         lines.append(entry)
         total += len(entry) + 1
     if not lines:
