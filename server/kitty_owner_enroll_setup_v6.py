@@ -103,6 +103,20 @@ def atomic_restore(path, content, mode):
             os.unlink(temp)
 
 
+def running_service_has_enrollment(public_file, secret):
+    """Verify the *live* service picked up the new private env, no secrets out."""
+    try:
+        pid = command("show", SERVICE, "-p", "MainPID", "--value")
+        if not pid.isdecimal() or int(pid) <= 1:
+            return False
+        entries = set(Path(f"/proc/{int(pid)}/environ").read_bytes().split(b"\0"))
+        expected_path = ("KITTY_OWNER_PUBLIC_KEY_PEM=" + str(public_file)).encode()
+        expected_mac = ("KITTY_OWNER_GRANT_SECRET_HEX=" + secret).encode()
+        return expected_path in entries and expected_mac in entries
+    except (OSError, ValueError, EnrollmentRefusal):
+        return False
+
+
 def install(pem, *, env=ENV, public_file=OWNER_PEM, backup=BACKUP,
             restart=command):
     # This script runs as the owning Linux user, never sudo/root.
@@ -154,6 +168,8 @@ def install(pem, *, env=ENV, public_file=OWNER_PEM, backup=BACKUP,
         restart("restart", SERVICE)
         if restart("is-active", SERVICE) != "active":
             raise EnrollmentRefusal("service_unhealthy")
+        if not running_service_has_enrollment(public_file, mac_secret):
+            raise EnrollmentRefusal("owner_env_not_loaded_by_service")
         # Do not print key, grant or private configuration.
         return "installed"
     except Exception:
