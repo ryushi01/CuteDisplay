@@ -51,6 +51,45 @@ class ShareableMemoryTests(unittest.TestCase):
         self.assertNotIn("B" * 300, context)
         self.assertIn("Remember the orange kite", context)
 
+    def test_question_finds_later_approved_memory_not_in_startup_budget(self):
+        self.write("first\tshared\t" + "A" * 300 + "\n"
+                   "second\tshared\t" + "B" * 300 + "\n"
+                   "third\tshared\tCrystal Moon has purple oceans\n")
+        initial = shareable_context(self.root, max_chars=350)
+        self.assertNotIn("Crystal Moon", initial)
+        targeted = shareable_context(self.root, max_chars=350,
+                                     query="What color were Crystal Moon's oceans?")
+        self.assertIn("Crystal Moon has purple oceans", targeted)
+        self.assertNotIn("A" * 300, targeted)
+        self.assertNotIn("B" * 300, targeted)
+
+    def test_question_cannot_recall_archive_claims_facts_or_private_rows(self):
+        self.write("a\tprivate\tMy phone PIN is 0000\n"
+                   "b\tvoice_probable\tNever approved for sharing\n"
+                   "c\tshared\tKitty's favorite planet is Mochi Planet\n")
+        (self.root / "kitty/conversations.tsv").write_text(
+            "111\tMy secret planet is Pluto\tOkay\n")
+        (self.root / "kitty/speaker_claims_v6.tsv").write_text(
+            "111\tperson:owner\tplanet\tJupiter\tvoice_probable\n")
+        (self.root / "kitty/facts.tsv").write_text(
+            "private_plan\tSaturn\n")
+        for term in ("Pluto", "Jupiter", "Saturn", "phone PIN"):
+            self.assertEqual(
+                shareable_context(self.root, query=term), "")
+        approved = shareable_context(self.root, query="Mochi Planet")
+        self.assertIn("Mochi Planet", approved)
+        self.assertNotIn("Never approved", approved)
+
+    def test_query_must_match_and_not_fall_back_to_unrelated_shared_items(self):
+        self.write("one\tshared\tMochi Planet is imaginary\n")
+        self.assertEqual(shareable_context(self.root, query="please remember"),
+                         "")
+        self.assertEqual(shareable_context(self.root, query="Blue ocean"),
+                         "")
+        self.assertEqual(shareable_context(self.root, query="Mochi" * 100),
+                         "")
+        self.assertIn("Mochi", shareable_context(self.root, query="Mochi"))
+
     def test_bounded_result(self):
         self.write("one\tshared\t" + "A" * 300 + "\n"
                    "two\tshared\t" + "B" * 300 + "\n")
