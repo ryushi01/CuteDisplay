@@ -58,10 +58,12 @@ class ServiceContextContract(unittest.TestCase):
             with patch.dict(os.environ, {"KITTY_SEMANTIC_DB": str(cache)}):
                 status, body = self.request(
                     "/semantic/context", {"query": "hello", "speaker_id": "unknown"})
-            self.assertEqual(status, 400)
-            self.assertEqual(body["error"], "speaker_identity_required")
+            # Device bearer and an untrusted speaker string do not grant
+            # access to owner-private semantic memory.
+            self.assertEqual(status, 403)
+            self.assertEqual(body["error"], "verified_owner_session_required")
 
-    def test_context_calls_shared_formatter(self):
+    def test_context_formatter_not_called_without_signed_owner_grant(self):
         with tempfile.TemporaryDirectory() as temp:
             cache = Path(temp) / "derived.db"
             cache.touch()
@@ -70,10 +72,9 @@ class ServiceContextContract(unittest.TestCase):
                            return_value="attributed context") as recalled:
                     status, body = self.request("/semantic/context", {
                         "query": "Bonjour", "speaker_id": "person:camille"})
-            self.assertEqual(status, 200)
-            self.assertEqual(body, {"context": "attributed context"})
-            recalled.assert_called_once_with(
-                str(cache), "Bonjour", "person:camille")
+            self.assertEqual(status, 403)
+            self.assertEqual(body, {"error": "verified_owner_session_required"})
+            recalled.assert_not_called()
 
     def test_legacy_personal_writes_disabled_by_default(self):
         with patch.dict(os.environ, {"KITTY_LEGACY_MEMORY_DB_ENABLED": "0"}):
