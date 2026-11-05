@@ -16,7 +16,9 @@ from urllib.parse import quote
 
 SERVICE = "kitty-memory-v6.service"
 ENV_KEYS = {b"KITTY_SD_SNAPSHOT_ROOT", b"KITTY_SEMANTIC_DB", b"KITTY_SEMANTIC_AUTO_REFRESH"}
-FILES = ("facts.tsv", "dated_plans.tsv", "summaries.tsv", "conversations.tsv", "shareable_memories_v6.tsv")
+FILES = ("facts.tsv", "dated_plans.tsv", "summaries.tsv",
+         "unverified_summaries_v6.tsv", "conversations.tsv",
+         "speaker_claims_v6.tsv", "shareable_memories_v6.tsv")
 
 
 def _env_of_user_service():
@@ -106,7 +108,25 @@ def index_info(filename):
                 return {"index": "no_active_generation"}
             count = db.execute("SELECT COUNT(*) FROM semantic_v6 WHERE generation=?", (generation,)).fetchone()[0]
             associated = db.execute("SELECT COUNT(*) FROM semantic_speakers WHERE generation=?", (generation,)).fetchone()[0]
-            return {"index": "active", "indexed_rows": str(count), "attributed_rows": str(associated)}
+            result = {"index": "active", "indexed_rows": str(count), "attributed_rows": str(associated)}
+            # The counters explain why an indexed record may not be readable
+            # during a non-attested call. Never print names or free-form
+            # provenance strings, and never join against memory text.
+            columns = {row[1] for row in db.execute("PRAGMA table_info(semantic_speakers)")}
+            if {"speaker_id", "provenance"} <= columns:
+                rows = db.execute(
+                    "SELECT COUNT(*) AS n, "
+                    "SUM(CASE WHEN speaker_id = 'person:owner' THEN 1 ELSE 0 END) AS owner, "
+                    "SUM(CASE WHEN provenance = 'session_verified' THEN 1 ELSE 0 END) AS verified, "
+                    "SUM(CASE WHEN provenance = 'voice_probable' THEN 1 ELSE 0 END) AS probable, "
+                    "SUM(CASE WHEN provenance = 'explicit_introduction' THEN 1 ELSE 0 END) AS self_claimed "
+                    "FROM semantic_speakers WHERE generation=?", (generation,)
+                ).fetchone()
+                result.update({"owner_index_rows": str(rows[1] or 0),
+                               "verified_index_rows": str(rows[2] or 0),
+                               "probable_index_rows": str(rows[3] or 0),
+                               "self_claimed_index_rows": str(rows[4] or 0)})
+            return result
     except (OSError, ValueError, TypeError, sqlite3.Error):
         return {"index": "unreadable_or_incomplete"}
 
