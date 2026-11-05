@@ -77,3 +77,49 @@
 - Stable Open WebUI resumed after rollback; no PR #6 live patch.
 - No firmware, audio path, SD contents, memory authorization or identity
   permissions were changed by these GitHub edits.
+
+
+## 2026-11-05 response-bound same-call continuity increment (SOURCE ONLY)
+
+The first experimental volatile RAM feature in blocked PR #6 sent an
+unsolicited upstream \`session.update\` and was rolled back after the first
+live-call failure. The exact provider rejection source was not proven.
+**Do not redeploy that feature.**
+
+The new source-only module \`server/kitty_response_bound_call_context_v6.py\`
+holds a bounded extractive, unverified **call-shared** scratchpad in one
+per-WebSocket Python object. It only observes completed authenticated
+provider-side transcript events. It does not create a global transcript log,
+persistent store or any new network request. It is not a speaker verifier.
+
+The new pure gateway transformer
+\`server/kitty_gateway_response_bound_patch_v6.py\` requires the previously
+deployed passive-provider and approved-shared response markers, and fails
+closed on unexpected AST scope/forwarding. It has a **read-only** \`--check\`
+command that prints only fixed compatibility statuses. **No apply command is
+provided**: runtime remains unchanged until the exact live route has passed
+this check, the provider behavior has been verified without disrupting audio,
+and a fully reversible deployment is independently reviewed.
+
+Unlike PR #6, the proposed route never sends any extra provider event:
+it can only append bounded, quoted, untrusted references to the existing
+\`response.create.response.instructions\` field, **if that field already exists
+as a string**, leaving the model persona, approved shared context and all
+other message fields unchanged. If the field is absent, the helper does
+nothing. This is designed to avoid speculative provider protocol commands,
+but compatible source topology plus passing tests are **not** proof of
+end-to-end behavior on the Mac inference delegation path.
+
+A quote from an unknown speaker cannot unlock SD owner memories, assign
+a trusted speaker or persist new facts. Call-shared continuity is visible to
+all participants in the current call; do not confuse it with verified
+speaker-private memory. Confidential statements are filtered on a best-effort
+basis only; the helper must never be reused across calls or accepted as a
+privacy boundary for speaker-specific facts.
+
+Offline integration tests simulate provider-to-client forwarding, one original
+client-to-provider response command, context binding, deduplication,
+expiration, sensitive-input filtering and no additional provider sends.
+The existing S3/C5 realtime firmware and private Ubuntu host gateway are
+unchanged. No flash, SD migration, model change, new disk data or live
+service restart is part of this increment.
