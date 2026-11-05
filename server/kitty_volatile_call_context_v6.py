@@ -189,7 +189,9 @@ class VolatileCallContext:
             self._observe_session(event)
             return None
         if kind == "error":
-            self._reset_excerpt()
+            # Any provider error disables this OPTIONAL helper for this call.
+            # Never retrigger a rejected session.update or hurt normal audio.
+            self.close()
             return None
         if kind == "conversation.item.input_audio_transcription.completed":
             changed = self._observe_line(event, role="user")
