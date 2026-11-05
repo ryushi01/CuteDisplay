@@ -131,8 +131,7 @@ class CallContextTests(unittest.TestCase):
         c.on_provider_event(transcript("one", "We decided on an orange kite."))
         c.on_provider_event(transcript("two", "We chose blue paint."))
         now[0] += 1801
-        self.assertIs(c.on_existing_client_command(response()), response()) if False else self.assertEqual(
-            c.on_existing_client_command(response()), response())
+        self.assertEqual(c.on_existing_client_command(response()), response())
         self.assertEqual(c.note_count, 0)
         c.on_provider_event(transcript("three", "We decided to go outside."))
         c.on_provider_event({"type": "error"})
