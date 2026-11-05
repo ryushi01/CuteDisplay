@@ -33,7 +33,8 @@ class EnrollmentTests(unittest.TestCase):
         if restart is None:
             restart = lambda *args: "active"
         with patch.object(setup.os, "geteuid", return_value=1001), \
-             patch.object(setup, "command", return_value="active"):
+             patch.object(setup, "command", return_value="active"), \
+             patch.object(setup, "running_service_has_enrollment", return_value=True):
             return setup.install(
                 self.pem, env=self.env, public_file=self.pub,
                 backup=self.backup, restart=restart)
@@ -79,6 +80,22 @@ class EnrollmentTests(unittest.TestCase):
         self.assertFalse(self.pub.exists())
         self.assertEqual(self.backup.read_bytes(), original)
         self.assertEqual(attempts.count(("restart", setup.SERVICE)), 2)
+
+    def test_live_service_env_not_loaded_rolls_back(self):
+        original = self.env.read_bytes()
+        with patch.object(setup.os, "geteuid", return_value=1001), \
+             patch.object(setup, "command", return_value="active"), \
+             patch.object(setup, "running_service_has_enrollment", return_value=False):
+            with self.assertRaisesRegex(
+                setup.EnrollmentRefusal, "owner_env_not_loaded_by_service"
+            ):
+                setup.install(
+                    self.pem, env=self.env, public_file=self.pub, backup=self.backup,
+                    restart=lambda *args: "active"
+                )
+        self.assertEqual(self.env.read_bytes(), original)
+        self.assertFalse(self.pub.exists())
+        self.assertTrue(self.backup.is_file())
 
     def test_bearer_config_never_printed_or_overwritten(self):
         self.env.write_text(
