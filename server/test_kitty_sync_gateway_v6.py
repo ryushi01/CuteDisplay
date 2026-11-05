@@ -57,7 +57,9 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(call("/secret", b"", method="GET")[0][0], 404)
 
     def test_durable_ack_timeout_budget(self):
-        self.assertEqual(gateway.UPSTREAM_TIMEOUT_SECONDS, 8)
+        self.assertEqual(gateway.UPSTREAM_TIMEOUT_SECONDS, 9)
+        self.assertGreater(gateway.UPSTREAM_TIMEOUT_SECONDS, 8)
+        self.assertLess(gateway.UPSTREAM_TIMEOUT_SECONDS, 12)
         from pathlib import Path
         source = Path(gateway.__file__).read_text()
         self.assertIn("timeout=UPSTREAM_TIMEOUT_SECONDS", source)
