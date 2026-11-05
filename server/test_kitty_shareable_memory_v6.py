@@ -55,9 +55,9 @@ class ShareableMemoryTests(unittest.TestCase):
         self.write("first\tshared\t" + "A" * 300 + "\n"
                    "second\tshared\t" + "B" * 300 + "\n"
                    "third\tshared\tCrystal Moon has purple oceans\n")
-        initial = shareable_context(self.root, max_chars=350)
+        initial = shareable_context(self.root, max_chars=320)
         self.assertNotIn("Crystal Moon", initial)
-        targeted = shareable_context(self.root, max_chars=350,
+        targeted = shareable_context(self.root, max_chars=320,
                                      query="What color were Crystal Moon's oceans?")
         self.assertIn("Crystal Moon has purple oceans", targeted)
         self.assertNotIn("A" * 300, targeted)
