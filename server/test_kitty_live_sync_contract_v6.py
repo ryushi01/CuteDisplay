@@ -33,13 +33,16 @@ class LiveSyncContract(unittest.TestCase):
         self.assertIn("frozen[n]=boundary.boundaries[n]",sync)
         self.assertIn("KittyMemory::requestExport(i,offset,frozen[i])",sync)
         self.assertNotIn("archiveChanged(savedBefore,factsBefore,summariesBefore)",sync)
-    def test_call_stop_source_is_logged(self):
+    def test_call_stop_clears_active_state_and_preserves_controls(self):
         direct=(ROOT/"firmware/CuteDisplayBrain/BrainRealtimeDirect.h").read_text()
         main=(ROOT/"firmware/CuteDisplayBrain/CuteDisplayBrain.ino").read_text()
-        self.assertIn("[CALL CTRL] local_stop cause=%s",direct)
-        self.assertIn('stop("toggle")',direct)
-        self.assertIn("[CALL CTRL] C5 CALL_TOGGLE active=%d",main)
-        self.assertIn('stop("usb_command")',main)
+        self.assertIn("inline void stop(){",direct)
+        self.assertIn('status("CALL_OFF");',direct)
+        self.assertIn("if(requested){stop();return true;}",direct)
+        self.assertIn('f.type=="CALL_STOP"',main)
+        self.assertIn("if(BrainRealtimeDirect::active())BrainRealtimeDirect::stop();",main)
+        self.assertIn("BrainRealtimeDirect::stop();",main)
+        self.assertIn("Manual USB stop requested",main)
         self.assertIn("[CALL NET] ws_disconnected",direct)
     def test_mic_jitter_queue_and_adaptive_catchup(self):
         audio=(ROOT/"firmware/CuteDisplayBrain/BrainRealtimeAudio.h").read_text()
