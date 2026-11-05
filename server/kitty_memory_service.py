@@ -220,6 +220,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._reply(200,interpret(str(data.get("text",""))[:300],now,zone))
             if self.path=="/shared/context":
                 # Only finalized S3 snapshots, never live/unknown speaker archives.
+                # An optional query re-ranks those SAME explicitly approved
+                # notes; it must never search semantic/private SD entries.
+                query=data.get("query",None)
+                if query is not None and (
+                        not isinstance(query,str) or not 1<=len(query)<=300):
+                    return self._reply(400,{"error":"invalid_public_query"})
                 root=os.environ.get("KITTY_SD_SNAPSHOT_ROOT","")
                 context=""
                 if root and os.path.isdir(root):
@@ -231,7 +237,8 @@ class Handler(BaseHTTPRequestHandler):
                          and (p/"kitty"/"shareable_memories_v6.tsv").is_file()),
                         key=lambda p: p.stat().st_mtime,reverse=True)
                     if snapshots:
-                        context=shareable_context(snapshots[0],max_chars=520)
+                        context=shareable_context(
+                            snapshots[0],max_chars=520,query=query)
                 return self._reply(200,{"context":context[:640]})
             if self.path in ("/semantic/context","/semantic"):
                 # Device bearer auth is not human identity. Both legacy and
