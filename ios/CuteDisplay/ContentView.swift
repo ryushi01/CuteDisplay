@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Foundation
 import Security
 
@@ -243,6 +244,7 @@ struct ContentView: View {
                         themeSection
                     default:
                         wifiSection
+                        ownerEnrollmentSection
                         brightnessSection
                         displayProfilesSection
                         powerSection
@@ -402,6 +404,35 @@ struct ContentView: View {
         .background(.white.opacity(0.07))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .sheet(isPresented: $showingIPSettings) { ipSettingsPopup }
+    }
+
+    /// A manually approved public-key enrollment step; never sends owner
+    /// credentials to Kitty, over BLE, or to the realtime AI service.
+    private var ownerEnrollmentSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Private memory owner setup")
+                .font(.headline)
+            Text("Copy this iPhone's Secure Enclave PUBLIC key for enrollment on your private Ubuntu server. The private key never leaves the phone. Voice matching alone never unlocks owner memories.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Copy Owner Public Key") {
+                if #available(iOS 16.0, *) {
+                    do {
+                        let publicKey = try KittyOwnerProofV6.enrollmentPublicKeyDER()
+                        UIPasteboard.general.string = publicKey.base64EncodedString()
+                        appNotice = "Public key copied. Enroll it locally on Ubuntu; this does not enable private spoken recall."
+                    } catch {
+                        appNotice = "Secure Enclave owner key unavailable or authorization was cancelled. No key was exported."
+                    }
+                } else {
+                    appNotice = "Owner key enrollment requires iOS 16 or newer."
+                }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding()
+        .background(.white.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private var ipSettingsPopup: some View {
