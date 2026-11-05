@@ -46,6 +46,28 @@ class ReadinessProbeTests(unittest.TestCase):
             self.assertEqual(before, path.read_bytes())
             self.assertEqual(sorted(p.name for p in Path(t).iterdir()), ["index.sqlite"])
 
+    def test_index_attribution_counts_are_aggregated_and_never_reveal_ids(self):
+        with tempfile.TemporaryDirectory() as t:
+            path = Path(t) / "index.sqlite"
+            with sqlite3.connect(path) as db:
+                db.execute("CREATE TABLE semantic_meta(key TEXT,value TEXT)")
+                db.execute("INSERT INTO semantic_meta VALUES('active','2')")
+                db.execute("CREATE TABLE semantic_v6(generation INTEGER)")
+                db.execute("CREATE TABLE semantic_speakers("
+                           "generation INTEGER,speaker_id TEXT,provenance TEXT)")
+                db.executemany("INSERT INTO semantic_v6 VALUES(2)", [()] * 3)
+                db.executemany("INSERT INTO semantic_speakers VALUES(2,?,?)",
+                               [("person:owner", "session_verified"),
+                                ("person:private_secret_name", "voice_probable"),
+                                ("person:private_secret_name", "explicit_introduction")])
+            result = index_info(str(path))
+            self.assertEqual(result["indexed_rows"], "3")
+            self.assertEqual(result["owner_index_rows"], "1")
+            self.assertEqual(result["verified_index_rows"], "1")
+            self.assertEqual(result["probable_index_rows"], "1")
+            self.assertEqual(result["self_claimed_index_rows"], "1")
+            self.assertNotIn("private_secret_name", repr(result))
+
     def test_missing_index_is_not_created(self):
         with tempfile.TemporaryDirectory() as t:
             missing = Path(t) / "missing.sqlite"
