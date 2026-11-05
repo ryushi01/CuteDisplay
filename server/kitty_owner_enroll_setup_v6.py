@@ -12,6 +12,7 @@ gateway, SD, profiles, archive, Compose or C5/S3 firmware changes.
 """
 import argparse
 import base64
+import binascii
 import getpass
 import os
 from pathlib import Path
@@ -79,7 +80,7 @@ def validate_der(encoded):
     try:
         der = base64.b64decode(encoded, validate=True)
         key = serialization.load_der_public_key(der)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, binascii.Error):
         raise EnrollmentRefusal("public_key_invalid") from None
     if (not isinstance(key, ec.EllipticCurvePublicKey)
             or not isinstance(key.curve, ec.SECP256R1)):
