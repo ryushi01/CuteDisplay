@@ -50,6 +50,15 @@ check("summary_jobs_v6" not in files and "unverified_summaries_v6" not in files,
 journal = memory.split("auto submitSummaryBatch=", 1)[1].split("auto dispatchSummaryJob=", 1)[0]
 check(r'+"\t"+' in journal and r'+turns+"\n";' in journal, "actual TSV delimiter escapes")
 check(r'+"\\t"+' not in journal and r'+turns+"\\n";' not in journal, "double-escaped TSV delimiters")
+# A second speaker preference in the same utterance must be a REAL TSV row.
+# It previously wrote literal \\t and \\n characters, joining/corrupting
+# later records and causing indexes to silently skip legitimate claims.
+second_claim = memory.split('File scoped2=SD_MMC.open(', 1)[1].split('scoped2.close();', 1)[0]
+check('scoped2.printf("%lu\\t%s\\t%s\\t%s\\t%s\\n",' in second_claim,
+      "second preference must use actual TSV separators")
+check('scoped2.printf("%lu\\\\t%s\\\\t' not in second_claim,
+      "second preference cannot contain double-escaped TSV separators")
+
 check('static volatile bool operatorEnabled=true;' in worker, "idle AI automatically enabled")
 check('if(running || !operatorEnabled || pausedAfterHttpFailure' in worker, "idle AI enable gate")
 check('running=false;requestStartedAt=0;worker=nullptr;' in worker, "worker finishes cleanly")
