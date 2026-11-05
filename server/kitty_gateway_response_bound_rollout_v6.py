@@ -59,8 +59,8 @@ def git_source(ref, name):
     return raw
 
 
-def components():
-    sha = checked(["git", "rev-parse", "--verify", "FETCH_HEAD"]).decode("ascii").strip()
+def components(ref=None):
+    sha = ref if ref is not None else checked(["git", "rev-parse", "--verify", "FETCH_HEAD"]).decode("ascii").strip()
     if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
         raise Refusal("fetch_head_not_pinned")
     guard = types.ModuleType("kitty_verified_bind_helpers")
@@ -160,7 +160,8 @@ def remove_created_helper(g, expected):
 
 
 def install():
-    g, patcher, helper = components()
+    pinned_ref = checked(["git", "rev-parse", "--verify", "FETCH_HEAD"]).decode("ascii").strip()
+    g, patcher, helper = components(pinned_ref)
     path, meta, original, candidate, inventory = preflight(g, patcher, helper)
     safe_store()
     # Only the original gateway *code*, never memory data, is retained.
@@ -170,6 +171,7 @@ def install():
     g.atomic_private(STATE, json.dumps({
         "status":"prepared", "source":path, "meta":meta,
         "before":g.sha(original), "after":g.sha(candidate),
+        "source_ref":pinned_ref,
         "module":g.sha(helper), "module_created":inventory=="absent"
     }, sort_keys=True).encode())
     created = False
@@ -200,6 +202,7 @@ def install():
         g.atomic_private(STATE, json.dumps({
             "status":"installed", "source":path, "meta":meta,
             "before":g.sha(original), "after":g.sha(candidate),
+            "source_ref":pinned_ref,
             "module":g.sha(helper), "module_created":created
         }, sort_keys=True).encode())
         print("gateway_health=healthy", flush=True)
@@ -251,7 +254,6 @@ def inspect():
 
 
 def rollback():
-    g, _, _ = components()
     if not STATE.is_file() or STATE.is_symlink() or not ORIGINAL.is_file():
         raise Refusal("no_valid_installation")
     try:
@@ -260,6 +262,9 @@ def rollback():
         raise Refusal("invalid_installed_state") from None
     if record.get("status") != "installed":
         raise Refusal("not_installed")
+    # Load source-only deployment helpers from the exact installation SHA,
+    # even if FETCH_HEAD/main changed after deployment.
+    g, _, _ = components(record.get("source_ref"))
     path, meta = record["source"], record["meta"]
     if g.mounted_host_source() != path:
         raise Refusal("mount_source_changed")
