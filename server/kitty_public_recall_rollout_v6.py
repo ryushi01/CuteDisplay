@@ -363,18 +363,23 @@ def apply():
 
 
 def restore_files(state, *, expected="installed"):
+    # Validate ALL original and current files before mutating any source.
+    # An independently edited container helper must not leave us with only
+    # the host half rolled back.
+    restorations = []
     for name in HOST_FILES:
-        old = (STORE / (name + ".before")).read_bytes()
-        if checksum(old) != state["host_old"][name]:
+        original = (STORE / (name + ".before")).read_bytes()
+        if checksum(original) != state["host_old"][name]:
             raise Refusal("host_backup_corrupt")
-        current, mode = host_bytes(name)
+        current, _ = host_bytes(name)
         target = state["host_new"][name]
         if expected == "installed" and checksum(current) != target:
             raise Refusal("host_modified_since_install")
         if expected == "partial" and checksum(current) not in (
                 state["host_old"][name], target):
             raise Refusal("host_conflict_during_recovery")
-        atomic_file(HOST_ROOT / name, old, state["host_modes"][name])
+        restorations.append((HOST_ROOT / name, original,
+                             state["host_modes"][name]))
     old = (STORE / (CONTAINER_FILES[0] + ".before")).read_bytes()
     if checksum(old) != state["container_old"]:
         raise Refusal("container_backup_corrupt")
@@ -384,12 +389,15 @@ def restore_files(state, *, expected="installed"):
     if expected == "partial" and checksum(current) not in (
             state["container_old"], state["container_new"][CONTAINER_FILES[0]]):
         raise Refusal("container_conflict_during_recovery")
+    optional = container_bytes(CONTAINER_FILES[1], optional=True)
+    if (optional is not None
+            and checksum(optional) != state["container_new"][CONTAINER_FILES[1]]):
+        raise Refusal("new_helper_changed")
+    for path, original, mode in restorations:
+        atomic_file(path, original, mode)
     if current != old:
         deploy_container(CONTAINER_FILES[0], old)
-    optional = container_bytes(CONTAINER_FILES[1], optional=True)
     if optional is not None:
-        if checksum(optional) != state["container_new"][CONTAINER_FILES[1]]:
-            raise Refusal("new_helper_changed")
         remove_container(CONTAINER_FILES[1], optional)
 
 
