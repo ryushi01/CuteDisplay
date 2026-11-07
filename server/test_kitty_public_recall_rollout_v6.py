@@ -178,6 +178,87 @@ class TransactionTests(unittest.TestCase):
         for name, data in self.host_new.items():
             self.assertEqual((self.host / name).read_bytes(), data)
 
+    def test_deploy_code_module_is_readable_to_nonroot_app(self):
+        data = b"# source code only\n"
+        observed = {}
+        def fake_cp(*args, **kwargs):
+            self.assertEqual(args[0], "cp")
+            local = Path(args[1])
+            observed["mode"] = local.stat().st_mode & 0o777
+            observed["data"] = local.read_bytes()
+            return b""
+        with patch.object(d, "STORE", self.root), \
+             patch.object(d, "docker", side_effect=fake_cp), \
+             patch.object(d, "container_bytes", return_value=data):
+            d.deploy_container(d.CONTAINER_FILES[1], data)
+        self.assertEqual(observed["mode"], 0o644)
+        self.assertEqual(observed["data"], data)
+
+    def test_nonroot_import_smoke_check_targets_both_modules(self):
+        def docker_fake(*args, **kw):
+            self.assertEqual(args[:5], (
+                "exec", "--user", "65534:65534", "-w", "/app/backend"))
+            snippet = args[-1]
+            self.assertIn("kitty_approved_live_query_v6", snippet)
+            self.assertIn("kitty_response_bound_call_context_v6", snippet)
+            return b"call_helper_import=ok\n"
+        with patch.object(d, "docker", side_effect=docker_fake):
+            d.smoke_runtime_imports()
+
+    def test_in_place_repair_preserves_approved_feature_and_host_source(self):
+        self.state_dir.mkdir(mode=0o700)
+        for name, data in self.host_new.items():
+            (self.host / name).write_bytes(data)
+        self.container[d.CONTAINER_FILES[0]] = self.new_container[d.CONTAINER_FILES[0]]
+        self.container[d.CONTAINER_FILES[1]] = self.new_container[d.CONTAINER_FILES[1]]
+        improved = dict(self.container)
+        newer = {
+            d.CONTAINER_FILES[0]: b"# safer call startup\n",
+            d.CONTAINER_FILES[1]: b"# safer approved questions\n",
+        }
+        record = {
+            "status": "installed",
+            "ref": "a755edc36ecd527607ec6715b3e8a08fff5d4924",
+            "host_new": {n: d.checksum(v) for n, v in self.host_new.items()},
+            "container_new": {n: d.checksum(v) for n, v in improved.items()},
+        }
+        manifest = self.state_dir / "state.json"
+        manifest.write_text(json.dumps(record))
+        manifest.chmod(0o600)
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            for name, val in (("HOST_ROOT", self.host),
+                              ("STORE", self.state_dir),
+                              ("MANIFEST", manifest)):
+                stack.enter_context(patch.object(d, name, val))
+            stack.enter_context(patch.object(d, "pinned_sha", return_value="b"*40))
+            stack.enter_context(patch.object(d, "git_file",
+                side_effect=lambda ref, name: newer[name]))
+            stack.enter_context(patch.object(d, "docker", side_effect=self.fake_docker))
+            stack.enter_context(patch.object(d, "container_bytes",
+                side_effect=lambda name: self.container[name]))
+            for name in ("service_active", "service_source_verified",
+                         "gateway_ok", "wait_health"):
+                stack.enter_context(patch.object(d, name, return_value=True))
+            stack.enter_context(patch.object(d, "smoke_runtime_imports"))
+            d.repair_call_start()
+            updated = json.loads(manifest.read_text())
+            self.assertEqual(updated["hotfix_ref"], "b"*40)
+            self.assertEqual(
+                updated["container_new"],
+                {n: d.checksum(v) for n, v in newer.items()})
+            for name in d.HOST_FILES:
+                self.assertEqual((self.host / name).read_bytes(),
+                                 self.host_new[name])
+            self.assertEqual(self.container, newer)
+            self.assertEqual(self.docker_restarts, 1)
+            self.assertEqual(self.restart_count, 0)
+            d.repair_call_start()
+            self.assertEqual(self.docker_restarts, 1)  # idempotent
+        self.assertEqual(
+            (self.state_dir / "hotfix-manifest.before").stat().st_mode & 0o777,
+            0o600)
+
     def test_no_private_memory_or_realtime_route_modified(self):
         src = Path(d.__file__).read_text()
         self.assertNotIn("KITTY_OWNER_GRANT_SECRET_HEX=", src)
