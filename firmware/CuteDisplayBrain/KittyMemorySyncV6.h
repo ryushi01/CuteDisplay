@@ -38,10 +38,12 @@ static volatile uint8_t lastFileIndex=0;
 static volatile uint8_t failureStage=0; // 1=export, 2=chunk, 3=finalize, 4=concurrent-change
 static volatile uint32_t changedDuringExport=0,abortedBeforeUpload=0;
 static volatile uint32_t inCallPosts=0,speechOverlapPosts=0,slowestPostMs=0;
-inline bool archiveChanged(uint32_t saved,uint32_t facts,uint32_t summaries,uint32_t shared){
+inline bool archiveChanged(uint32_t saved,uint32_t facts,uint32_t summaries,
+                           uint32_t shared,uint32_t receipts){
  return saved!=KittyMemory::saved || facts!=KittyMemory::factRevision ||
         summaries!=KittyMemory::summaryRevision ||
-        shared!=KittyMemory::sharedRevision;
+        shared!=KittyMemory::sharedRevision ||
+        receipts!=KittyMemory::ownerReceiptRevision;
 }
 inline bool configured(){
  return String(KITTY_SYNC_V6_URL)=="https://ragnarok-project.com/kitty-v6/sync" &&
@@ -109,6 +111,7 @@ inline bool exportAndSend(const String &snapshot){
  const uint32_t factsBefore=KittyMemory::factRevision;
  const uint32_t summariesBefore=KittyMemory::summaryRevision;
  const uint32_t sharedBefore=KittyMemory::sharedRevision;
+ const uint32_t receiptsBefore=KittyMemory::ownerReceiptRevision;
  failureStage=0;lastHttpStatus=0;
  if(!KittyMemory::requestExport(KittyMemory::EXPORT_COUNT,0)){
   failureStage=1;return false;
@@ -123,7 +126,8 @@ inline bool exportAndSend(const String &snapshot){
  String manifest="{";
  for(uint8_t i=0;i<KittyMemory::EXPORT_COUNT;i++){
   lastFileIndex=i;
-  if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision || sharedBefore!=KittyMemory::sharedRevision)){
+  if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision || sharedBefore!=KittyMemory::sharedRevision ||
+      receiptsBefore!=KittyMemory::ownerReceiptRevision)){
    changedDuringExport++;failureStage=4;return false;
   }
   if(!allowed()){failureStage=1;return false;}
@@ -133,7 +137,8 @@ inline bool exportAndSend(const String &snapshot){
   while(ok){
    // Abort before the next SD read/HTTPS chunk when the live archive grows.
    // A partial staging upload is never finalized as a mixed-revision snapshot.
-   if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision || sharedBefore!=KittyMemory::sharedRevision)){
+   if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision || sharedBefore!=KittyMemory::sharedRevision ||
+      receiptsBefore!=KittyMemory::ownerReceiptRevision)){
     failureStage=4;changedDuringExport++;ok=false;break;
    }
    if(!pauseForSpeech() || !KittyMemory::requestExport(i,offset,frozen[i])){ok=false;break;}
@@ -171,7 +176,8 @@ inline bool exportAndSend(const String &snapshot){
     String(total)+",\"sha256\":\""+digestHex(hash)+"\"}";
  }
  manifest+="}";
- if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision || sharedBefore!=KittyMemory::sharedRevision)){
+ if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision || sharedBefore!=KittyMemory::sharedRevision ||
+      receiptsBefore!=KittyMemory::ownerReceiptRevision)){
   changedDuringExport++;failureStage=4;return false;
  }
  String reply;
@@ -193,13 +199,16 @@ inline void task(void*){
  uint32_t lastArchiveChange=millis();
  uint32_t seenSaved=KittyMemory::saved,seenFacts=KittyMemory::factRevision;
  uint32_t seenSummaries=KittyMemory::summaryRevision,seenShared=KittyMemory::sharedRevision;
+ uint32_t seenReceipts=KittyMemory::ownerReceiptRevision;
  uint32_t syncedSaved=UINT32_MAX,syncedFacts=UINT32_MAX,syncedSummaries=UINT32_MAX,syncedShared=UINT32_MAX;
+ uint32_t syncedReceipts=UINT32_MAX;
  while(true){
   uint32_t now=millis();
-  if(archiveChanged(seenSaved,seenFacts,seenSummaries,seenShared)){
+  if(archiveChanged(seenSaved,seenFacts,seenSummaries,seenShared,seenReceipts)){
    lastArchiveChange=now;
    seenSaved=KittyMemory::saved;seenFacts=KittyMemory::factRevision;
    seenSummaries=KittyMemory::summaryRevision;seenShared=KittyMemory::sharedRevision;
+   seenReceipts=KittyMemory::ownerReceiptRevision;
   }
   if(!allowed()){
    idleSince=0;
@@ -212,7 +221,8 @@ inline void task(void*){
   bool changed=syncedSaved!=KittyMemory::saved ||
                syncedFacts!=KittyMemory::factRevision ||
                syncedSummaries!=KittyMemory::summaryRevision ||
-               syncedShared!=KittyMemory::sharedRevision;
+               syncedShared!=KittyMemory::sharedRevision ||
+               syncedReceipts!=KittyMemory::ownerReceiptRevision;
   bool periodic=lastSuccess && (uint32_t)(now-lastSuccess)>=PERIODIC_REFRESH_MS;
   bool mayRetry=!lastFailure || (uint32_t)(now-lastFailure)>=FAILURE_RETRY_MS;
   if(quiet && mayRetry && (changed || periodic)){
@@ -220,15 +230,17 @@ inline void task(void*){
    const uint32_t startFacts=KittyMemory::factRevision;
    const uint32_t startSummaries=KittyMemory::summaryRevision;
    const uint32_t startShared=KittyMemory::sharedRevision;
+   const uint32_t startReceipts=KittyMemory::ownerReceiptRevision;
    String snapshot=String("s3_")+String((unsigned long)time(nullptr))+
       "_"+String((unsigned long)esp_random(),HEX);
-   if(archiveChanged(startSaved,startFacts,startSummaries,startShared)){
+   if(archiveChanged(startSaved,startFacts,startSummaries,startShared,startReceipts)){
     abortedBeforeUpload++;lastArchiveChange=millis();
     idleSince=0;vTaskDelay(pdMS_TO_TICKS(500));continue;
    }
    if(exportAndSend(snapshot)){
     completed++;
     syncedSaved=startSaved;syncedFacts=startFacts;syncedSummaries=startSummaries;syncedShared=startShared;
+    syncedReceipts=startReceipts;
     lastSuccess=millis();lastFailure=0;
     Serial.printf("[MEMSYNC] snapshot finalized call_posts=%lu speech_overlap=%lu max_post_ms=%lu changed=%lu\n",
       (unsigned long)inCallPosts,(unsigned long)speechOverlapPosts,
