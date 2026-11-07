@@ -29,6 +29,9 @@ static bool requested=false, started=false, connected=false, ready=false;
 // Provider memory updates are opt-in and disabled unless the authenticated
 // gateway explicitly advertises support. Never require them for a voice call.
 static bool memoryRefreshSupported=false;
+// This optional archive protocol requires an explicit upgraded gateway
+// capability. Normal voice/S3 SD behavior stays unchanged by default.
+static bool ownerArchiveSupported=false;
 static bool semanticPending=false;
 static String semanticRequestId,semanticSpeaker,semanticTurnId,semanticContext,semanticTranscript;
 static uint32_t semanticRequestedAt=0,semanticSequence=0;
@@ -331,6 +334,7 @@ inline void flushSpeakerTurns(bool all);
 inline void stop(){
  flushSpeakerTurns(true);
  KittyMemory::endConversation();
+ ownerArchiveSupported=false;KittyMemory::setOwnerArchiveEnabled(false);
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;expressionIdleSince=0;moodUpdatedAt=0;expressionIdleSince=0;
  requested=false;ready=false;connected=false;started=false;
  clearSemanticTurn();waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
@@ -345,6 +349,7 @@ inline void stop(){
 inline void fail(const char *why){
  flushSpeakerTurns(true);
  KittyMemory::endConversation();
+ ownerArchiveSupported=false;KittyMemory::setOwnerArchiveEnabled(false);
  clearMoodQueue();pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;moodUpdatedAt=0;
  const bool localAudio=(strcmp(why,"I2S_RUNTIME")==0 ||
    strcmp(why,"AUDIO_TASK_ALLOC")==0 ||
@@ -382,7 +387,8 @@ inline void archiveSpeakerTurn(uint8_t i){
  if(t.item.isEmpty())return;
  (void)KittyMemory::queueAttributed(t.transcript,"[voice transcript]",
   t.intro.isEmpty()?String("unknown"):t.intro,
-  t.intro.isEmpty()?String("unverified"):String("explicit_introduction"));
+  t.intro.isEmpty()?String("unverified"):String("explicit_introduction"),
+  t.item);
  clearSpeakerTurn(i);
 }
 inline void flushSpeakerTurns(bool all){
@@ -436,7 +442,9 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
    (unsigned long)BrainRealtimeAudio::droppedSpeakerMs());
   pendingMood=-1;currentMood=1;lastExplicitMoodAt=0;
   connected=false;ready=false;remoteResponse=false;streamedSpeech=false;
-  memoryRefreshSupported=false;memoryRefreshSeq=0;clearSemanticTurn();flushSpeakerTurns(true);introducedSpeaker="";introducedClaimContext="";
+  memoryRefreshSupported=false;memoryRefreshSeq=0;
+  ownerArchiveSupported=false;KittyMemory::setOwnerArchiveEnabled(false);
+  clearSemanticTurn();flushSpeakerTurns(true);introducedSpeaker="";introducedClaimContext="";
   waitingDelegationId="";waitingDelegationPrompt="";waitingDelegationAt=0;
  deferredVoiceItem="";playbackSpeechDetected=false;
   delegatedCallId="";animationResponseId="";toolResponseFinished=false;
@@ -462,6 +470,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   // Older gateways ignore this field and preserve existing realtime behavior.
   cJSON_AddBoolToObject(auth,"kitty_voice_v6",true);
   memoryRefreshSupported=false;memoryRefreshSeq=0;
+  ownerArchiveSupported=false;KittyMemory::setOwnerArchiveEnabled(false);
   memoryDaySeen=BrainClock::localDayKey();
   memoryMinuteSeen=BrainClock::valid()?(uint32_t)(time(nullptr)/60):0;
   memorySharedSeen=KittyMemory::sharedRevision;
@@ -502,6 +511,20 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
   cJSON* flag=cJSON_GetObjectItem(json,"refresh");
   memoryRefreshSupported=cJSON_IsTrue(flag);
   Serial.printf("[CALL MEMORY] live_refresh=%d\n",memoryRefreshSupported?1:0);
+ }else if(strcmp(type,"kitty.memory.owner_archive.capabilities")==0){
+  // Never enable based on voice candidate or phone pairing. The trusted
+  // gateway must explicitly negotiate this protocol for each session.
+  cJSON* flag=cJSON_GetObjectItem(json,"enabled");
+  ownerArchiveSupported=ready && cJSON_IsTrue(flag);
+  KittyMemory::setOwnerArchiveEnabled(ownerArchiveSupported);
+  ownerArchiveSupported=KittyMemory::ownerArchiveEnabled;
+ }else if(strcmp(type,"kitty.memory.owner_archive.receipt")==0){
+  // Opaque S3 storage only; owner HMAC is checked on derived snapshot index.
+  // This cannot set ownerVerified or write to the owner facts catalog.
+  cJSON* line=cJSON_GetObjectItem(json,"line");
+  if(ownerArchiveSupported && ready && cJSON_IsString(line) &&
+     line->valuestring && strlen(line->valuestring)<=KittyMemory::OWNER_RECEIPT_LINE_MAX)
+    (void)KittyMemory::queueOpaqueOwnerReceipt(String(line->valuestring),true);
  }else if(strcmp(type,"kitty.memory.refreshed")==0){
   // ACK only: never log the user's personal memory text.
   Serial.println("[CALL MEMORY] context refresh accepted");
@@ -613,7 +636,7 @@ inline void onEvent(WStype_t event, uint8_t *payload, size_t n){
      speaker=introduction;source="explicit_introduction";
     }
    (void)KittyMemory::queueAttributed(transcript,"[voice transcript]",
-                                     speaker,source);
+                                     speaker,source,item);
    // A different recognized speaker invalidates any prior introduction.
    if(source=="voice_probable" && !introducedSpeaker.isEmpty() &&
       speaker!=introducedSpeaker){
@@ -927,6 +950,26 @@ inline void tick(bool audioBusy){
  }
  ws.loop();
  if(!requested)return; // A callback may have rejected the session.
+ // Opaque archive ACK is only delivered after explicit gateway negotiation.
+ // It never affects realtime audio when this feature is disabled/unsupported.
+ if(ownerArchiveSupported && ready){
+  KittyMemory::ArchiveAck ack={};
+  if(KittyMemory::takeArchiveAck(ack) &&
+     ack.conversation==KittyMemory::activeConversation &&
+     ack.epoch==KittyMemory::ownerArchiveEpoch && ack.item[0]){
+   cJSON* msg=cJSON_CreateObject();
+   if(msg){
+    cJSON_AddStringToObject(msg,"type","kitty.memory.owner_archive.ack");
+    cJSON_AddStringToObject(msg,"item_id",ack.item);
+    cJSON_AddNumberToObject(msg,"stamp",ack.stamp);
+    cJSON_AddNumberToObject(msg,"offset",ack.offset);
+    cJSON_AddStringToObject(msg,"archive_sha256",ack.sha256);
+    if(!sendEvent(msg)){
+     ownerArchiveSupported=false;KittyMemory::setOwnerArchiveEnabled(false);
+    }
+   }
+  }
+ }
  if(!waitingDelegationId.isEmpty() &&
     (!semanticPending || (uint32_t)(millis()-waitingDelegationAt)>=80UL)){
   String callId=waitingDelegationId, prompt=waitingDelegationPrompt;
