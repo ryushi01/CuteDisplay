@@ -58,6 +58,7 @@ class VoiceOwnerIssuer:
         self._owner = owner_profile_id
         self._time = clock
         self._session = None
+        self._generation = 0
         self._matches = []
         self._seen_items = set()
         self._seen_audio = set()
@@ -97,9 +98,11 @@ class VoiceOwnerIssuer:
 
     def interrupt(self):
         """A guest, uncertainty, overlap or a gap invalidates accumulated trust."""
+        self._generation += 1
         self._matches.clear()
 
     def end_call(self):
+        self._generation += 1
         self._session = None
         self._matches.clear()
         self._seen_items.clear()
@@ -120,6 +123,8 @@ class VoiceOwnerIssuer:
             self.interrupt()
             return None
         self._seen_items.add(item_id)
+        generation = self._generation
+        session_id = self._session
         policy = self._policy()
         if policy is None:
             self.interrupt()
@@ -130,6 +135,8 @@ class VoiceOwnerIssuer:
             record = self._capture(self._session, item_id)
         except (OSError, KeyError, ValueError, RuntimeError, TypeError):
             self.interrupt()
+            return None
+        if self._generation != generation or self._session != session_id:
             return None
         if not isinstance(record, dict):
             self.interrupt()
@@ -161,6 +168,11 @@ class VoiceOwnerIssuer:
             result = self._score(wav)
         except (OSError, ValueError, RuntimeError, TypeError):
             self.interrupt()
+            return None
+        # CPU scoring can finish AFTER a guest/cancel/disconnect event.
+        # Such a result must not restore consecutive-owner trust or mint a
+        # ticket for a newer call, even if the model score itself is high.
+        if self._generation != generation or self._session != session_id:
             return None
         if not isinstance(result, dict):
             self.interrupt()
