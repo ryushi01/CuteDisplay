@@ -80,7 +80,10 @@ class ResponseBoundCallContext:
         try:
             from kitty_approved_live_query_v6 import ApprovedLiveQuery
             self._public = ApprovedLiveQuery(clock=clock)
-        except (ImportError, TypeError, ValueError, RuntimeError):
+        except Exception:
+            # Optional cross-call query failure must NEVER abort voice startup.
+            # In particular Docker-copied Python sources can be unreadable
+            # to the WebUI worker (PermissionError), even when health passes.
             self._public = None
 
     def close(self):
@@ -89,7 +92,11 @@ class ResponseBoundCallContext:
         self._seen.clear()
         self._closed = True
         if self._public is not None:
-            self._public.close()
+            try:
+                self._public.close()
+            except Exception:
+                pass
+            self._public = None
 
     @property
     def note_count(self):
