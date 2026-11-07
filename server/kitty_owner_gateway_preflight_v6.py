@@ -50,14 +50,48 @@ def _owners(tree):
 
 
 def _provider_candidate(tree):
-    # Reuse the strict and well-tested passive upstream decoder topology.
-    # It does NOT prove the human owner or original S3 mic audio.
-    try:
-        from kitty_gateway_decode_hook_patch_v6 import _target, HookRefusal
-        _target(tree)
-        return "candidate"
-    except (ImportError, ValueError, TypeError, SyntaxError):
+    # Self-contained inside Docker: no dependency on deployed helper paths.
+    # A strict candidate needs exactly one upstream loop, one direct decode
+    # from that loop item and one observed provider->device forward.
+    providers = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.AsyncFunctionDef)
+                 and n.name == "provider_events"]
+    if len(providers) != 1:
         return "not_verified"
+    own = list(_scope_nodes(providers[0]))
+    loops = [n for n in own if isinstance(n, ast.AsyncFor)
+             and isinstance(n.iter, ast.Name) and n.iter.id == "upstream"
+             and isinstance(n.target, ast.Name)]
+    if len(loops) != 1:
+        return "not_verified"
+    loop = loops[0]
+    decodes, forwards = 0, 0
+    for n in _scope_nodes(providers[0]):
+        if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(
+                n.targets[0], ast.Name) and n.targets[0].id == "event":
+            val = n.value.value if isinstance(n.value, ast.Await) else n.value
+            if isinstance(val, ast.Call) and isinstance(val.func, ast.Attribute):
+                func = val.func
+                if (func.attr == "json" and not val.args
+                        and isinstance(func.value, ast.Name)
+                        and func.value.id == loop.target.id):
+                    decodes += 1
+                elif (func.attr == "loads" and len(val.args) == 1
+                      and isinstance(func.value, ast.Name)
+                      and func.value.id in ("json", "orjson")
+                      and isinstance(val.args[0], ast.Name)
+                      and val.args[0].id == loop.target.id):
+                    decodes += 1
+        if isinstance(n, ast.Await) and isinstance(n.value, ast.Call):
+            call = n.value
+            if (len(call.args) == 1 and isinstance(call.func, ast.Attribute)
+                    and call.func.attr == "send_json"
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id == "ws"
+                    and isinstance(call.args[0], ast.Name)
+                    and call.args[0].id == "event"):
+                forwards += 1
+    return "candidate" if decodes == 1 and forwards == 1 else "not_verified"
 
 
 def _client_receive_count(client):
