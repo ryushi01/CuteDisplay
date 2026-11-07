@@ -205,7 +205,7 @@ class AsyncAttestedHistoryTests(unittest.IsolatedAsyncioTestCase):
         _,grant,_=self.authorize_owner()
         started=asyncio.Event()
         release=asyncio.Event()
-        async def fake(*args):
+        async def fake(*args, **kwargs):
             started.set()
             await release.wait()
             return "private note must not reach later speaker"
