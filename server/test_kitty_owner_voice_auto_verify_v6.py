@@ -3,6 +3,7 @@
 import io
 import math
 import struct
+import time
 import unittest
 import wave
 
@@ -13,7 +14,9 @@ from kitty_owner_session_v6 import verify_grant
 SESSION = "gateway_voice_auto_session_123"
 SIGNER = b"t"*32
 GRANT = b"g"*32
-WALL = 1900001000
+# HTTP boundary tests run against the actual current clock; using a
+# future fixed epoch would make every signed grant not-yet-valid.
+WALL = int(time.time())
 
 
 def captured_wav(freq=180):
