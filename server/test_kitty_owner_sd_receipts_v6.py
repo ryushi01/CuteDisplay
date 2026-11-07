@@ -97,12 +97,23 @@ class OwnerReceiptTests(unittest.TestCase):
         self.receipt_file.write_bytes(self.mint())
         self.kitty.joinpath("speaker_claims_v6.tsv").write_text(
             f"{NOW}\tperson:owner\tcolor\tpurple\tvoice_probable\n")
-        with patch("kitty_sd_semantic_index.get_model", return_value=FakeModel()):
-            build(self.sd, self.db, owner_receipt_secret=b"wrong-key"*4)
-            self.assertEqual(
-                search(self.db, "hidden color", speaker_id="person:owner"), [])
-            build(self.sd, self.db, owner_receipt_secret=RECEIPT)
-            found = search(self.db, "hidden color", speaker_id="person:owner")
+        with patch.dict(os.environ, {
+                "KITTY_OWNER_ARCHIVE_RECEIPT_SECRET_HEX": RECEIPT.hex()}):
+            with patch("kitty_sd_semantic_index.get_model", return_value=FakeModel()):
+                build(self.sd, self.db, owner_receipt_secret=b"wrong-key"*4)
+                self.assertEqual(
+                    search(self.db, "hidden color", speaker_id="person:owner"), [])
+                build(self.sd, self.db, owner_receipt_secret=RECEIPT)
+                found = search(self.db, "hidden color", speaker_id="person:owner")
+                self.assertEqual(len(found), 1)
+                with patch.dict(os.environ, {
+                        "KITTY_OWNER_ARCHIVE_RECEIPT_SECRET_HEX": ""}):
+                    self.assertEqual(search(
+                        self.db, "hidden color", speaker_id="person:owner"), [])
+                with patch.dict(os.environ, {
+                        "KITTY_OWNER_ARCHIVE_RECEIPT_SECRET_HEX": (b"wrong"*8).hex()}):
+                    self.assertEqual(search(
+                        self.db, "hidden color", speaker_id="person:owner"), [])
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0]["speaker_role"], "owner")
         self.assertEqual(found[0]["provenance"], "session_verified")
