@@ -34,6 +34,27 @@ class ApprovedRecallTests(unittest.IsolatedAsyncioTestCase):
                     "unix:///run/kitty-semantic/../bad.sock"):
             self.assertFalse(local_endpoint(url), url)
 
+    async def test_greeting_does_not_spawn_background_query(self):
+        calls = []
+        async def lookup(url, token, query):
+            calls.append(query)
+            return "Approved shared note"
+        q = ApprovedLiveQuery(url=URL, token="token", lookup=lookup)
+        for item, message in (
+                ("a", "Hello Kitty"),
+                ("b", "Thanks for chatting with me."),
+                ("c", "I am enjoying this conversation.")):
+            q.observe(user(item, message))
+        await asyncio.sleep(0.02)
+        self.assertEqual(calls, [])
+        self.assertEqual(q.decorate(response()), response())
+        q.observe(user("question", "Do you remember Mochi Planet?"))
+        await asyncio.sleep(0.02)
+        self.assertEqual(calls, ["Do you remember Mochi Planet?"])
+        self.assertIn("Approved shared note",
+                      q.decorate(response())["response"]["instructions"])
+        q.close()
+
     async def test_async_approved_result_in_existing_response_only(self):
         calls = []
         async def fake(url, token, query):

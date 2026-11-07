@@ -33,6 +33,49 @@ class CallContextTests(unittest.TestCase):
                 self.assertNotIn(disallowed, src)
         self.assertIn("__slots__", src)
 
+    def test_optional_import_permission_error_never_breaks_call(self):
+        # A Docker cp may create root-owned mode-0600 code, while a WebUI
+        # worker runs as an unprivileged UID. This must not disconnect S3.
+        import builtins
+        imported = builtins.__import__
+        def deny_optional(name, *args, **kwargs):
+            if name == "kitty_approved_live_query_v6":
+                raise PermissionError("optional helper not readable")
+            return imported(name, *args, **kwargs)
+        with patch("builtins.__import__", side_effect=deny_optional):
+            c = ResponseBoundCallContext()
+        self.assertIsNone(c._public)
+        c.on_provider_event(transcript("a", "We decided to visit a cave planet."))
+        c.on_provider_event(transcript("b", "It has purple oceans."))
+        result = c.on_existing_client_command(response())
+        self.assertIn("cave planet", result["response"]["instructions"])
+        self.assertEqual(result["type"], "response.create")
+        c.close()
+
+    def test_optional_helper_exception_and_bad_cleanup_never_disconnects(self):
+        from unittest.mock import Mock
+        c = ResponseBoundCallContext()
+        broken = Mock()
+        broken.observe.side_effect = RuntimeError("public helper failed")
+        broken.close.side_effect = OSError("cannot close optional helper")
+        c._public = broken
+        c.on_provider_event(transcript("a", "We decided on a blue kite."))
+        self.assertIsNone(c._public)
+        c.on_provider_event(transcript("b", "It has gold stripes."))
+        self.assertIn("blue kite", c.on_existing_client_command(
+            response())["response"]["instructions"])
+        c.close()
+        self.assertTrue(c._closed)
+
+        c = ResponseBoundCallContext()
+        broken = Mock()
+        broken.decorate.side_effect = PermissionError("not readable")
+        broken.close.side_effect = RuntimeError("cleanup failed")
+        c._public = broken
+        self.assertEqual(c.on_existing_client_command(response()), response())
+        self.assertIsNone(c._public)
+        c.close()
+
     def test_first_turn_does_not_mutate_existing_response(self):
         note = ResponseBoundCallContext()
         original = response()

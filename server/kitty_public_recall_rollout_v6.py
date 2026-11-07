@@ -245,12 +245,39 @@ def deploy_container(name, content):
     with tempfile.TemporaryDirectory(prefix=".kitty-module-", dir=STORE) as d:
         local = Path(d) / name
         local.write_bytes(content)
-        local.chmod(0o600)
+        # Python module SOURCE contains no secrets; the WebUI worker may run
+        # without root. Mode 0600 made imports fail only when a call started.
+        # Keep private transaction backups 0600, but deploy code as 0644.
+        local.chmod(0o644)
         docker("cp", str(local), CONTAINER + ":" + CONTAINER_BASE + name,
                timeout=35)
     if container_bytes(name) != content:
         raise Refusal("container_copy_verification_failed")
 
+
+
+def smoke_runtime_imports():
+    """Prove both helpers import as an unprivileged container worker.
+
+    The container's health endpoint can succeed without ever importing the
+    lazily initialized per-call helper. Simulate non-root access without
+    opening audio, model, memory records or provider connections.
+    """
+    source = (
+        "import sys\n"
+        "sys.path.insert(0,'/app/backend')\n"
+        "from kitty_approved_live_query_v6 import ApprovedLiveQuery\n"
+        "from kitty_response_bound_call_context_v6 import ResponseBoundCallContext\n"
+        "v=ResponseBoundCallContext()\n"
+        "assert v._public is not None\n"
+        "v.close()\n"
+        "print('call_helper_import=ok')\n"
+    )
+    answer = docker("exec", "--user", "65534:65534", "-w",
+                    "/app/backend", CONTAINER, "python3", "-c",
+                    source, timeout=20)
+    if answer.strip() != b"call_helper_import=ok":
+        raise Refusal("nonroot_call_helper_import_failed")
 
 def remove_container(name, expected):
     if name not in CONTAINER_FILES or container_bytes(name) != expected:
@@ -424,12 +451,122 @@ def rollback():
     print("open_webui=healthy")
 
 
+
+def repair_call_start():
+    """Upgrade PR #14 in place; keep approved public recall and saved backup.
+
+    An installed transaction can be safely hotfixed without returning to the
+    old, non-query version. This repairs only Python helper sources, leaves
+    the active realtime route/memory service intact, and restarts WebUI once.
+    No config, credentials, S3 storage or audio code are changed.
+    """
+    ref = pinned_sha()
+    if MANIFEST.is_symlink() or not MANIFEST.is_file():
+        raise Refusal("prior_public_recall_installation_not_found")
+    try:
+        state = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise Refusal("prior_deployment_state_invalid") from None
+    if state.get("status") != "installed":
+        raise Refusal("prior_public_recall_not_installed")
+    if not service_active() or not service_source_verified():
+        raise Refusal("memory_service_not_verified")
+    if not gateway_ok():
+        raise Refusal("working_gateway_hook_missing")
+    for name in HOST_FILES:
+        if checksum(host_bytes(name)[0]) != state["host_new"].get(name):
+            raise Refusal("custom_host_memory_module_refused")
+    current = {}
+    target = {}
+    for name in CONTAINER_FILES:
+        content = container_bytes(name)
+        if checksum(content) != state["container_new"].get(name):
+            raise Refusal("custom_container_module_refused")
+        current[name] = content
+        target[name] = git_file(ref, name)
+    if state.get("hotfix_ref") is not None:
+        if state["hotfix_ref"] != ref:
+            raise Refusal("another_hotfix_already_installed")
+        smoke_runtime_imports()
+        print("approved_public_recall=already_repaired")
+        print("voice_gateway_route=unchanged")
+        print("changes=none")
+        return
+    if current == target:
+        raise Refusal("no_hotfix_source_changes")
+    if any((STORE / ("hotfix-" + name + ".before")).exists()
+           for name in CONTAINER_FILES):
+        raise Refusal("previous_hotfix_backup_present")
+    if (STORE / "hotfix-manifest.before").exists():
+        raise Refusal("previous_hotfix_state_present")
+    # Private exact bytes are only source code and transaction state.
+    backup("hotfix-manifest.before", MANIFEST.read_bytes())
+    for name in CONTAINER_FILES:
+        backup("hotfix-" + name + ".before", current[name])
+    changed = False
+    restarted = False
+    try:
+        for name in CONTAINER_FILES:
+            if target[name] != current[name]:
+                changed = True
+                deploy_container(name, target[name])
+            else:
+                # Previously installed source may still be root-only mode
+                # 0600. Copying the same bytes with 0644 repairs access.
+                changed = True
+                deploy_container(name, target[name])
+        smoke_runtime_imports()
+        docker("restart", CONTAINER, timeout=90)
+        restarted = True
+        if not wait_health() or not gateway_ok():
+            raise Refusal("webui_health_failed_after_repair")
+        smoke_runtime_imports()
+        if any(container_bytes(name) != target[name] for name in CONTAINER_FILES):
+            raise Refusal("hotfix_source_hash_mismatch")
+        state["container_new"] = {
+            name: checksum(data) for name, data in target.items()
+        }
+        state["hotfix_ref"] = ref
+        safe_state(state)
+        print("approved_public_recall=repaired")
+        print("call_helper_nonroot_import=verified")
+        print("memory_service=active")
+        print("open_webui=healthy")
+        print("voice_gateway_route=unchanged")
+        print("owner_private_recall=disabled")
+        print("s3_c5_sd_iphone=unchanged")
+    except Exception:
+        # Restore the installed improved PR #14 helpers, NOT the older
+        # non-query release. This is recovery from a failed repair only.
+        print("repair_error=restoring_installed_improved_version", flush=True)
+        if changed:
+            try:
+                for name in CONTAINER_FILES:
+                    previous = (STORE / ("hotfix-" + name + ".before")).read_bytes()
+                    if checksum(previous) != checksum(current[name]):
+                        raise Refusal("hotfix_backup_corrupt")
+                    deployed = container_bytes(name)
+                    if deployed not in (current[name], target[name]):
+                        raise Refusal("hotfix_concurrent_edit")
+                for name in CONTAINER_FILES:
+                    deploy_container(name, current[name])
+                if restarted:
+                    docker("restart", CONTAINER, timeout=90)
+                if not wait_health():
+                    raise Refusal("recovery_health_failed")
+                print("recovery=improved_version_preserved", flush=True)
+            except Exception:
+                print("recovery=requires_manual_review", flush=True)
+        raise Refusal("public_recall_repair_failed") from None
+
+
 def main():
     p = argparse.ArgumentParser()
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--apply", action="store_true")
     mode.add_argument("--rollback", action="store_true")
+    mode.add_argument("--repair", action="store_true")
     args = p.parse_args()
     try:
         if args.check:
@@ -440,6 +577,8 @@ def main():
             print("changes=none")
         elif args.apply:
             apply()
+        elif args.repair:
+            repair_call_start()
         else:
             rollback()
     except Refusal as exc:
