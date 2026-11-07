@@ -243,7 +243,7 @@ class AsyncOwnerArchiveBridgeTests(unittest.IsolatedAsyncioTestCase):
             channel=self.channel,event=ack))
         self.live=True
         self.consent=False
-        self.assertTrue(self.bridge.on_authenticated_s3_ack(
+        self.assertFalse(self.bridge.on_authenticated_s3_ack(
             channel=self.channel,event=ack))
         await self.bridge.drain()
         self.assertEqual(self.events,[])
@@ -254,12 +254,12 @@ class AsyncOwnerArchiveBridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_cpu_timeout_closes_bridge_without_sending(self):
         await self.warm()
         self.block_score=True
-        item=self.add_turn(3)
-        self.assertTrue(await asyncio.to_thread(self.score_started.wait,1.0))
-        ack,_=self.ack(item)
-        self.assertTrue(self.bridge.on_authenticated_s3_ack(
-            channel=self.channel,event=ack))
         with patch("kitty_owner_receipt_async_bridge_v6.VOICE_TIMEOUT",0.02):
+            item=self.add_turn(3)
+            self.assertTrue(await asyncio.to_thread(self.score_started.wait,1.0))
+            ack,_=self.ack(item)
+            self.assertTrue(self.bridge.on_authenticated_s3_ack(
+                channel=self.channel,event=ack))
             await self.bridge.drain()
         self.assertFalse(self.bridge.active)
         self.assertEqual(self.events,[])
