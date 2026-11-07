@@ -37,6 +37,11 @@ def recall_context(db_path, query, speaker_id, *, limit=4, search_fn=search):
     for item in matches:
         if item.get("speaker_id") != speaker_id:
             continue
+        if speaker_id == "person:owner" and (
+                item.get("speaker_role") != "owner" or
+                item.get("provenance") != "session_verified"):
+            # Defense in depth against stale/forged derived-cache metadata.
+            continue
         provenance = str(item.get("provenance", "unverified"))[:40]
         body = " ".join(str(item.get("text", "")).split())
         if not body:
