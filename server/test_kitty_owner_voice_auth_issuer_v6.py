@@ -146,11 +146,12 @@ class VoiceOwnerIssuerTests(unittest.TestCase):
         self.assertIsNone(self.utterance(2))
         self.assertIsNone(self.issuer.verify_microphone_turn("provider-item-2"))
         self.assertIsNone(self.utterance(3))
-        self.assertIsNotNone(self.utterance(4))
+        self.assertIsNone(self.utterance(4))
+        self.assertIsNotNone(self.utterance(5))
         self.issuer.end_call()
-        self.assertIsNone(self.utterance(5))
+        self.assertIsNone(self.utterance(6))
         self.assertTrue(self.issuer.begin_call("another-provider-session-0001"))
-        self.assertIsNone(self.issuer.verify_microphone_turn("provider-item-5"))
+        self.assertIsNone(self.issuer.verify_microphone_turn("provider-item-6"))
 
     def test_opt_in_revoke_bad_policy_and_time_gap(self):
         self.assertIsNone(self.utterance(1))
