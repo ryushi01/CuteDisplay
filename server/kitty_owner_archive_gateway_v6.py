@@ -71,6 +71,11 @@ class OwnerArchiveGatewayCorrelator:
     def active(self):
         return self._session is not None
 
+    @property
+    def consent_active(self):
+        """Fail-closed gateway-only receipt consent check; not owner proof."""
+        return self._still_consented()
+
     def begin_call(self, *, trusted_gateway_session_id, channel):
         """Gateway-created session only. Return optional capability message.
 
