@@ -11,9 +11,10 @@ from pathlib import Path
 
 FILES = {"facts.tsv", "factsmeta.tsv", "dated_plans.tsv", "summaries.tsv",
          "conversations.tsv", "turn_sources.tsv", "voice_profiles_v6.json", "speaker_claims_v6.tsv",
-         "shareable_memories_v6.tsv"}
+         "shareable_memories_v6.tsv", "owner_turn_receipts_v6.tsv"}
 MAX_CHUNK = 8192
 MAX_FILE = 256 * 1024 * 1024
+OWNER_RECEIPT_MAX_FILE = 4 * 1024 * 1024
 
 class SnapshotReceiver:
     def __init__(self, root):
@@ -33,7 +34,10 @@ class SnapshotReceiver:
             raise ValueError("symlinked snapshot path")
         return path/name
     def chunk(self,snapshot,name,offset,data):
-        if not isinstance(data,bytes) or len(data)>MAX_CHUNK or not isinstance(offset,int) or offset<0 or offset+len(data)>MAX_FILE:
+        if (not isinstance(data,bytes) or len(data)>MAX_CHUNK
+                or type(offset) is not int or offset<0 or offset+len(data)>MAX_FILE
+                or (name=="owner_turn_receipts_v6.tsv"
+                    and offset+len(data)>OWNER_RECEIPT_MAX_FILE)):
             raise ValueError("invalid chunk")
         path=self._file(snapshot,name)
         flags=os.O_CREAT|os.O_RDWR|getattr(os,"O_NOFOLLOW",0)
@@ -60,6 +64,12 @@ class SnapshotReceiver:
     def finalize(self,snapshot,manifest):
         if not self.valid_id(snapshot) or not isinstance(manifest,dict) or not manifest or set(manifest)-FILES:
             raise ValueError("invalid manifest")
+        for name, desc in manifest.items():
+            if (name=="owner_turn_receipts_v6.tsv"
+                    and (not isinstance(desc, dict)
+                         or type(desc.get("size")) is not int
+                         or desc["size"]>OWNER_RECEIPT_MAX_FILE)):
+                raise ValueError("owner receipt snapshot too large")
         for desc in manifest.values():
             if (not isinstance(desc, dict) or set(desc) != {"size", "sha256"}
                 or type(desc["size"]) is not int or not 0 <= desc["size"] <= MAX_FILE
