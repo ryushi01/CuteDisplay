@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Short-lived owner attribution grants, issued ONLY after trusted app login.
+"""Short-lived owner attribution grants for an authenticated owner session.
 
-An S3 API key proves device possession, not which human is speaking.
-This module verifies cryptographic grants; it deliberately does NOT turn
-audio self-identification or paired hardware into owner verification.
+A trusted app proof issuer OR a separately isolated, explicitly consented,
+calibrated multi-turn voice issuer may establish the owner under their
+respective threat models. This low-level signer is NOT itself an authenticator.
+An S3 API key, self-claimed name or paired hardware is never enough.
 """
 import base64
 import hashlib
@@ -20,7 +21,7 @@ def _unb64(data):
     return base64.urlsafe_b64decode(data + "="*((-len(data))%4))
 
 def issue_grant(secret, authenticated_owner, session_id, now=None, ttl=120):
-    """Call only from a server endpoint with independently verified owner login."""
+    """Call only after trusted owner proof OR approved opt-in voice verification."""
     if authenticated_owner is not True:
         raise PermissionError("owner login must already be independently verified")
     if not isinstance(session_id,str) or not 8<=len(session_id)<=100:
