@@ -86,17 +86,22 @@ class ResponseBoundCallContext:
             # to the WebUI worker (PermissionError), even when health passes.
             self._public = None
 
+    def _drop_public(self):
+        # Optional cross-call memory can never abort realtime voice.
+        helper = self._public
+        self._public = None
+        if helper is not None:
+            try:
+                helper.close()
+            except Exception:
+                pass
+
     def close(self):
         self._recent.clear()
         self._pins.clear()
         self._seen.clear()
         self._closed = True
-        if self._public is not None:
-            try:
-                self._public.close()
-            except Exception:
-                pass
-            self._public = None
+        self._drop_public()
 
     @property
     def note_count(self):
@@ -124,8 +129,7 @@ class ResponseBoundCallContext:
             try:
                 self._public.observe(event)
             except Exception:
-                self._public.close()
-                self._public = None
+                self._drop_public()
         role = (
             "User" if kind == "conversation.item.input_audio_transcription.completed"
             else "Kitty" if kind in ("response.output_audio_transcript.done",
@@ -210,6 +214,5 @@ class ResponseBoundCallContext:
         try:
             return self._public.decorate(result)
         except Exception:
-            self._public.close()
-            self._public = None
+            self._drop_public()
             return result
