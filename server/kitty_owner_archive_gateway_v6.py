@@ -103,6 +103,17 @@ class OwnerArchiveGatewayCorrelator:
         """Barge-in, unknown speaker, provider error or cancel: no old proofs."""
         self._pending.clear()
 
+    def _still_consented(self):
+        if self._session is None:
+            return False
+        try:
+            ok = self._consent() is True
+        except (OSError, ValueError, TypeError, RuntimeError):
+            ok = False
+        if not ok:
+            self.cancelled_or_guest()
+        return ok
+
     def register_owner_turn(self, *, item_id, transcript,
                             owner_grant, turn_attestation, audio_sha256):
         """Internal callback only: exact transcript from the provider socket.
@@ -110,7 +121,7 @@ class OwnerArchiveGatewayCorrelator:
         The callback must not be exposed to client events, self-claims,
         probable voice results or S3-sidecar source labels.
         """
-        if (self._session is None or not isinstance(item_id, str)
+        if (not self._still_consented() or not isinstance(item_id, str)
                 or not ITEM.fullmatch(item_id)
                 or item_id in self._used_items
                 or len(self._used_items) >= MAX_ITEMS_PER_CALL
@@ -149,7 +160,7 @@ class OwnerArchiveGatewayCorrelator:
         This is NOT a client-facing handler; the channel object is never
         serialized into JSON or made available to an HTTP caller.
         """
-        if (self._session is None or channel is not self._device
+        if (not self._still_consented() or channel is not self._device
                 or not isinstance(event, dict)
                 or event.get("type") != ACK_TYPE):
             return False
@@ -187,7 +198,7 @@ class OwnerArchiveGatewayCorrelator:
         Once expired, permanently drop the item; never reissue retroactively
         with a new proof or a stated name.
         """
-        if self._session is None or not isinstance(item_id, str):
+        if not self._still_consented() or not isinstance(item_id, str):
             return None
         pending = self._pending.get(item_id)
         if pending is None or pending["ack"] is None:
