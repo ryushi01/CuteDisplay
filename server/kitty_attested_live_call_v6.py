@@ -276,7 +276,10 @@ class AttestedLiveCall:
             self._clear_notes()
             return False
         self._generation += 1
-        self._current = (item_id, attribution, role, transcript)
+        # Retain only this current signed ticket in volatile call RAM; it is
+        # bound to the exact provider item and expires quickly.
+        self._current = (item_id, attribution, role, transcript,
+                         signed_attestation if role == "owner" else None)
         return True
 
     def context_for_verified_turn(self, item_id):
@@ -314,8 +317,10 @@ class AttestedLiveCall:
         query = current[3]
         try:
             executor = lookup if lookup is not None else owner_semantic_context
-            response = await executor(service_url, service_token, query,
-                                      self._session_id, owner_grant)
+            response = await executor(
+                service_url, service_token, query,
+                self._session_id, owner_grant,
+                item_id=item_id, transcript=query, turn_attestation=current[4])
         except (OSError, ValueError, TypeError, TimeoutError, RuntimeError):
             return ""
         if (self._closed or self._generation != generation
