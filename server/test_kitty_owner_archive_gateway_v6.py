@@ -143,6 +143,16 @@ class ArchiveCorrelationTests(unittest.TestCase):
         bridge.begin_call(trusted_gateway_session_id=SID,channel=self.channel)
         return bridge
 
+    def test_revocation_after_ack_blocks_receipt(self):
+        self.assertTrue(self.enroll())
+        self.assertTrue(self.send_ack())
+        self.rows[(NOW,0)] = self.raw
+        self.consent=False
+        self.assertIsNone(self.bridge.receipt_from_finalized_snapshot(ITEM))
+        self.consent=True
+        self.assertIsNone(self.bridge.receipt_from_finalized_snapshot(ITEM))
+        self.assertFalse(self.enroll())  # No reusing this provider item
+
     def test_expiry_and_missing_snapshot_do_not_enable_late_receipt(self):
         self.assertTrue(self.enroll())
         self.assertTrue(self.send_ack())
