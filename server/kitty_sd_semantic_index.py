@@ -66,7 +66,8 @@ def _connect(path):
     )""")
     return db
 
-def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
+def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32, *,
+          owner_receipt_secret=None):
     """Incrementally refresh derived index. Writes commit only after each batch.
 
     On interruption, next build repairs any partial generation; searches can
@@ -86,7 +87,12 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
         db.execute("DELETE FROM semantic_speakers WHERE generation=?", (next_gen,))
         db.commit()
         from kitty_semantic_attribution_v6 import iter_archive_with_speakers
-        speakers = {r["id"]:r for r in iter_archive_with_speakers(sd)}
+        from kitty_owner_sd_receipts_v6 import configured_receipt_secret
+        # No archive key: zero owner rows, even if an SD sidecar lies.
+        if owner_receipt_secret is None:
+            owner_receipt_secret = configured_receipt_secret()
+        speakers = {r["id"]:r for r in iter_archive_with_speakers(
+            sd, owner_receipt_secret=owner_receipt_secret)}
         claims = {}
         claims_path = Path(sd) / "kitty" / "speaker_claims_v6.tsv"
         if claims_path.is_file():
