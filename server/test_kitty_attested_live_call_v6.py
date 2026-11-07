@@ -211,7 +211,9 @@ class AsyncAttestedHistoryTests(unittest.IsolatedAsyncioTestCase):
             return "private note must not reach later speaker"
         task=asyncio.create_task(self.call.owner_history_for_verified_turn(
             "owner_item","http://127.0.0.1:8766","token",grant,lookup=fake))
-        await started.wait()
+        # A bad owner callback must fail a focused test quickly, not hang
+        # GitHub's entire privacy regression job indefinitely.
+        await asyncio.wait_for(started.wait(), timeout=0.5)
         self.call.upstream_speech_started()
         release.set()
         self.assertEqual(await task,"")
