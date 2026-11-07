@@ -23,6 +23,8 @@ class OwnerSdArchiveHandoffContract(unittest.TestCase):
         self.assertIn('"owner_turn_receipts_v6.tsv"', names)
         self.assertIn("uint32_t boundaries[10]", S3)
         self.assertIn("uint32_t frozen[KittyMemory::EXPORT_COUNT]", SYNC)
+        self.assertIn("const uint8_t filesToSend=frozen[KittyMemory::EXPORT_COUNT-1]>0", SYNC)
+        self.assertIn("for(uint8_t i=0;i<filesToSend;i++)", SYNC)
         self.assertIn("ownerReceiptRevision", SYNC)
         self.assertIn("receiptsBefore!=KittyMemory::ownerReceiptRevision", SYNC)
         self.assertIn("startReceipts", SYNC)
