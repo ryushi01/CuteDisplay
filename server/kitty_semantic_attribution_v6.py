@@ -34,9 +34,10 @@ def read_sidecar(sd_root):
             # Never treat an unauthenticated, SD-editable sidecar as proof of
             # owner verification. Verified owner attribution requires trusted
             # session provenance handled in a future authenticated protocol.
-            if role=="owner" or speaker_id=="person:owner":
-                # An SD-editable guest sidecar is not allowed to claim the
-                # reserved owner namespace either (not just owner role).
+            if role=="owner":
+                continue
+            if speaker_id=="person:owner":
+                # A guest-labeled SD row cannot impersonate the reserved owner.
                 continue
             mapping[(int(stamp),int(offset))] = {
                 "speaker_id":speaker_id,
