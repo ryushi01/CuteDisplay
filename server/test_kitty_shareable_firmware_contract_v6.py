@@ -9,10 +9,19 @@ BASE = Path(__file__).resolve().parents[1] / "firmware" / "CuteDisplayBrain"
 
 
 class ShareableFirmwareContract(unittest.TestCase):
-    def test_nine_files_have_matching_boundary_array(self):
+    def test_nine_existing_files_plus_optional_tenth_have_matching_boundaries(self):
         memory=(BASE / "KittyMemory.h").read_text()
-        self.assertIn("uint32_t boundaries[9]",memory)
-        self.assertIn('"shareable_memories_v6.tsv"',memory)
+        self.assertIn("uint32_t boundaries[10]",memory)
+        names=memory.split("static constexpr const char* EXPORT_NAMES[]=",1)[1].split(";",1)[0]
+        legacy=[
+            "facts.tsv","factsmeta.tsv","dated_plans.tsv","summaries.tsv",
+            "conversations.tsv","turn_sources.tsv","voice_profiles_v6.json",
+            "speaker_claims_v6.tsv","shareable_memories_v6.tsv",
+        ]
+        self.assertEqual([f'"{name}"' for name in legacy],
+                         [token.strip() for token in names.split("{",1)[1]
+                          .split("}",1)[0].split(",")][:9])
+        self.assertIn('"owner_turn_receipts_v6.tsv"',names)
         self.assertIn("static constexpr uint8_t EXPORT_COUNT=",memory)
 
     def test_explicit_approval_and_sd_worker_write(self):
