@@ -233,8 +233,9 @@ class AttestedLiveCall:
         self._seen.add(item_id)
         return True
 
-    def verify_turn(self, item_id, signed_attestation, *, owner_grant=None):
-        """Authorize only the matching observed transcript; never from voice scores."""
+    def verify_turn(self, item_id, signed_attestation, *, owner_grant=None,
+                    audio_sha256=None):
+        """Authorize an exact turn using a signed ticket and valid owner grant."""
         self._current = None
         waiting = self._waiting.pop(item_id, None)
         if self._closed or waiting is None or self._secret is None:
@@ -246,14 +247,16 @@ class AttestedLiveCall:
             return False
         verified = verify_external_attestation(
             self._secret, signed_attestation, session_id=self._session_id,
-            item_id=item_id, transcript=transcript, now=self._wall_clock())
+            item_id=item_id, transcript=transcript, now=self._wall_clock(),
+            audio_sha256=audio_sha256)
         if verified is None:
             self._clear_notes()
             return False
         speaker, role = verified
         if role == "owner":
-            # Secure Enclave / owner-session proof is an additional condition;
-            # neither it nor voice probability alone authorizes spoken turns.
+            # The owner grant may follow enrolled phone proof or the explicit
+            # voice-only issuer policy. Neither mere voice probability nor
+            # a claimed name can issue that grant or a trusted turn ticket.
             if not self._owner_secret:
                 self._clear_notes()
                 return False
@@ -279,7 +282,8 @@ class AttestedLiveCall:
         # Retain only this current signed ticket in volatile call RAM; it is
         # bound to the exact provider item and expires quickly.
         self._current = (item_id, attribution, role, transcript,
-                         signed_attestation if role == "owner" else None)
+                         signed_attestation if role == "owner" else None,
+                         audio_sha256 if role == "owner" else None)
         return True
 
     def context_for_verified_turn(self, item_id):
@@ -317,10 +321,13 @@ class AttestedLiveCall:
         query = current[3]
         try:
             executor = lookup if lookup is not None else owner_semantic_context
+            evidence = {"item_id": item_id, "transcript": query,
+                        "turn_attestation": current[4]}
+            if current[5] is not None:
+                evidence["audio_sha256"] = current[5]
             response = await executor(
                 service_url, service_token, query,
-                self._session_id, owner_grant,
-                item_id=item_id, transcript=query, turn_attestation=current[4])
+                self._session_id, owner_grant, **evidence)
         except (OSError, ValueError, TypeError, TimeoutError, RuntimeError):
             return ""
         if (self._closed or self._generation != generation

@@ -3,15 +3,16 @@
 
 Three independent conditions are required by the memory storage boundary:
   1. Authenticated local memory-service transport (HTTP handler's bearer).
-  2. A short-lived owner grant issued only after owner login/proof.
+  2. A short-lived owner grant issued after trusted login/proof OR an
+     explicitly opt-in, calibrated, isolated voice-only owner issuer.
   3. A separate trusted speaker issuer's signed ticket for THIS exact
      provider-observed session, item and transcript (current question).
 
-The signing secret MUST live only with the independently trusted human
-speaker verifier and the memory service, never with Kitty's S3 device token,
-Bluetooth pairing, voice-candidate score, untrusted caller or mutable SD
-snapshot. No such verifier is active in the current deployment. Until both
-independent secrets are configured, this is intentionally unavailable.
+The signing secret MUST live only with the trusted speaker issuer and memory
+service, never with S3 device credentials, Bluetooth or a mutable SD snapshot.
+In voice-only mode the same isolated issuer may establish both credentials;
+separate keys are NOT independent authentication factors. This is an explicit
+owner risk opt-in; live trusted gateway wiring is not installed by source code.
 """
 from kitty_owner_session_v6 import verify_grant
 
@@ -22,8 +23,8 @@ def authorized_semantic_speaker(payload, owner_proof,
                                 trusted_turn_secret=None, *, now=None):
     """Return fixed owner identity ONLY for exact, independently signed turn.
 
-    A copied owner grant, device token, voice label, SD owner sidecar, or
-    self-introduction is never enough. The query MUST equal the independently
+    A copied owner grant, device token, probable voice label, SD owner sidecar,
+    or self-introduction is never enough. The query MUST equal the independently
     signed transcription: a valid ticket cannot become a general-purpose
     bearer credential to query arbitrary private facts.
     """
@@ -37,12 +38,16 @@ def authorized_semantic_speaker(payload, owner_proof,
     transcript = payload.get("transcript")
     query = payload.get("query")
     ticket = payload.get("turn_attestation")
+    audio_sha256 = payload.get("audio_sha256")
     if (not isinstance(session_id, str) or not 16 <= len(session_id) <= 100
             or not isinstance(grant, str) or not 1 <= len(grant) <= 1024
             or not isinstance(item, str) or not 1 <= len(item) <= 160
             or not isinstance(transcript, str) or not 1 <= len(transcript) <= 300
             or not isinstance(query, str) or query != transcript
             or not isinstance(ticket, str) or not 1 <= len(ticket) <= 1024
+            or (audio_sha256 is not None and
+                (not isinstance(audio_sha256, str) or len(audio_sha256) != 64
+                 or any(c not in "0123456789abcdef" for c in audio_sha256)))
             or not isinstance(trusted_turn_secret, bytes)
             or len(trusted_turn_secret) < 32):
         return None
@@ -58,5 +63,6 @@ def authorized_semantic_speaker(payload, owner_proof,
     from kitty_attested_live_call_v6 import verify_external_attestation
     identity = verify_external_attestation(
         trusted_turn_secret, ticket, session_id=session_id,
-        item_id=item, transcript=transcript, now=now, purpose="turn")
+        item_id=item, transcript=transcript, now=now, purpose="turn",
+        audio_sha256=audio_sha256)
     return OWNER_ID if identity == (OWNER_ID, "owner") else None
