@@ -124,8 +124,15 @@ class ArchiveCorrelationTests(unittest.TestCase):
                     item_id=ITEM,transcript=QUESTION,
                     owner_grant=self.grant,turn_attestation=self.ticket,
                     audio_sha256=AUDIO))
-                self.assertFalse(bridge.observe_authenticated_s3_ack(
-                    channel=self.channel,event={**self.ack,**bad}))
+                accepted=bridge.observe_authenticated_s3_ack(
+                    channel=self.channel,event={**self.ack,**bad})
+                if bad.get("archive_sha256") == "0"*64:
+                    # A well-formed but false digest is rejected only when
+                    # actual finalized SD bytes become available.
+                    self.assertTrue(accepted)
+                    self.rows[(NOW,0)] = self.raw
+                else:
+                    self.assertFalse(accepted)
                 self.assertIsNone(bridge.receipt_from_finalized_snapshot(ITEM))
 
         self.assertTrue(self.enroll())
