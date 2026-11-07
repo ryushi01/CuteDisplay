@@ -38,27 +38,43 @@ class AsyncSemanticTests(unittest.IsolatedAsyncioTestCase):
             timeout=0.05, request_fn=slow)
         self.assertEqual(result, "")
 
-    async def test_owner_recall_requires_explicit_grant_and_session(self):
-        calls=[]
-        def fake(url, token, query, speaker, timeout, session_id, grant):
-            calls.append((query,speaker,session_id,grant))
+    async def test_owner_recall_needs_signed_exact_turn_and_grant(self):
+        calls = []
+        def fake(url, token, query, speaker, timeout, session_id, grant,
+                 item_id, transcript, ticket):
+            calls.append((query, speaker, session_id, grant,
+                          item_id, transcript, ticket))
             return "authorized owner context"
-        result=await owner_semantic_context(
-            "http://127.0.0.1:8766","device","What did I decide?",
-            "enrolled-session-1234","signed-grant",request_fn=fake)
-        self.assertEqual(result,"authorized owner context")
-        self.assertEqual(calls,[("What did I decide?","person:owner",
-                                 "enrolled-session-1234","signed-grant")])
+        payload = {"item_id": "item_1",
+                   "transcript": "What did I decide?",
+                   "turn_attestation": "independent-signed-ticket"}
+        result = await owner_semantic_context(
+            "http://127.0.0.1:8766", "device", "What did I decide?",
+            "enrolled-session-1234", "signed-grant",
+            request_fn=fake, **payload)
+        self.assertEqual(result, "authorized owner context")
+        self.assertEqual(calls, [(
+            "What did I decide?", "person:owner", "enrolled-session-1234",
+            "signed-grant", "item_1", "What did I decide?",
+            "independent-signed-ticket")])
 
         def forbidden(*args):
             raise AssertionError("unproven owner request must not start")
-        for session,grant in (("short","signed-grant"),
-                              ("enrolled-session-1234",""),
-                              ("enrolled-session-1234",None)):
-            result=await owner_semantic_context(
-                "http://127.0.0.1:8766","device","private",session,grant,
-                request_fn=forbidden)
-            self.assertEqual(result,"")
+        for session, grant, changes in (
+            ("short", "signed-grant", {}),
+            ("enrolled-session-1234", "", {}),
+            ("enrolled-session-1234", None, {}),
+            ("enrolled-session-1234", "signed-grant",
+             {"turn_attestation": ""}),
+            ("enrolled-session-1234", "signed-grant",
+             {"transcript": "different question"}),
+            ("enrolled-session-1234", "signed-grant",
+             {"item_id": "bad item with spaces"}),
+        ):
+            result = await owner_semantic_context(
+                "http://127.0.0.1:8766", "device", "What did I decide?",
+                session, grant, request_fn=forbidden, **{**payload, **changes})
+            self.assertEqual(result, "")
 
     async def test_crafted_authority_and_remote_redirects_are_rejected(self):
         def forbidden(*args):
