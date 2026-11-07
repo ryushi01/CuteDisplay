@@ -89,13 +89,14 @@ class KittyPassiveTurnBridge:
             echo_or_overlap=overlap)
 
     def independently_verified(self, item_id, signed_turn_ticket, *,
-                               owner_grant=None):
+                               owner_grant=None, audio_sha256=None):
         """Trusted server-side callback ONLY, never an inbound client event."""
         if self._closed:
             return False
         try:
             return self._turns.verify_independent_turn(
-                item_id,signed_turn_ticket,owner_grant=owner_grant)
+                item_id,signed_turn_ticket,owner_grant=owner_grant,
+                audio_sha256=audio_sha256)
         except (ValueError,TypeError,RuntimeError):
             self._turns.unknown_turn()
             return False
