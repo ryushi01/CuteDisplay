@@ -196,8 +196,11 @@ class ApprovedLiveQuery:
                     and 0 < len(result.encode("utf-8")) <= _MAX_RESULT_BYTES):
                 self._ready = result
                 self._ready_at = self._clock()
-        except (asyncio.CancelledError, TimeoutError, OSError, RuntimeError,
-                ValueError, TypeError):
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            # Optional background recall errors must not surface as an
+            # unhandled asyncio task or destabilize the provider connection.
             pass
         finally:
             # The latest user query supersedes an older in-flight lookup.
