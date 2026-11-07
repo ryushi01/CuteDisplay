@@ -83,11 +83,13 @@ static constexpr uint32_t OWNER_RECEIPT_MAX_FILE=4UL*1024UL*1024UL;
 struct OwnerReceiptWrite {char line[OWNER_RECEIPT_LINE_MAX+1];};
 static QueueHandle_t ownerReceiptWrites=nullptr;
 static OwnerReceiptWrite* ownerReceiptScratch=nullptr;
+static OwnerReceiptWrite* ownerReceiptIngress=nullptr;
 static volatile uint32_t ownerReceiptRevision=0;
 struct ArchiveAck {char item[161];uint32_t stamp=0,offset=0,conversation=0,epoch=0;char sha256[65];};
 static QueueHandle_t archiveAcks=nullptr;
 static volatile bool ownerArchiveEnabled=false;
 static volatile uint32_t ownerArchiveEpoch=0;
+static volatile uint32_t ownerReceiptRejected=0;
 inline void setOwnerArchiveEnabled(bool enabled){
  ownerArchiveEnabled=false;
  ++ownerArchiveEpoch;
@@ -104,7 +106,7 @@ inline bool takeArchiveAck(ArchiveAck &ack){
 // Unknown/custom/legacy gateways cannot enable this queue by default.
 inline bool queueOpaqueOwnerReceipt(const String &row,bool gatewayAccepted){
  if(!gatewayAccepted || !ownerArchiveEnabled || !mounted ||
-    !ownerReceiptWrites || !ownerReceiptScratch ||
+    !ownerReceiptWrites || !ownerReceiptScratch || !ownerReceiptIngress ||
     row.length()<100 || row.length()>OWNER_RECEIPT_LINE_MAX ||
     !row.startsWith("owner-v1\\t") || row[row.length()-1]!='\\n')return false;
  size_t tabs=0;
@@ -115,8 +117,10 @@ inline bool queueOpaqueOwnerReceipt(const String &row,bool gatewayAccepted){
   if(c<32 || c>126)return false;
  }
  if(tabs!=10)return false;
- OwnerReceiptWrite item={};row.toCharArray(item.line,sizeof(item.line));
- return xQueueSend(ownerReceiptWrites,&item,0)==pdTRUE;
+ // The WebSocket callback uses a separate PSRAM scratch; never reserve
+ // another 1 KiB of scarce realtime task stack for an optional receipt.
+ row.toCharArray(ownerReceiptIngress->line,sizeof(ownerReceiptIngress->line));
+ return xQueueSend(ownerReceiptWrites,ownerReceiptIngress,0)==pdTRUE;
 }
 // Explicit approval only: never automatically promote speech to shared.
 inline bool queueApprovedSharedMemory(const String &id,const String &text,bool approved){
@@ -1346,6 +1350,25 @@ inline void task(void*){
    }
    (void)xQueueSend(exportBlocks,&block,0);
   }
+  // Opaque signed owner receipt append is SD-only, never voice/call task IO.
+  // The verifier on Ubuntu, not the S3, decides whether the HMAC proves
+  // ownership. No validation key is present on this device.
+  if(mounted && ownerReceiptWrites && ownerReceiptScratch &&
+     xQueueReceive(ownerReceiptWrites,ownerReceiptScratch,0)==pdTRUE){
+   const size_t n=strlen(ownerReceiptScratch->line);
+   File out=SD_MMC.open("/kitty/owner_turn_receipts_v6.tsv",FILE_APPEND);
+   if(out){
+    const uint32_t before=(uint32_t)out.size();
+    bool ok=n>0 && before<=OWNER_RECEIPT_MAX_FILE &&
+      n<=OWNER_RECEIPT_MAX_FILE-before;
+    size_t written=ok?out.write((const uint8_t*)ownerReceiptScratch->line,n):0;
+    out.flush();
+    ok=ok && written==n && out.size()==before+n;
+    out.close();
+    if(ok)ownerReceiptRevision++;
+    else ownerReceiptRejected++;
+   }else ownerReceiptRejected++;
+  }
   // Only the SD worker persists explicitly approved shared memories.
   SharedMemoryWrite shared={};
   if(mounted && sharedMemoryWrites &&
@@ -1562,7 +1585,10 @@ inline void task(void*){
   // Timestamp | question | answer. One entry per successfully completed turn.
   const uint32_t ts=(uint32_t)time(nullptr);
   uint32_t offset=(uint32_t)f.size();
-  bool ok=f.printf("%lu\t%s\t%s\n",(unsigned long)ts,e.question,e.answer)>0;
+  const size_t written=f.printf("%lu\t%s\t%s\n",
+                                 (unsigned long)ts,e.question,e.answer);
+  f.flush();
+  bool ok=written>0 && f.size()==offset+written;
   f.close();
   if(ok){
    // V6: backward-compatible attribution sidecar. Archive rows preserve
@@ -1580,6 +1606,43 @@ inline void task(void*){
     Serial.println("[MEMORY V6] attribution sidecar unavailable; source remains unknown");
    }
    saved++;appendIndex(e,offset,ts);
+   // Optional archive ACK, NEVER an owner trust decision. A gateway that
+   // independently verifies a human and the exact S3 microphone turn must
+   // match this item/row hash to its own authenticated provider session.
+   // Unknown gateways negotiate nothing: no new WebSocket traffic is sent.
+   if(ownerArchiveEnabled && archiveAcks && e.archiveItem[0] &&
+      e.archiveEpoch==ownerArchiveEpoch &&
+      e.conversation==activeConversation){
+    String raw=String((unsigned long)ts)+"\t"+e.question+"\t"+e.answer+"\n";
+    if(raw.length()==written && raw.length()<=1200){
+     bool same=true;
+     File check=SD_MMC.open("/kitty/conversations.tsv",FILE_READ);
+     if(!check || !check.seek(offset))same=false;
+     if(same){
+      for(size_t k=0;k<raw.length();k++){
+       if(check.read()!=(uint8_t)raw[k]){same=false;break;}
+      }
+     }
+     if(check)check.close();
+     if(same){
+      unsigned char hash[32]={0};
+      if(mbedtls_sha256((const unsigned char*)raw.c_str(),
+                        raw.length(),hash,0)==0){
+       ArchiveAck ack={};
+       strlcpy(ack.item,e.archiveItem,sizeof(ack.item));
+       ack.stamp=ts;ack.offset=offset;
+       ack.conversation=e.conversation;ack.epoch=e.archiveEpoch;
+       static const char hx[]="0123456789abcdef";
+       for(int h=0;h<32;h++){
+        ack.sha256[2*h]=hx[hash[h]>>4];
+        ack.sha256[2*h+1]=hx[hash[h]&15];
+       }
+       ack.sha256[64]=0;
+       (void)xQueueSend(archiveAcks,&ack,0);
+      }
+     }
+    }
+   }
    // Voice-linked preferences belong to the matched voice identity, NOT
    // the verified owner facts.tsv catalog. Voice matching can be spoofed;
    // these are attributed, revocable *claims*, not authentication.
@@ -1722,6 +1785,20 @@ inline void init(){
  if(!exportRequests)exportRequests=xQueueCreate(1,sizeof(ExportRequest));
  if(!claimRequests)claimRequests=xQueueCreate(1,sizeof(ClaimRequest));
  if(!sharedMemoryWrites)sharedMemoryWrites=xQueueCreate(2,sizeof(SharedMemoryWrite));
+ if(!ownerReceiptWrites){
+  static StaticQueue_t receiptCtrl,ackCtrl;
+  static uint8_t *receiptStorage=nullptr,*ackStorage=nullptr;
+  receiptStorage=(uint8_t*)heap_caps_malloc(2*sizeof(OwnerReceiptWrite),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(receiptStorage)ownerReceiptWrites=xQueueCreateStatic(
+    2,sizeof(OwnerReceiptWrite),receiptStorage,&receiptCtrl);
+  ackStorage=(uint8_t*)heap_caps_malloc(4*sizeof(ArchiveAck),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(ackStorage)archiveAcks=xQueueCreateStatic(
+    4,sizeof(ArchiveAck),ackStorage,&ackCtrl);
+  ownerReceiptScratch=(OwnerReceiptWrite*)heap_caps_calloc(
+    1,sizeof(OwnerReceiptWrite),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  ownerReceiptIngress=(OwnerReceiptWrite*)heap_caps_calloc(
+    1,sizeof(OwnerReceiptWrite),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+ }
  if(!claimResults){
   static StaticQueue_t claimQueueCtrl;
   static uint8_t *claimStorage=nullptr;
