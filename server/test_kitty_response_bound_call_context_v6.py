@@ -52,6 +52,30 @@ class CallContextTests(unittest.TestCase):
         self.assertEqual(result["type"], "response.create")
         c.close()
 
+    def test_optional_helper_exception_and_bad_cleanup_never_disconnects(self):
+        from unittest.mock import Mock
+        c = ResponseBoundCallContext()
+        broken = Mock()
+        broken.observe.side_effect = RuntimeError("public helper failed")
+        broken.close.side_effect = OSError("cannot close optional helper")
+        c._public = broken
+        c.on_provider_event(transcript("a", "We decided on a blue kite."))
+        self.assertIsNone(c._public)
+        c.on_provider_event(transcript("b", "It has gold stripes."))
+        self.assertIn("blue kite", c.on_existing_client_command(
+            response())["response"]["instructions"])
+        c.close()
+        self.assertTrue(c._closed)
+
+        c = ResponseBoundCallContext()
+        broken = Mock()
+        broken.decorate.side_effect = PermissionError("not readable")
+        broken.close.side_effect = RuntimeError("cleanup failed")
+        c._public = broken
+        self.assertEqual(c.on_existing_client_command(response()), response())
+        self.assertIsNone(c._public)
+        c.close()
+
     def test_first_turn_does_not_mutate_existing_response(self):
         note = ResponseBoundCallContext()
         original = response()
