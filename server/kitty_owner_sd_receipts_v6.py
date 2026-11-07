@@ -128,6 +128,72 @@ def issue_owner_receipt(
     return body + b"\t" + _mac(receipt_secret, body).encode("ascii") + b"\n"
 
 
+
+def issue_provisional_owner_receipt(
+        receipt_secret, owner_grant_secret, turn_issuer_secret, *,
+        session_id, item_id, transcript, audio_sha256,
+        owner_grant, signed_turn, authenticated_archive_ack,
+        trusted_ack_validator, now=None):
+    """Sign a *pending* S3 owner receipt before the next finalized SD export.
+
+    This is a receipt-writing authorization, NOT proof that snapshot contents
+    have been verified. The eventual snapshot index independently checks the
+    HMAC, exact archived question and original row SHA-256. If S3 changes or
+    misreports the row, the receipt confers no owner identity.
+
+    Only call this privately from an authenticated gateway handling the
+    original S3 SD-worker ACK on the same live socket. The trusted validator
+    MUST corroborate channel identity, epoch, item, one-time ACK provenance;
+    it must NOT be an echo of client-controlled JSON.
+    """
+    keys = (receipt_secret, owner_grant_secret, turn_issuer_secret)
+    if (any(not isinstance(k, bytes) or len(k) < 32 for k in keys)
+            or len(set(keys)) != 3
+            or not isinstance(session_id, str) or not SESSION.fullmatch(session_id)
+            or not isinstance(item_id, str) or not ITEM.fullmatch(item_id)
+            or _digest(transcript) is None
+            or not isinstance(audio_sha256, str)
+            or not AUDIO_HASH.fullmatch(audio_sha256)
+            or not isinstance(signed_turn, str)
+            or not isinstance(authenticated_archive_ack, dict)
+            or not callable(trusted_ack_validator)):
+        return None
+    wall = int(time.time() if now is None else now)
+    if (not verify_grant(owner_grant_secret, owner_grant, session_id,
+                         now=wall)
+            or verify_external_attestation(
+                turn_issuer_secret, signed_turn, session_id=session_id,
+                item_id=item_id, transcript=transcript,
+                audio_sha256=audio_sha256, now=wall, purpose="turn"
+            ) != ("person:owner", "owner")):
+        return None
+    ack = authenticated_archive_ack
+    stamp, offset, row_hash = (
+        ack.get("stamp"), ack.get("offset"), ack.get("archive_sha256"))
+    if (ack.get("source") != "trusted_s3_sd_worker_ack"
+            or ack.get("session_id") != session_id
+            or ack.get("item_id") != item_id
+            or type(stamp) is not int or not 1 <= stamp <= MAX_OFFSET
+            or type(offset) is not int or not 0 <= offset <= MAX_OFFSET
+            or type(row_hash) is not str or not HEX_SHA256.fullmatch(row_hash)
+            or abs(wall - stamp) > MAX_TIMESTAMP_DRIFT):
+        return None
+    try:
+        if trusted_ack_validator(
+                session_id=session_id, item_id=item_id, stamp=stamp,
+                offset=offset, archive_sha256=row_hash) is not True:
+            return None
+    except Exception:
+        return None
+    # The index will independently open the finalized snapshot, read exactly
+    # offset+row and require this hash AND transcript digest to match.
+    body = "\t".join((
+        VERSION, str(stamp), str(offset), session_id, item_id,
+        _digest(transcript), audio_sha256, row_hash,
+        hashlib.sha256(signed_turn.encode("utf-8")).hexdigest(), str(wall)
+    )).encode("ascii")
+    return body + b"\t" + _mac(receipt_secret, body).encode("ascii") + b"\n"
+
 def read_verified_owner_receipts(snapshot_root, receipt_secret):
     """Map (timestamp, byte offset) to a verified exact archive-line digest.
 

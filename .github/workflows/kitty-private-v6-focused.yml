@@ -32,4 +32,5 @@ jobs:
             server.test_kitty_owner_voice_auth_issuer_v6 \
             server.test_kitty_owner_voice_auth_integration_v6 \
             server.test_kitty_owner_archive_gateway_v6 \
+            server.test_kitty_owner_provisional_receipt_v6 \
             server.test_kitty_gateway_turn_adapter_v6
