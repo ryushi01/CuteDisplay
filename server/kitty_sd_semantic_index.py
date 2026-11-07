@@ -176,6 +176,10 @@ def search(db_path, query, k=5, model_name=DEFAULT_MODEL, speaker_id=None):
         return []
     if not query or not query.strip() or len(query)>1000:
         return []
+    # Preserve the established missing-index error contract while still
+    # refusing to open/search owner rows if the receipt key is absent.
+    if not os.path.isfile(db_path):
+        raise FileNotFoundError(db_path)
     owner_key_id = None
     if speaker_id == "person:owner":
         from kitty_owner_sd_receipts_v6 import configured_receipt_secret
@@ -184,8 +188,6 @@ def search(db_path, query, k=5, model_name=DEFAULT_MODEL, speaker_id=None):
             return []
         owner_key_id = hashlib.sha256(
             b"kitty-owner-archive-keyid-v1:" + owner_secret).hexdigest()
-    if not os.path.isfile(db_path):
-        raise FileNotFoundError(db_path)
     model = get_model(model_name)
     with _MODEL_LOCK:
         q = np.asarray(model.encode([query], normalize_embeddings=True)[0], dtype=np.float32)
