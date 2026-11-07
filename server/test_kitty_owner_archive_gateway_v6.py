@@ -197,6 +197,38 @@ class ArchiveCorrelationTests(unittest.TestCase):
             trusted_gateway_session_id=SID,channel=self.guest_channel))
         self.assertFalse(bridge.active)
 
+    def test_expired_pending_proofs_do_not_stall_long_calls(self):
+        self.assertTrue(self.enroll())
+        for n in range(2,9):
+            item="provider_item_"+str(n)
+            ticket=issue_external_attestation(
+                KEY_TURN,session_id=SID,item_id=item,transcript=QUESTION,
+                speaker_id="person:owner",speaker_role="owner",
+                audio_sha256=AUDIO,now=self.now,ttl=10)
+            self.assertTrue(self.bridge.register_owner_turn(
+                item_id=item,transcript=QUESTION,owner_grant=self.grant,
+                turn_attestation=ticket,audio_sha256=AUDIO))
+        self.now+=11
+        grant=issue_grant(KEY_GRANT,True,SID,now=self.now,ttl=45)
+        item="new_provider_item_after_expiry"
+        ticket=issue_external_attestation(
+            KEY_TURN,session_id=SID,item_id=item,transcript=QUESTION,
+            speaker_id="person:owner",speaker_role="owner",
+            audio_sha256=AUDIO,now=self.now,ttl=10)
+        self.assertTrue(self.bridge.register_owner_turn(
+            item_id=item,transcript=QUESTION,owner_grant=grant,
+            turn_attestation=ticket,audio_sha256=AUDIO))
+        self.assertFalse(self.enroll())  # Used item cannot return.
+
+    def test_serializable_socket_id_not_accepted(self):
+        with self.assertRaises(ValueError):
+            OwnerArchiveGatewayCorrelator(
+                authenticated_s3_channel="device_ws_1",
+                consent_check=lambda:True,
+                read_finalized_archive_row=lambda *_:None,
+                receipt_secret=KEY_RECEIPT,grant_secret=KEY_GRANT,
+                turn_secret=KEY_TURN)
+
     def test_snapshot_changes_during_validation_never_sign(self):
         self.assertTrue(self.enroll())
         self.assertTrue(self.send_ack())
