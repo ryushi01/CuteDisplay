@@ -108,12 +108,12 @@ inline bool queueOpaqueOwnerReceipt(const String &row,bool gatewayAccepted){
  if(!gatewayAccepted || !ownerArchiveEnabled || !mounted ||
     !ownerReceiptWrites || !ownerReceiptScratch || !ownerReceiptIngress ||
     row.length()<100 || row.length()>OWNER_RECEIPT_LINE_MAX ||
-    !row.startsWith("owner-v1\\t") || row[row.length()-1]!='\\n')return false;
+    !row.startsWith("owner-v1\t") || row[row.length()-1]!='\n')return false;
  size_t tabs=0;
  for(size_t i=0;i<row.length();i++){
   uint8_t c=(uint8_t)row[i];
-  if(c=='\\t'){tabs++;continue;}
-  if(c=='\\n' && i==row.length()-1)continue;
+  if(c=='\t'){tabs++;continue;}
+  if(c=='\n' && i==row.length()-1)continue;
   if(c<32 || c>126)return false;
  }
  if(tabs!=10)return false;
