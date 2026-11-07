@@ -60,6 +60,7 @@ class OwnerArchiveGatewayCorrelator:
         self._turn_key = turn_secret
         self._clock = clock
         self._session = None
+        self._ever_started = False
         self._pending = {}
         self._used_items = set()
         self._used_offsets = set()
@@ -75,6 +76,8 @@ class OwnerArchiveGatewayCorrelator:
         must provide the exact server-held socket handle after device auth.
         This capability merely enables S3 ACKs, never owner access.
         """
+        if self._ever_started:
+            return None  # Fresh socket/adapter required for every new call.
         self.end_call()
         if (channel is not self._device
                 or not isinstance(trusted_gateway_session_id, str)
@@ -87,6 +90,7 @@ class OwnerArchiveGatewayCorrelator:
         if consent is not True:
             return None
         self._session = trusted_gateway_session_id
+        self._ever_started = True
         return {"type": CAPABILITY_TYPE, "enabled": True}
 
     def end_call(self):
