@@ -152,6 +152,32 @@ class TransactionTests(unittest.TestCase):
         self.assertNotIn("print(u)", captured[1])
         self.assertNotIn("print(t)", captured[1])
 
+    def test_rollback_refuses_custom_helper_before_any_host_write(self):
+        self.state_dir.mkdir()
+        state = {
+            "host_old": {n: d.checksum(v) for n, v in self.host_old.items()},
+            "host_new": {n: d.checksum(v) for n, v in self.host_new.items()},
+            "host_modes": {n: 0o600 for n in d.HOST_FILES},
+            "container_old": d.checksum(self.previous),
+            "container_new": {
+                n: d.checksum(v) for n, v in self.new_container.items()
+            },
+        }
+        for name, data in self.host_old.items():
+            (self.state_dir / (name + ".before")).write_bytes(data)
+            (self.host / name).write_bytes(self.host_new[name])
+        (self.state_dir / (d.CONTAINER_FILES[0] + ".before")).write_bytes(
+            self.previous)
+        with patch.object(d, "STORE", self.state_dir), \
+             patch.object(d, "HOST_ROOT", self.host), \
+             patch.object(d, "container_bytes",
+                          return_value=b"unrelated custom helper"):
+            with self.assertRaisesRegex(
+                    d.Refusal, "container_modified_since_install"):
+                d.restore_files(state)
+        for name, data in self.host_new.items():
+            self.assertEqual((self.host / name).read_bytes(), data)
+
     def test_no_private_memory_or_realtime_route_modified(self):
         src = Path(d.__file__).read_text()
         self.assertNotIn("KITTY_OWNER_GRANT_SECRET_HEX=", src)
