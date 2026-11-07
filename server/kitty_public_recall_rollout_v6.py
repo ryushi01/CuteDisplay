@@ -245,12 +245,39 @@ def deploy_container(name, content):
     with tempfile.TemporaryDirectory(prefix=".kitty-module-", dir=STORE) as d:
         local = Path(d) / name
         local.write_bytes(content)
-        local.chmod(0o600)
+        # Python module SOURCE contains no secrets; the WebUI worker may run
+        # without root. Mode 0600 made imports fail only when a call started.
+        # Keep private transaction backups 0600, but deploy code as 0644.
+        local.chmod(0o644)
         docker("cp", str(local), CONTAINER + ":" + CONTAINER_BASE + name,
                timeout=35)
     if container_bytes(name) != content:
         raise Refusal("container_copy_verification_failed")
 
+
+
+def smoke_runtime_imports():
+    """Prove both helpers import as an unprivileged container worker.
+
+    The container's health endpoint can succeed without ever importing the
+    lazily initialized per-call helper. Simulate non-root access without
+    opening audio, model, memory records or provider connections.
+    """
+    source = (
+        "import sys\n"
+        "sys.path.insert(0,'/app/backend')\n"
+        "from kitty_approved_live_query_v6 import ApprovedLiveQuery\n"
+        "from kitty_response_bound_call_context_v6 import ResponseBoundCallContext\n"
+        "v=ResponseBoundCallContext()\n"
+        "assert v._public is not None\n"
+        "v.close()\n"
+        "print('call_helper_import=ok')\n"
+    )
+    answer = docker("exec", "--user", "65534:65534", "-w",
+                    "/app/backend", CONTAINER, "python3", "-c",
+                    source, timeout=20)
+    if answer.strip() != b"call_helper_import=ok":
+        raise Refusal("nonroot_call_helper_import_failed")
 
 def remove_container(name, expected):
     if name not in CONTAINER_FILES or container_bytes(name) != expected:
