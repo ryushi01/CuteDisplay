@@ -139,7 +139,8 @@ def read_verified_owner_receipts(snapshot_root, receipt_secret):
     root = Path(snapshot_root)
     path = root / "kitty" / RECEIPT_NAME
     archive = root / "kitty" / "conversations.tsv"
-    if (root.is_symlink() or path.is_symlink() or archive.is_symlink()
+    if (root.is_symlink() or (root / "kitty").is_symlink()
+            or path.is_symlink() or archive.is_symlink()
             or not path.is_file() or not archive.is_file()):
         return {}
     try:
