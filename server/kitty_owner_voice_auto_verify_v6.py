@@ -27,6 +27,7 @@ from kitty_owner_session_v6 import issue_grant
 OWNER_CANDIDATE = "person:shana"
 OWNER_ID = "person:owner"
 MIN_VOICE_SCORE = 0.970
+MIN_NAMED_SCORE = 0.965
 MIN_TURNS = 2
 WINDOW_SECONDS = 45
 MAX_WAV_BYTES = 300_000
@@ -74,7 +75,8 @@ class AutomaticVoiceOwner:
 
     def __init__(
         self, *, session_id, match_audio, turn_issuer_secret, grant_secret,
-        opt_in=False, enrolled_owner_profile=False, clock=time.monotonic,
+        opt_in=False, enrolled_owner_profile=False,
+        named_confirmation_opt_in=False, clock=time.monotonic,
         wall_clock=time.time, candidate_id=OWNER_CANDIDATE,
         threshold=MIN_VOICE_SCORE,
     ):
@@ -98,10 +100,12 @@ class AutomaticVoiceOwner:
         self._grant_secret = grant_secret if self._enabled else None
         self._candidate = candidate_id
         self._threshold = threshold
+        self._named_enabled = self._enabled and named_confirmation_opt_in is True
         self._clock = clock
         self._wall = wall_clock
         self._observed = []
         self._seen = set()
+        self._audio_seen = set()
         self._closed = False
 
     @property
@@ -112,6 +116,7 @@ class AutomaticVoiceOwner:
         self._closed = True
         self._observed.clear()
         self._seen.clear()
+        self._audio_seen.clear()
         self._turn_secret = None
         self._grant_secret = None
 
@@ -123,9 +128,10 @@ class AutomaticVoiceOwner:
                 trusted_provider_capture=False):
         """Maybe issue exact owner turn attestation + short owner grant.
 
-        Requires TWO different successful model comparisons inside 45 seconds.
-        Neither a spoken owner name nor scores received from S3 can be used
-        as proof. Never stores WAV, transcript history or model profiles.
+        Standard mode: TWO distinct high-scoring local microphone matches.
+        Explicit named-convenience mode: owner's spoken name + one fresh
+        locally verified match at a slightly lower threshold. Name alone
+        NEVER authorizes. Neither mode guarantees replay resistance.
         """
         if (not self.enabled or trusted_provider_capture is not True
                 or not isinstance(item_id, str) or not ITEM.fullmatch(item_id)
@@ -144,12 +150,27 @@ class AutomaticVoiceOwner:
         speaker = match.get("speaker_id") if isinstance(match, dict) else None
         if (speaker != self._candidate or type(score) not in (float, int)
                 or not math.isfinite(score)
-                or not self._threshold <= score <= 1):
+                or not MIN_NAMED_SCORE <= score <= 1):
             self.speaker_change()
             return None
 
         now = self._clock()
         digest = hashlib.sha256(microphone_wav).hexdigest()
+        if digest in self._audio_seen:
+            self.speaker_change()
+            return None
+        self._audio_seen.add(digest)
+        name = NAME_INTRO.search(transcript)
+        name_confirmed = bool(
+            name and name.group("name").casefold() == "shana")
+        # A named confirmation is an explicitly selectable *weaker*
+        # convenience setting, and still requires a real matching voice.
+        # Merely claiming the owner's name cannot issue private credentials.
+        named_ready = (self._named_enabled and name_confirmed
+                       and score >= MIN_NAMED_SCORE)
+        if not named_ready and score < self._threshold:
+            self.speaker_change()
+            return None
         self._observed = [
             (item, audio_hash, t)
             for item, audio_hash, t in self._observed
@@ -160,13 +181,8 @@ class AutomaticVoiceOwner:
             return None
         self._observed.append((item_id, digest, now))
         self._observed = self._observed[-MIN_TURNS:]
-        if len(self._observed) < MIN_TURNS:
+        if len(self._observed) < MIN_TURNS and not named_ready:
             return None
-
-        # An introduction can improve the spoken greeting, never security.
-        intro = NAME_INTRO.search(transcript)
-        name_confirmed = bool(
-            intro and intro.group("name").casefold() == "shana")
         wall = int(self._wall())
         ticket = issue_external_attestation(
             self._turn_secret, session_id=self.session_id,
