@@ -65,7 +65,8 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
 
 def _read_context(url, token, query, speaker_id, timeout,
                   session_id=None, owner_grant=None,
-                  item_id=None, transcript=None, turn_attestation=None):
+                  item_id=None, transcript=None, turn_attestation=None,
+                  audio_sha256=None):
     payload={"query":query,"speaker_id":speaker_id}
     if session_id is not None and owner_grant is not None:
         payload["session_id"]=session_id
@@ -74,6 +75,8 @@ def _read_context(url, token, query, speaker_id, timeout,
         payload["item_id"]=item_id
         payload["transcript"]=transcript
         payload["turn_attestation"]=turn_attestation
+        if audio_sha256 is not None:
+            payload["audio_sha256"]=audio_sha256
     body = json.dumps(payload,ensure_ascii=False).encode("utf-8")
     if url.startswith("unix:///run/kitty-semantic/"):
         path = url[len("unix://"):]
@@ -137,14 +140,15 @@ async def semantic_context(url, token, query, speaker_id, *, timeout=ALLOWED_TIM
 async def owner_semantic_context(
         url, token, query, session_id, owner_grant, *,
         item_id=None, transcript=None, turn_attestation=None,
-        timeout=ALLOWED_TIMEOUT, request_fn=_read_context):
+        audio_sha256=None, timeout=ALLOWED_TIMEOUT,
+        request_fn=_read_context):
     """One-shot owner SD lookup only for a separately signed exact voice turn.
 
     A valid device token or even an enrolled-owner session grant alone
     cannot trigger lookup. The memory-service API revalidates the separate
     trusted speaker issuer signature for the same query, session and item.
     """
-    from kitty_attested_live_call_v6 import ITEM, SESSION
+    from kitty_attested_live_call_v6 import ITEM, SESSION, AUDIO_HASH
     if (not _local_memory_endpoint(url) or not isinstance(token, str) or not token
             or not isinstance(query, str) or not query.strip()
             or not isinstance(session_id, str) or not SESSION.fullmatch(session_id)
@@ -153,16 +157,21 @@ async def owner_semantic_context(
             or not isinstance(transcript, str) or transcript != query
             or not 1 <= len(transcript) <= MAX_QUERY
             or not isinstance(turn_attestation, str)
-            or not 1 <= len(turn_attestation) <= 1024):
+            or not 1 <= len(turn_attestation) <= 1024
+            or (audio_sha256 is not None and
+                (not isinstance(audio_sha256,str)
+                 or not AUDIO_HASH.fullmatch(audio_sha256)))):
         return ""
     try:
         limit = min(max(float(timeout), 0.05), ALLOWED_TIMEOUT)
+        # Retain legacy positional request_fn compatibility for non-audio
+        # owner proof; audio-bound voice issuer requests carry one extra hash.
+        args=(url, token, query, "person:owner", limit,
+              session_id, owner_grant, item_id, transcript, turn_attestation)
+        if audio_sha256 is not None:
+            args=args+(audio_sha256,)
         return await asyncio.wait_for(
-            asyncio.to_thread(
-                request_fn, url, token, query,
-                "person:owner", limit, session_id, owner_grant,
-                item_id, transcript, turn_attestation),
-            timeout=limit)
+            asyncio.to_thread(request_fn, *args), timeout=limit)
     except (TimeoutError, OSError, ValueError, TypeError, KeyError,
             json.JSONDecodeError, urllib.error.URLError):
         return ""
