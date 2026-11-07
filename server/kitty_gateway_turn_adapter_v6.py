@@ -93,7 +93,7 @@ class GatewayTurnAdapter:
         return False
 
     def verify_independent_turn(self, item_id, signed_ticket, *,
-                                owner_grant=None):
+                                owner_grant=None, audio_sha256=None):
         """Only a separately verified issuer may supply signed_ticket.
 
         Do not call this method on a client speaker-result event or an
@@ -102,7 +102,8 @@ class GatewayTurnAdapter:
         if self._closed:
             return False
         return self.call.verify_turn(
-            item_id, signed_ticket, owner_grant=owner_grant)
+            item_id, signed_ticket, owner_grant=owner_grant,
+            audio_sha256=audio_sha256)
 
     async def context_for_item(self, item_id, *, service_url="",
                                service_token="", owner_grant=None,
