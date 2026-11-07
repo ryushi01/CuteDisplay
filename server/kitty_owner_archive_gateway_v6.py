@@ -12,8 +12,6 @@ a finalized exported row becomes available. An expired proof is NOT renewed
 from a candidate match; an unavailable snapshot causes a safe missed receipt.
 """
 import hashlib
-import math
-import re
 import time
 
 from kitty_attested_live_call_v6 import ITEM, SESSION, AUDIO_HASH, _digest
@@ -45,6 +43,9 @@ class OwnerArchiveGatewayCorrelator:
                  read_finalized_archive_row, receipt_secret, grant_secret,
                  turn_secret, clock=time.time):
         if (authenticated_s3_channel is None
+                or isinstance(authenticated_s3_channel,
+                              (str, bytes, int, float, bool,
+                               list, dict, tuple, set))
                 or not callable(consent_check)
                 or not callable(read_finalized_archive_row)
                 or not callable(clock)
@@ -114,6 +115,15 @@ class OwnerArchiveGatewayCorrelator:
             self.cancelled_or_guest()
         return ok
 
+    def _prune_expired(self, now):
+        # Preserve used-item tombstones, so a stale item cannot be replayed.
+        # Otherwise an 8-turn outstanding queue could stall long calls.
+        for item, p in tuple(self._pending.items()):
+            if not self._fresh_proof(
+                    item, p["transcript"], p["owner_grant"],
+                    p["ticket"], p["audio"], now):
+                self._pending.pop(item, None)
+
     def register_owner_turn(self, *, item_id, transcript,
                             owner_grant, turn_attestation, audio_sha256):
         """Internal callback only: exact transcript from the provider socket.
@@ -121,7 +131,11 @@ class OwnerArchiveGatewayCorrelator:
         The callback must not be exposed to client events, self-claims,
         probable voice results or S3-sidecar source labels.
         """
-        if (not self._still_consented() or not isinstance(item_id, str)
+        if not self._still_consented():
+            return False
+        now = int(self._clock())
+        self._prune_expired(now)
+        if (not isinstance(item_id, str)
                 or not ITEM.fullmatch(item_id)
                 or item_id in self._used_items
                 or len(self._used_items) >= MAX_ITEMS_PER_CALL
@@ -135,7 +149,6 @@ class OwnerArchiveGatewayCorrelator:
                 or not isinstance(audio_sha256, str)
                 or not AUDIO_HASH.fullmatch(audio_sha256)):
             return False
-        now = int(self._clock())
         if not self._fresh_proof(item_id, transcript, owner_grant,
                                  turn_attestation, audio_sha256, now):
             return False
