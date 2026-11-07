@@ -13,7 +13,6 @@ sent to the authenticated device socket. Ordinary calls remain unaffected.
 """
 import asyncio
 from collections import deque
-import re
 import time
 
 from kitty_attested_live_call_v6 import ITEM, AUDIO_HASH
@@ -64,6 +63,7 @@ class AsyncOwnerReceiptBridge:
         self._closed = False
         self._generation = 0
         self._items = set()
+        self._acked_items = set()
         self._queue = deque()
         self._early = {}
         self._worker = None
@@ -145,7 +145,7 @@ class AsyncOwnerReceiptBridge:
             return False
         item = event.get("item_id")
         if (not isinstance(item, str) or item not in self._items
-                or item in self._early):
+                or item in self._early or item in self._acked_items):
             return False
         stamp, offset, digest = (
             event.get("stamp"), event.get("offset"),
@@ -159,10 +159,12 @@ class AsyncOwnerReceiptBridge:
             return False
         if self._correlator.observe_authenticated_s3_ack(
                 channel=channel, event=event):
+            self._acked_items.add(item)
             self._schedule_delivery(item)
             return True
         if len(self._early) >= MAX_EARLY_ACKS:
             return False
+        self._acked_items.add(item)
         self._early[item] = (float(self._mono()), {
             "type": ACK_TYPE, "item_id": item, "stamp": stamp,
             "offset": offset, "archive_sha256": digest})
@@ -268,6 +270,7 @@ class AsyncOwnerReceiptBridge:
         self._queue.clear()
         self._early.clear()
         self._items.clear()
+        self._acked_items.clear()
         self._correlator.end_call()
         self._issuer.end_call()
         if self._worker is not None:
