@@ -149,7 +149,7 @@ def analyze(server_dir):
             "build" in _functions(idx)
             and _call_uses(idx, "iter_archive_with_speakers")
             and _call_uses(idx, "configured_receipt_secret")
-            and "owner_receipt_key_id" in _strings(idx)):
+            and "owner_receipt_key_id" in _names(idx)):
         labels["semantic_index_receipt_binding"] = "present_on_disk"
     return labels
 
