@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from server import kitty_memory_service as service
 from kitty_owner_voice_auto_profile_v6 import (
-    consented_owner_profile, CONSENT, MODEL_ID,
+    consented_owner_profile, match_local_enrolled_owner, CONSENT, MODEL_ID,
 )
 from kitty_owner_voice_auto_verify_v6 import AutomaticVoiceOwner
 from test_kitty_owner_voice_auto_verify_v6 import captured_wav, SESSION, SIGNER, GRANT, WALL
@@ -110,6 +110,40 @@ class VoiceOwnerBoundaryTests(unittest.TestCase):
         external.chmod(0o600)
         self.profile.symlink_to(external)
         self.assertFalse(consented_owner_profile(self.profile))
+
+    def test_local_model_compares_real_audio_to_pinned_consent_anchors(self):
+        wav=captured_wav(180)
+        positive=match_local_enrolled_owner(
+            wav, self.profile, embed_fn=lambda sample: [1.0]+[0.0]*511)
+        self.assertEqual(positive["speaker_id"],"person:shana")
+        self.assertEqual(positive["score"],1.0)
+        negative=match_local_enrolled_owner(
+            wav, self.profile, embed_fn=lambda sample: [0.0,1.0]+[0.0]*510)
+        self.assertEqual(negative["speaker_id"],"unknown")
+        self.profile.chmod(0o644)
+        self.assertEqual(match_local_enrolled_owner(
+            wav, self.profile, embed_fn=lambda sample: [1.0]+[0.0]*511
+        )["speaker_id"],"unknown")
+        self.profile.chmod(0o600)
+        gate=AutomaticVoiceOwner(
+            session_id=SESSION,
+            match_audio=lambda sample: match_local_enrolled_owner(
+                sample,self.profile,
+                embed_fn=lambda captured:[1.0]+[0.0]*511),
+            turn_issuer_secret=SIGNER,grant_secret=GRANT,
+            opt_in=True,enrolled_owner_profile=consented_owner_profile(self.profile),
+            clock=lambda:1.0,wall_clock=lambda:WALL,
+        )
+        self.assertIsNone(gate.observe(
+            item_id="one",transcript="Hello",
+            microphone_wav=captured_wav(180),
+            trusted_provider_capture=True))
+        result=gate.observe(
+            item_id="two",transcript="Do you remember?",
+            microphone_wav=captured_wav(230),
+            trusted_provider_capture=True)
+        self.assertIsNotNone(result)
+        gate.close()
 
     def test_opt_in_voice_grant_can_read_only_owner_index(self):
         data=self.evidence()
