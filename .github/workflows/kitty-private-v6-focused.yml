@@ -30,4 +30,6 @@ jobs:
             server.test_kitty_semantic_async_client_v6 \
             server.test_kitty_owner_sd_receipts_v6 \
             server.test_kitty_owner_voice_auth_issuer_v6 \
-            server.test_kitty_owner_voice_auth_integration_v6
+            server.test_kitty_owner_voice_auth_integration_v6 \
+            server.test_kitty_owner_archive_gateway_v6 \
+            server.test_kitty_gateway_turn_adapter_v6
