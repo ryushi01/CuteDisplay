@@ -85,7 +85,13 @@ class OwnerGatewayEventGate:
                 or not isinstance(provider_store, ProviderTranscriptEvidence)
                 or provider_socket is None or s3_socket is None
                 or provider_socket is s3_socket
-                or provider_store._provider is not provider_socket):
+                or provider_store._provider is not provider_socket
+                or provider_store._closed
+                or bridge._channel is not s3_socket
+                or bridge._correlator._device is not s3_socket
+                or getattr(bridge._transcript, "__self__", None) is not provider_store
+                or getattr(bridge._transcript, "__func__", None)
+                   is not ProviderTranscriptEvidence.lookup):
             raise ValueError("distinct authenticated gateway socket handles required")
         self._bridge = bridge
         self._store = provider_store
