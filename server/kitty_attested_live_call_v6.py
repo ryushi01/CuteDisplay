@@ -235,7 +235,7 @@ class AttestedLiveCall:
 
     def verify_turn(self, item_id, signed_attestation, *, owner_grant=None,
                     audio_sha256=None):
-        """Authorize only the matching observed transcript; never from voice scores."""
+        """Authorize an exact turn using a signed ticket and valid owner grant."""
         self._current = None
         waiting = self._waiting.pop(item_id, None)
         if self._closed or waiting is None or self._secret is None:
@@ -254,8 +254,9 @@ class AttestedLiveCall:
             return False
         speaker, role = verified
         if role == "owner":
-            # Secure Enclave / owner-session proof is an additional condition;
-            # neither it nor voice probability alone authorizes spoken turns.
+            # The owner grant may follow enrolled phone proof or the explicit
+            # voice-only issuer policy. Neither mere voice probability nor
+            # a claimed name can issue that grant or a trusted turn ticket.
             if not self._owner_secret:
                 self._clear_notes()
                 return False
