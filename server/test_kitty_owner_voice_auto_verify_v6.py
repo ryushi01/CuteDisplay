@@ -82,6 +82,48 @@ class VoiceOwnerTests(unittest.TestCase):
         self.assertFalse(gate.enabled)
         self.assertIsNone(self.observe(gate, "turn_C", "Hello Kitty", captured_wav(250)))
 
+    def test_named_convenience_requires_matching_voice_and_explicit_opt_in(self):
+        for statement in (
+            "My name is Shana.", "I'm Shana!", "Je m'appelle Shana.",
+            "私はシャナです", "Shana",
+        ):
+            with self.subTest(statement=statement):
+                gate = self.setup_gate(
+                    named_confirmation_opt_in=True,
+                    matcher=lambda wav: {
+                        "speaker_id":"person:shana","score":0.966})
+                result=self.observe(
+                    gate,"named", statement, captured_wav(245))
+                self.assertIsNotNone(result)
+                self.assertTrue(result["self_introduction_confirmed"])
+                self.assertTrue(verify_grant(
+                    GRANT,result["owner_grant"],SESSION,now=WALL))
+                gate.close()
+
+        # A high score is still not a grant without the opt-in route.
+        gate=self.setup_gate(matcher=lambda wav: {
+            "speaker_id":"person:shana","score":0.966})
+        self.assertIsNone(self.observe(
+            gate,"first","My name is Shana",captured_wav(250)))
+        self.assertIsNone(self.observe(
+            gate,"second","Hello",captured_wav(270)))
+
+    def test_wrong_name_and_name_only_fail_even_in_named_mode(self):
+        for statement,score in (
+                ("I'm Shana",0.964),
+                ("I'm Shana",0.960),
+                ("I'm somebody else",0.999),
+                ("my name is Shana",0.1),
+                ("Shana",0.0),
+                ("私はシャナです",0.95)):
+            gate=self.setup_gate(
+                named_confirmation_opt_in=True,
+                matcher=lambda wav,s=score:{
+                    "speaker_id":"person:shana","score":s})
+            self.assertIsNone(self.observe(
+                gate,"test",statement,captured_wav(180)))
+            gate.close()
+
     def test_disallowed_by_default_or_without_consent_profile(self):
         for change in (
                 {"opt_in":False},
