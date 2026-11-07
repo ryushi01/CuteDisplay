@@ -267,6 +267,38 @@ class AsyncOwnerArchiveBridgeTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.02)
         self.assertEqual(self.events,[])
 
+    async def test_scoring_that_finishes_after_guest_interruption_stays_invalid(self):
+        await self.warm()
+        self.block_score=True
+        item=self.add_turn(3)
+        self.assertTrue(await asyncio.to_thread(self.score_started.wait,1.0))
+        ack,_=self.ack(item)
+        self.assertTrue(self.bridge.on_authenticated_s3_ack(
+            channel=self.channel,event=ack))
+        self.bridge.interrupted()
+        self.block_score=False
+        self.score_release.set()
+        await self.bridge.drain()
+        self.assertEqual(self.events,[])
+        # Three NEW consecutive authenticated microphone turns are needed
+        # after interruption, despite the old score returning high.
+        self.add_turn(4)
+        self.add_turn(5)
+        await self.bridge.drain()
+        for n in (4,5):
+            late_ack,_=self.ack(f"item-{n}")
+            self.assertTrue(self.bridge.on_authenticated_s3_ack(
+                channel=self.channel,event=late_ack))
+        await self.bridge.drain()
+        self.assertEqual(self.events,[])
+        item=self.add_turn(6)
+        await self.bridge.drain()
+        newest_ack,_=self.ack(item)
+        self.assertTrue(self.bridge.on_authenticated_s3_ack(
+            channel=self.channel,event=newest_ack))
+        await self.bridge.drain()
+        self.assertEqual(len(self.events),1)
+
     async def test_slow_send_is_time_bounded_and_does_not_retry(self):
         await self.warm()
         item=self.add_turn(3)
