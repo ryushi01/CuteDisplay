@@ -44,8 +44,8 @@ class AttestedContextAdapterTests(unittest.IsolatedAsyncioTestCase):
         grant=issue_grant(OWNER,True,self.call.session_id,now=self.now,ttl=120)
         self.assertTrue(self.verify("o",text,"owner","person:owner",grant))
         calls=[]
-        async def fake(url,token,query,session,proof):
-            calls.append((url,query,session,proof))
+        async def fake(url,token,query,session,proof,**signed):
+            calls.append((url,query,session,proof,signed))
             return "- Owner decided to keep the S3 microSD as authority."
         out=await attested_voice_turn_context(
             self.call,"o",LOCAL,"token",grant,
@@ -75,14 +75,14 @@ class AttestedContextAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.verify("owner-1",text,"owner","person:owner",grant))
         started=asyncio.Event()
         done=asyncio.Event()
-        async def fake(*args):
+        async def fake(*args, **kwargs):
             started.set()
             await done.wait()
             return "private historical secret"
         task=asyncio.create_task(attested_voice_turn_context(
             self.call,"owner-1",LOCAL,"token",grant,
             include_owner_history=True,owner_lookup=fake))
-        await started.wait()
+        await asyncio.wait_for(started.wait(),timeout=0.5)
         self.call.upstream_speech_started()
         done.set()
         self.assertEqual(await task,"")
