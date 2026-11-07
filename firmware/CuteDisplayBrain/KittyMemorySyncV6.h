@@ -123,8 +123,13 @@ inline bool exportAndSend(const String &snapshot){
  }
  uint32_t frozen[KittyMemory::EXPORT_COUNT]={};
  for(uint8_t n=0;n<KittyMemory::EXPORT_COUNT;n++)frozen[n]=boundary.boundaries[n];
+ // Preserve the exact existing nine-file manifest until there is a
+ // nonempty owner receipt file. An older running snapshot receiver must
+ // not reject every ordinary shared/voice snapshot after a future flash.
+ const uint8_t filesToSend=frozen[KittyMemory::EXPORT_COUNT-1]>0
+   ?KittyMemory::EXPORT_COUNT:(KittyMemory::EXPORT_COUNT-1);
  String manifest="{";
- for(uint8_t i=0;i<KittyMemory::EXPORT_COUNT;i++){
+ for(uint8_t i=0;i<filesToSend;i++){
   lastFileIndex=i;
   if((factsBefore!=KittyMemory::factRevision || summariesBefore!=KittyMemory::summaryRevision || sharedBefore!=KittyMemory::sharedRevision ||
       receiptsBefore!=KittyMemory::ownerReceiptRevision)){
