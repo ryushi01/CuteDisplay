@@ -233,6 +233,20 @@ class GatewayProvenanceTests(unittest.IsolatedAsyncioTestCase):
                 provider_socket=self.provider,s3_socket=self.provider)
         with self.assertRaises(ValueError):
             ProviderTranscriptEvidence(provider_socket="device_id")
+        original_lookup=self.bridge._transcript
+        self.bridge._transcript=lambda item:"client supplied spoofed transcript"
+        with self.assertRaises(ValueError):
+            OwnerGatewayEventGate(
+                bridge=self.bridge,provider_store=self.store,
+                provider_socket=self.provider,s3_socket=self.s3)
+        self.bridge._transcript=original_lookup
+        original_socket=self.bridge._channel
+        self.bridge._channel=object()
+        with self.assertRaises(ValueError):
+            OwnerGatewayEventGate(
+                bridge=self.bridge,provider_store=self.store,
+                provider_socket=self.provider,s3_socket=self.s3)
+        self.bridge._channel=original_socket
         self.gate.close()
         self.assertFalse(self.bridge.active)
         self.assertFalse(self.gate.from_provider(
