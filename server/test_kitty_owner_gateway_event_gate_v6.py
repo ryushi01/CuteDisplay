@@ -203,8 +203,11 @@ class GatewayProvenanceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.gate.from_provider(
                 channel=self.provider,event=turn))
         await self.bridge.drain()
-        self.assertFalse(self.gate.from_s3(
+        # The authenticated ACK may be staged provisionally, but never
+        # produces a signed owner receipt without verified microphone proof.
+        self.assertTrue(self.gate.from_s3(
             channel=self.s3,event=self.ack_for(turn)[0]))
+        await self.bridge.drain()
         self.assertEqual(self.sent,[])
 
     async def test_client_malformed_and_failure_event_only_invalidate(self):
