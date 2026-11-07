@@ -117,6 +117,30 @@ class GatewayTurnAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.complete_from_provider("item5","Last turn."))
         self.assertEqual(await self.adapter.context_for_item("item5"),"")
 
+    async def test_audio_bound_owner_ticket_is_forwarded_and_rechecked(self):
+        audio_hash="a"*64
+        grant=issue_grant(OWNER_KEY,True,self.adapter.session_id,
+                          now=self.now,ttl=120)
+        words="Please recall my personal notes."
+        self.assertTrue(self.complete_from_provider("mic1",words))
+        ticket=issue_external_attestation(
+            VOICE_KEY,session_id=self.adapter.session_id,
+            item_id="mic1",transcript=words,
+            speaker_id="person:owner",speaker_role="owner",
+            audio_sha256=audio_hash,now=self.now)
+        self.assertFalse(self.adapter.verify_independent_turn(
+            "mic1",ticket,owner_grant=grant,audio_sha256="b"*64))
+        self.assertEqual(await self.adapter.context_for_item("mic1"),"")
+        self.assertTrue(self.complete_from_provider("mic2",words))
+        ticket=issue_external_attestation(
+            VOICE_KEY,session_id=self.adapter.session_id,
+            item_id="mic2",transcript=words,
+            speaker_id="person:owner",speaker_role="owner",
+            audio_sha256=audio_hash,now=self.now)
+        self.assertTrue(self.adapter.verify_independent_turn(
+            "mic2",ticket,owner_grant=grant,audio_sha256=audio_hash))
+        self.assertIn("personal notes",await self.adapter.context_for_item("mic2"))
+
     async def test_no_external_issuer_is_safe_default(self):
         default=GatewayTurnAdapter()
         item="provider_1"
