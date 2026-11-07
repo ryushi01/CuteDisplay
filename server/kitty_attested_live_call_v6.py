@@ -233,7 +233,8 @@ class AttestedLiveCall:
         self._seen.add(item_id)
         return True
 
-    def verify_turn(self, item_id, signed_attestation, *, owner_grant=None):
+    def verify_turn(self, item_id, signed_attestation, *,
+                    owner_grant=None, audio_sha256=None):
         """Authorize only the matching observed transcript; never from voice scores."""
         self._current = None
         waiting = self._waiting.pop(item_id, None)
@@ -246,7 +247,8 @@ class AttestedLiveCall:
             return False
         verified = verify_external_attestation(
             self._secret, signed_attestation, session_id=self._session_id,
-            item_id=item_id, transcript=transcript, now=self._wall_clock())
+            item_id=item_id, transcript=transcript,
+            audio_sha256=audio_sha256, now=self._wall_clock())
         if verified is None:
             self._clear_notes()
             return False
@@ -279,7 +281,8 @@ class AttestedLiveCall:
         # Retain only this current signed ticket in volatile call RAM; it is
         # bound to the exact provider item and expires quickly.
         self._current = (item_id, attribution, role, transcript,
-                         signed_attestation if role == "owner" else None)
+                         signed_attestation if role == "owner" else None,
+                         audio_sha256 if role == "owner" else None)
         return True
 
     def context_for_verified_turn(self, item_id):
@@ -317,10 +320,13 @@ class AttestedLiveCall:
         query = current[3]
         try:
             executor = lookup if lookup is not None else owner_semantic_context
+            exact = ({"audio_sha256":current[5]}
+                     if current[5] is not None else {})
             response = await executor(
                 service_url, service_token, query,
                 self._session_id, owner_grant,
-                item_id=item_id, transcript=query, turn_attestation=current[4])
+                item_id=item_id, transcript=query,
+                turn_attestation=current[4], **exact)
         except (OSError, ValueError, TypeError, TimeoutError, RuntimeError):
             return ""
         if (self._closed or self._generation != generation

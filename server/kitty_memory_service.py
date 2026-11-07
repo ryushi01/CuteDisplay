@@ -10,6 +10,9 @@ TOKEN = os.environ.get("KITTY_MEMORY_TOKEN", "")
 WRITE_Q = queue.Queue(maxsize=256)
 LOCK = threading.Lock()
 OWNER_PROOF = None
+# Optional separate consented voice-based owner grants. Never initialized
+# from names, candidate scores or the phone's existing Bluetooth connection.
+VOICE_OWNER_PROOF = None
 # Configured only alongside an actual independent human speaker verifier;
 # device/voice candidate or owner grant alone cannot enable private search.
 TRUSTED_TURN_SECRET = None
@@ -251,6 +254,11 @@ class Handler(BaseHTTPRequestHandler):
                 from kitty_semantic_authorization_v6 import authorized_semantic_speaker
                 sid=authorized_semantic_speaker(
                     data, OWNER_PROOF, TRUSTED_TURN_SECRET)
+                if sid is None and VOICE_OWNER_PROOF is not None:
+                    # Voice owner grants use a separate secret. The exact-turn
+                    # ticket still must come from the trusted speaker issuer.
+                    sid=authorized_semantic_speaker(
+                        data, VOICE_OWNER_PROOF, TRUSTED_TURN_SECRET)
                 if sid is None:
                     return self._reply(403,{"error":"verified_owner_session_required"})
                 index=os.environ.get("KITTY_SEMANTIC_DB","")
@@ -299,15 +307,37 @@ def main():
             OWNER_PROOF=OwnerProof(secret,enrolled_key)
         except (ValueError,OSError) as exc:
             raise SystemExit("Invalid owner verification configuration") from exc
-    # Separate independent signer for EXACT verified spoken turns. Do not
-    # interpret phone pairing or X-vector scores as permission. Incomplete
-    # configuration stays fail-closed and never blocks working shared recall.
+    # Voice-based private recall is an EXPLICIT opt-in with a protected,
+    # locally enrolled owner profile and independent grant secret. The
+    # default remains disabled; a shadow_only candidate profile is rejected.
+    if os.environ.get("KITTY_VOICE_OWNER_PRIVATE_OPT_IN") == "1":
+        from types import SimpleNamespace
+        from kitty_owner_voice_auto_profile_v6 import consented_owner_profile
+        profile = os.environ.get("KITTY_VOICE_OWNER_CONSENTED_PROFILE", "")
+        voice_hex = os.environ.get("KITTY_VOICE_OWNER_GRANT_SECRET_HEX", "")
+        try:
+            voice_secret = bytes.fromhex(voice_hex)
+            if (not consented_owner_profile(profile)
+                    or len(voice_secret) < 32
+                    or (OWNER_PROOF is not None and
+                        voice_secret == OWNER_PROOF.secret)):
+                raise ValueError("missing consented local voice enrollment")
+            global VOICE_OWNER_PROOF
+            VOICE_OWNER_PROOF = SimpleNamespace(secret=voice_secret)
+        except (ValueError, TypeError) as exc:
+            raise SystemExit("Invalid consented voice-owner configuration") from exc
+    # An independent issuer signs the provider turn. A device token,
+    # self-introduction, or untrusted score NEVER produces this signature.
     issuer_hex = os.environ.get("KITTY_TRUSTED_TURN_ISSUER_SECRET_HEX", "")
     if issuer_hex:
         try:
             issuer = bytes.fromhex(issuer_hex)
-            if (len(issuer) < 32 or OWNER_PROOF is None
-                    or issuer == OWNER_PROOF.secret):
+            grant_secrets = [
+                proof.secret for proof in (OWNER_PROOF, VOICE_OWNER_PROOF)
+                if proof is not None
+            ]
+            if (len(issuer) < 32 or not grant_secrets
+                    or issuer in grant_secrets):
                 raise ValueError("missing independent owner verification")
             global TRUSTED_TURN_SECRET
             TRUSTED_TURN_SECRET = issuer
