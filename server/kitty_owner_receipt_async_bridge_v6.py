@@ -64,6 +64,7 @@ class AsyncOwnerReceiptBridge:
         self._generation = 0
         self._items = set()
         self._acked_items = set()
+        self._invalid_items = set()
         self._queue = deque()
         self._early = {}
         self._worker = None
@@ -76,6 +77,9 @@ class AsyncOwnerReceiptBridge:
 
     def _ready(self):
         if not self.active:
+            return False
+        if not self._correlator.consent_active:
+            self.interrupted()
             return False
         try:
             return self._socket_active() is True
@@ -145,7 +149,8 @@ class AsyncOwnerReceiptBridge:
             return False
         item = event.get("item_id")
         if (not isinstance(item, str) or item not in self._items
-                or item in self._early or item in self._acked_items):
+                or item in self._early or item in self._acked_items
+                or item in self._invalid_items):
             return False
         stamp, offset, digest = (
             event.get("stamp"), event.get("offset"),
@@ -256,6 +261,7 @@ class AsyncOwnerReceiptBridge:
         if not self.active:
             return
         self._generation += 1
+        self._invalid_items.update(self._items)
         self._early.clear()
         self._queue.clear()
         self._issuer.interrupt()
@@ -271,6 +277,7 @@ class AsyncOwnerReceiptBridge:
         self._early.clear()
         self._items.clear()
         self._acked_items.clear()
+        self._invalid_items.clear()
         self._correlator.end_call()
         self._issuer.end_call()
         if self._worker is not None:
