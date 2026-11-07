@@ -95,7 +95,8 @@ inline void setOwnerArchiveEnabled(bool enabled){
  ++ownerArchiveEpoch;
  if(!ownerArchiveEpoch)++ownerArchiveEpoch;
  if(archiveAcks)xQueueReset(archiveAcks);
- ownerArchiveEnabled=enabled && archiveAcks && ownerReceiptWrites && ownerReceiptScratch;
+ ownerArchiveEnabled=enabled && archiveAcks && ownerReceiptWrites &&
+   ownerReceiptScratch && ownerReceiptIngress;
 }
 inline bool takeArchiveAck(ArchiveAck &ack){
  return ownerArchiveEnabled && archiveAcks &&
