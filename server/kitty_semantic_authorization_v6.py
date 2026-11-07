@@ -37,12 +37,16 @@ def authorized_semantic_speaker(payload, owner_proof,
     transcript = payload.get("transcript")
     query = payload.get("query")
     ticket = payload.get("turn_attestation")
+    audio_sha256 = payload.get("audio_sha256")
     if (not isinstance(session_id, str) or not 16 <= len(session_id) <= 100
             or not isinstance(grant, str) or not 1 <= len(grant) <= 1024
             or not isinstance(item, str) or not 1 <= len(item) <= 160
             or not isinstance(transcript, str) or not 1 <= len(transcript) <= 300
             or not isinstance(query, str) or query != transcript
             or not isinstance(ticket, str) or not 1 <= len(ticket) <= 1024
+            or (audio_sha256 is not None and
+                (not isinstance(audio_sha256, str) or len(audio_sha256) != 64
+                 or any(c not in "0123456789abcdef" for c in audio_sha256)))
             or not isinstance(trusted_turn_secret, bytes)
             or len(trusted_turn_secret) < 32):
         return None
@@ -58,5 +62,6 @@ def authorized_semantic_speaker(payload, owner_proof,
     from kitty_attested_live_call_v6 import verify_external_attestation
     identity = verify_external_attestation(
         trusted_turn_secret, ticket, session_id=session_id,
-        item_id=item, transcript=transcript, now=now, purpose="turn")
+        item_id=item, transcript=transcript, now=now, purpose="turn",
+        audio_sha256=audio_sha256)
     return OWNER_ID if identity == (OWNER_ID, "owner") else None
