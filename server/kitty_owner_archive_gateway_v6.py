@@ -16,7 +16,8 @@ import time
 
 from kitty_attested_live_call_v6 import ITEM, SESSION, AUDIO_HASH, _digest
 from kitty_owner_sd_receipts_v6 import (
-    _archive_question, issue_owner_receipt, MAX_OFFSET, MAX_TIMESTAMP_DRIFT,
+    _archive_question, issue_owner_receipt, issue_provisional_owner_receipt,
+    MAX_OFFSET, MAX_TIMESTAMP_DRIFT,
 )
 from kitty_owner_session_v6 import verify_grant
 from kitty_attested_live_call_v6 import verify_external_attestation
@@ -202,6 +203,60 @@ class OwnerArchiveGatewayCorrelator:
         self._used_offsets.add((stamp, offset))
         pending["ack"] = (stamp, offset, hash_value)
         return True
+
+    def receipt_from_authenticated_ack(self, item_id):
+        """Issue once while owner proof is fresh; verify SD bytes *later*.
+
+        The receipt's HMAC protects the exact ACK row hash and transcript.
+        It does not claim the bytes were exported, or authorize immediate
+        private recall. It must be delivered only to the S3 SD worker over
+        this gateway's original authenticated device connection.
+
+        No disk, snapshot wait, network I/O, or speaker recognition here.
+        The caller must avoid sending a receipt if the original S3 channel
+        has disconnected or the gateway has lost trusted item provenance.
+        """
+        if not self._still_consented() or not isinstance(item_id, str):
+            return None
+        pending = self._pending.get(item_id)
+        if pending is None or pending["ack"] is None:
+            return None
+        now = int(self._clock())
+        if not self._fresh_proof(
+                item_id, pending["transcript"], pending["owner_grant"],
+                pending["ticket"], pending["audio"], now):
+            self._pending.pop(item_id, None)
+            return None
+        stamp, offset, digest = pending["ack"]
+        # This closure checks the exact S3 ACK already bound by
+        # observe_authenticated_s3_ack() to this private socket and item.
+        # It is NOT callable from an untrusted / HTTP / client event path.
+        def check_ack(*, session_id, item_id, stamp, offset,
+                      archive_sha256):
+            if (session_id != self._session
+                    or item_id not in self._pending
+                    or not self._still_consented()):
+                return False
+            recorded = self._pending[item_id].get("ack")
+            return recorded == (stamp, offset, archive_sha256)
+        try:
+            line = issue_provisional_owner_receipt(
+                self._receipt_key, self._grant_key, self._turn_key,
+                session_id=self._session, item_id=item_id,
+                transcript=pending["transcript"], audio_sha256=pending["audio"],
+                owner_grant=pending["owner_grant"], signed_turn=pending["ticket"],
+                authenticated_archive_ack={
+                    "source": "trusted_s3_sd_worker_ack",
+                    "session_id": self._session, "item_id": item_id,
+                    "stamp": stamp, "offset": offset, "archive_sha256": digest,
+                },
+                trusted_ack_validator=check_ack, now=now)
+        finally:
+            # One-use even on failed signing. Do not allow duplicate receipts
+            # via the finalized-snapshot method after this attempt.
+            self._pending.pop(item_id, None)
+        return ({"type": RECEIPT_TYPE, "line": line.decode("ascii")}
+                if line is not None else None)
 
     def receipt_from_finalized_snapshot(self, item_id):
         """Try to issue ONE signed row, only if original proof remains fresh.
