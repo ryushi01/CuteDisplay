@@ -7,6 +7,7 @@ except the embedding model's initial local cache download.
 """
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -66,7 +67,8 @@ def _connect(path):
     )""")
     return db
 
-def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
+def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32, *,
+          owner_receipt_secret=None):
     """Incrementally refresh derived index. Writes commit only after each batch.
 
     On interruption, next build repairs any partial generation; searches can
@@ -86,7 +88,16 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
         db.execute("DELETE FROM semantic_speakers WHERE generation=?", (next_gen,))
         db.commit()
         from kitty_semantic_attribution_v6 import iter_archive_with_speakers
-        speakers = {r["id"]:r for r in iter_archive_with_speakers(sd)}
+        from kitty_owner_sd_receipts_v6 import configured_receipt_secret
+        # No archive key: zero owner rows, even if an SD sidecar lies.
+        if owner_receipt_secret is None:
+            owner_receipt_secret = configured_receipt_secret()
+        owner_receipt_key_id = (
+            hashlib.sha256(b"kitty-owner-archive-keyid-v1:" + owner_receipt_secret).hexdigest()
+            if isinstance(owner_receipt_secret, bytes) and len(owner_receipt_secret)>=32
+            else "")
+        speakers = {r["id"]:r for r in iter_archive_with_speakers(
+            sd, owner_receipt_secret=owner_receipt_secret)}
         claims = {}
         claims_path = Path(sd) / "kitty" / "speaker_claims_v6.tsv"
         if claims_path.is_file():
@@ -145,6 +156,10 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
                 if len(batch) >= batch_size:
                     flush()
         flush()
+        # Key revocation/rotation must invalidate previously derived owner
+        # embeddings even if a semantic-index refresh has not happened yet.
+        db.execute("INSERT OR REPLACE INTO semantic_meta VALUES ('owner_receipt_key_id', ?)",
+                   (owner_receipt_key_id,))
         db.execute("INSERT OR REPLACE INTO semantic_meta VALUES ('active', ?)", (str(next_gen),))
         db.commit()
         db.execute("DELETE FROM semantic_v6 WHERE generation!=?", (next_gen,))
@@ -161,8 +176,18 @@ def search(db_path, query, k=5, model_name=DEFAULT_MODEL, speaker_id=None):
         return []
     if not query or not query.strip() or len(query)>1000:
         return []
+    # Preserve the established missing-index error contract while still
+    # refusing to open/search owner rows if the receipt key is absent.
     if not os.path.isfile(db_path):
         raise FileNotFoundError(db_path)
+    owner_key_id = None
+    if speaker_id == "person:owner":
+        from kitty_owner_sd_receipts_v6 import configured_receipt_secret
+        owner_secret = configured_receipt_secret()
+        if owner_secret is None:
+            return []
+        owner_key_id = hashlib.sha256(
+            b"kitty-owner-archive-keyid-v1:" + owner_secret).hexdigest()
     model = get_model(model_name)
     with _MODEL_LOCK:
         q = np.asarray(model.encode([query], normalize_embeddings=True)[0], dtype=np.float32)
@@ -172,6 +197,12 @@ def search(db_path, query, k=5, model_name=DEFAULT_MODEL, speaker_id=None):
         if not active_row:
             return []
         gen=int(active_row[0])
+        if owner_key_id is not None:
+            key_row = db.execute(
+                "SELECT value FROM semantic_meta WHERE key='owner_receipt_key_id'"
+            ).fetchone()
+            if not key_row or not hmac.compare_digest(key_row[0], owner_key_id):
+                return []
         speaker_rows={r[0]:{"speaker_id":r[1],"speaker_role":r[2],"provenance":r[3]}
             for r in db.execute("SELECT id,speaker_id,speaker_role,provenance FROM semantic_speakers WHERE generation=?", (gen,))}
         for id, text, raw, model_used in db.execute(

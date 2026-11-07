@@ -26,6 +26,31 @@ class ShareableSnapshotTransportTests(unittest.TestCase):
             }})
             self.assertEqual(read_shareable(path),[("cat","Kitty likes the sun")])
 
+    def test_optional_owner_receipt_snapshot_keeps_old_manifest_valid(self):
+        # Signed owner receipts are an OPTIONAL tenth SD snapshot file.
+        # Existing eight/nine-file snapshots must remain fully supported.
+        with tempfile.TemporaryDirectory() as tmp:
+            receiver = SnapshotReceiver(Path(tmp) / "receiver")
+            payload = b"owner-v1\t" + b"0" * 300 + b"\n"
+            identifier = "owner_receipt_test_01"
+            self.assertIn("owner_turn_receipts_v6.tsv", FILES)
+            self.assertEqual(
+                receiver.chunk(identifier, "owner_turn_receipts_v6.tsv",
+                               0, payload), len(payload))
+            completed = receiver.finalize(identifier, {
+                "owner_turn_receipts_v6.tsv": {
+                    "size": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                },
+            })
+            self.assertEqual(
+                (Path(completed) / "kitty/owner_turn_receipts_v6.tsv").read_bytes(),
+                payload)
+            # An uploaded filename alone doesn't confer identity; without
+            # a matching signed receipt/key the index reads no owner.
+            from kitty_owner_sd_receipts_v6 import read_verified_owner_receipts
+            self.assertEqual(read_verified_owner_receipts(completed, b"R"*32), {})
+
     def test_unapproved_filename_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             receiver=SnapshotReceiver(Path(tmp) / "receiver")

@@ -6,6 +6,7 @@ speaker_role<TAB>provenance. The S3 currently emits unknown/unknown/unverified.
 Legacy turns have no sidecar and are *unknown*, never automatically owner.
 """
 from pathlib import Path
+import hashlib
 
 UNKNOWN = {"speaker_id": "unknown", "speaker_role": "unknown",
            "provenance": "unverified"}
@@ -46,7 +47,17 @@ def read_sidecar(sd_root):
             }
     return mapping
 
-def iter_archive_with_speakers(sd_root):
+def iter_archive_with_speakers(sd_root, *, owner_receipt_secret=None):
+    """SD archive rows: signed owner receipts outrank UNVERIFIED sidecars.
+
+    The S3 microSD is still the only durable data source. Without a
+    separately provisioned receipt verification key, zero rows are promoted
+    into the reserved owner identity.
+    """
+    trusted={}
+    if isinstance(owner_receipt_secret,bytes) and len(owner_receipt_secret)>=32:
+        from kitty_owner_sd_receipts_v6 import read_verified_owner_receipts
+        trusted=read_verified_owner_receipts(sd_root,owner_receipt_secret)
     root=Path(sd_root)/"kitty"
     archive=root/"conversations.tsv"
     if not archive.is_file():
@@ -69,6 +80,11 @@ def iter_archive_with_speakers(sd_root):
                 continue
             stamp, question, answer=parts[0],parts[1],parts[2]
             identity=annotations.get((int(stamp),offset),UNKNOWN) if stamp.isdecimal() else UNKNOWN
+            if (stamp.isdecimal()
+                    and trusted.get((int(stamp),offset))==hashlib.sha256(raw).hexdigest()):
+                identity={"speaker_id":"person:owner",
+                          "speaker_role":"owner",
+                          "provenance":"session_verified"}
             yield {
                 "id":f"conversations.tsv:{current_line}:conversation:{stamp}",
                 "offset":offset, "timestamp":stamp,
