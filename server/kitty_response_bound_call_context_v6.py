@@ -65,7 +65,7 @@ def _clean(s):
 class ResponseBoundCallContext:
     """One optional object per authenticated provider WebSocket; no globals."""
 
-    __slots__ = ("_clock", "_recent", "_pins", "_seen", "_last", "_closed")
+    __slots__ = ("_clock", "_recent", "_pins", "_seen", "_last", "_closed", "_public")
 
     def __init__(self, *, clock=time.monotonic):
         self._clock = clock
@@ -74,12 +74,22 @@ class ResponseBoundCallContext:
         self._seen = set()
         self._last = clock()
         self._closed = False
+        # Optional local query helper. Missing module or config leaves the
+        # previously working call-continuity behavior unchanged.
+        self._public = None
+        try:
+            from kitty_approved_live_query_v6 import ApprovedLiveQuery
+            self._public = ApprovedLiveQuery(clock=clock)
+        except (ImportError, TypeError, ValueError, RuntimeError):
+            self._public = None
 
     def close(self):
         self._recent.clear()
         self._pins.clear()
         self._seen.clear()
         self._closed = True
+        if self._public is not None:
+            self._public.close()
 
     @property
     def note_count(self):
@@ -102,6 +112,13 @@ class ResponseBoundCallContext:
         if kind == "error":
             self.close()
             return
+        if self._public is not None and kind == (
+                "conversation.item.input_audio_transcription.completed"):
+            try:
+                self._public.observe(event)
+            except Exception:
+                self._public.close()
+                self._public = None
         role = (
             "User" if kind == "conversation.item.input_audio_transcription.completed"
             else "Kitty" if kind in ("response.output_audio_transcript.done",
@@ -175,8 +192,17 @@ class ResponseBoundCallContext:
             return command
         self._expire()
         if isinstance(command, dict):
-            return self._with_notes(command)
-        if isinstance(command, list):
-            result = [self._with_notes(e) for e in command]
-            return result if any(a is not b for a, b in zip(result, command)) else command
-        return command
+            result = self._with_notes(command)
+        elif isinstance(command, list):
+            changed = [self._with_notes(e) for e in command]
+            result = changed if any(a is not b for a, b in zip(changed, command)) else command
+        else:
+            return command
+        if self._public is None:
+            return result
+        try:
+            return self._public.decorate(result)
+        except Exception:
+            self._public.close()
+            self._public = None
+            return result
