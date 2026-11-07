@@ -58,10 +58,15 @@ class OwnerNamespaceTests(unittest.TestCase):
             # cannot be read under the reserved owner namespace.
             with sqlite3.connect(self.db) as conn:
                 conn.execute("""
-                  UPDATE semantic_speakers SET speaker_id='person:owner',
-                  speaker_role='guest',provenance='session_verified'
-                  WHERE id LIKE 'conversations.tsv:%'
+                    INSERT OR REPLACE INTO semantic_speakers
+                    (id,generation,speaker_id,speaker_role,provenance)
+                    SELECT id,generation,'person:owner','guest',
+                    'session_verified' FROM semantic_v6
+                    WHERE id LIKE 'conversations.tsv:%'
                 """)
+                self.assertGreater(conn.execute(
+                    "SELECT count(*) FROM semantic_speakers "
+                    "WHERE speaker_id='person:owner'").fetchone()[0], 0)
             self.assertEqual(search(
                 self.db,"hidden color",speaker_id="person:owner"), [])
 
