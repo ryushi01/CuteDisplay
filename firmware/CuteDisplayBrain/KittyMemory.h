@@ -7,11 +7,15 @@
 #include <SD_MMC.h>
 #include <ff.h>
 #include <time.h>
+#include <mbedtls/sha256.h>
 
 namespace KittyMemory {
 static constexpr size_t SLOT_BYTES=768;
 struct Entry { char question[256]; char answer[512]; uint8_t ownerVerified=0;
- char speaker[64]="unknown"; char source[24]="unverified"; uint32_t conversation=0; uint8_t flushSummary=0; };
+ char speaker[64]="unknown"; char source[24]="unverified"; uint32_t conversation=0; uint8_t flushSummary=0;
+ // Correlation is opt-in and untrusted until the separate gateway attests
+ // the microphone speaker; it NEVER changes ownerVerified on the S3.
+ char archiveItem[161]={0}; uint32_t archiveEpoch=0; };
 static QueueHandle_t writes=nullptr;
 static volatile uint32_t activeConversation=0;
 static uint32_t nextConversation=0;
@@ -65,12 +69,55 @@ inline bool proposeConsolidatedFact(const String &key,const String &value){
 
 // Network-free one-slot SD export. Only kitty_sd opens SD_MMC.
 struct ExportRequest { uint8_t file; uint32_t offset; uint32_t limit; };
-struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint32_t boundaries[9]; uint8_t ok; };
+struct ExportBlock { uint8_t file; uint32_t offset; uint32_t total; uint16_t length; uint8_t data[768]; uint32_t boundaries[10]; uint8_t ok; };
 static QueueHandle_t exportRequests=nullptr,exportBlocks=nullptr;
 static volatile bool mounted=false;
 struct SharedMemoryWrite {char id[65];char text[321];};
 static QueueHandle_t sharedMemoryWrites=nullptr;
 static volatile uint32_t sharedRevision=0;
+// Signed owner receipts are opaque: the S3 never holds the private HMAC key.
+// The trusted Ubuntu index validates both this signature and original SD
+// archive bytes. No new record can unlock owner facts on the S3 itself.
+static constexpr size_t OWNER_RECEIPT_LINE_MAX=1023;
+static constexpr uint32_t OWNER_RECEIPT_MAX_FILE=4UL*1024UL*1024UL;
+struct OwnerReceiptWrite {char line[OWNER_RECEIPT_LINE_MAX+1];};
+static QueueHandle_t ownerReceiptWrites=nullptr;
+static OwnerReceiptWrite* ownerReceiptScratch=nullptr;
+static volatile uint32_t ownerReceiptRevision=0;
+struct ArchiveAck {char item[161];uint32_t stamp=0,offset=0,conversation=0,epoch=0;char sha256[65];};
+static QueueHandle_t archiveAcks=nullptr;
+static volatile bool ownerArchiveEnabled=false;
+static volatile uint32_t ownerArchiveEpoch=0;
+inline void setOwnerArchiveEnabled(bool enabled){
+ ownerArchiveEnabled=false;
+ ++ownerArchiveEpoch;
+ if(!ownerArchiveEpoch)++ownerArchiveEpoch;
+ if(archiveAcks)xQueueReset(archiveAcks);
+ ownerArchiveEnabled=enabled && archiveAcks && ownerReceiptWrites && ownerReceiptScratch;
+}
+inline bool takeArchiveAck(ArchiveAck &ack){
+ return ownerArchiveEnabled && archiveAcks &&
+   xQueueReceive(archiveAcks,&ack,0)==pdTRUE;
+}
+// The gateway must have already issued a real independent signed receipt.
+// This method only stores the ASCII row and never asserts owner identity.
+// Unknown/custom/legacy gateways cannot enable this queue by default.
+inline bool queueOpaqueOwnerReceipt(const String &row,bool gatewayAccepted){
+ if(!gatewayAccepted || !ownerArchiveEnabled || !mounted ||
+    !ownerReceiptWrites || !ownerReceiptScratch ||
+    row.length()<100 || row.length()>OWNER_RECEIPT_LINE_MAX ||
+    !row.startsWith("owner-v1\\t") || row[row.length()-1]!='\\n')return false;
+ size_t tabs=0;
+ for(size_t i=0;i<row.length();i++){
+  uint8_t c=(uint8_t)row[i];
+  if(c=='\\t'){tabs++;continue;}
+  if(c=='\\n' && i==row.length()-1)continue;
+  if(c<32 || c>126)return false;
+ }
+ if(tabs!=10)return false;
+ OwnerReceiptWrite item={};row.toCharArray(item.line,sizeof(item.line));
+ return xQueueSend(ownerReceiptWrites,&item,0)==pdTRUE;
+}
 // Explicit approval only: never automatically promote speech to shared.
 inline bool queueApprovedSharedMemory(const String &id,const String &text,bool approved){
  if(!approved || !mounted || !sharedMemoryWrites ||
@@ -104,7 +151,7 @@ inline bool takeClaimContext(const String &speaker,String &out){
  if(speaker!=result.speaker)return false;
  out=String(result.context);return true;
 }
-static constexpr const char* EXPORT_NAMES[]={"facts.tsv","factsmeta.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv","turn_sources.tsv","voice_profiles_v6.json","speaker_claims_v6.tsv","shareable_memories_v6.tsv"};
+static constexpr const char* EXPORT_NAMES[]={"facts.tsv","factsmeta.tsv","dated_plans.tsv","summaries.tsv","conversations.tsv","turn_sources.tsv","voice_profiles_v6.json","speaker_claims_v6.tsv","shareable_memories_v6.tsv","owner_turn_receipts_v6.tsv"};
 static constexpr uint8_t EXPORT_COUNT=sizeof(EXPORT_NAMES)/sizeof(EXPORT_NAMES[0]);
 // Sentinel file=EXPORT_COUNT captures all file sizes in one SD-worker pass.
 inline bool requestExport(uint8_t file,uint32_t offset,uint32_t limit=UINT32_MAX){
@@ -839,7 +886,8 @@ inline void consolidatePreferences(const String &utterance){
 }
 
 inline bool queueAttributed(const String &question,const String &answer,
-                            const String &speaker,const String &source){
+                            const String &speaker,const String &source,
+                            const String &providerItem=""){
  if(!writes || !mounted || question.isEmpty() || answer.isEmpty()){Serial.printf("[MEMORY] enqueue refused mounted=%d queue=%d\n",mounted?1:0,writes?1:0);return false;}
  Entry e={};e.conversation=activeConversation;
  sanitize(question,sizeof(e.question)-1).toCharArray(e.question,sizeof(e.question));
@@ -851,6 +899,18 @@ inline bool queueAttributed(const String &question,const String &answer,
    ?source:String("unverified");
  safeSpeaker.toCharArray(e.speaker,sizeof(e.speaker));
  safeSource.toCharArray(e.source,sizeof(e.source));
+ if(ownerArchiveEnabled && providerItem.length()>0 && providerItem.length()<=160){
+  bool safe=true;
+  for(size_t j=0;j<providerItem.length();j++){
+   char c=providerItem[j];
+   if(!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||
+        (c>='0'&&c<='9')||c=='_'||c=='-')){safe=false;break;}
+  }
+  if(safe){
+   providerItem.toCharArray(e.archiveItem,sizeof(e.archiveItem));
+   e.archiveEpoch=ownerArchiveEpoch;
+  }
+ }
  if(xQueueSend(writes,&e,0)!=pdTRUE){failed++;return false;}
  // Facts are merged exclusively in the SD worker, so revision detection
  // and snapshot persistence cannot miss an early RAM-only mutation.
