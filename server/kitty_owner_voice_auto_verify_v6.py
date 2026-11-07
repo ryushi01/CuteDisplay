@@ -36,6 +36,20 @@ NAME_INTRO = re.compile(
     r"\b(?:i am|i'm|my name is|this is)\s+(?P<name>[A-Za-z_-]{2,32})\b",
     re.I,
 )
+NAME_FR = re.compile(r"\b(?:je m'appelle|c'est)\s+shana\b", re.I)
+NAME_JA = re.compile(r"(?:私は|わたしは|名前は|なまえは)?シャナ(?:です|だよ)")
+NAME_SINGLE = re.compile(r"^\s*shana[.!?。！]?(?:\s*)$", re.I)
+
+
+def owner_name_spoken(text):
+    if not isinstance(text,str) or not text or len(text)>300:
+        return False
+    intro = NAME_INTRO.search(text)
+    return bool(
+        (intro and intro.group("name").casefold() == "shana")
+        or NAME_FR.search(text) or NAME_JA.search(text)
+        or NAME_SINGLE.fullmatch(text)
+    )
 
 
 def _valid_wav(raw):
@@ -160,9 +174,7 @@ class AutomaticVoiceOwner:
             self.speaker_change()
             return None
         self._audio_seen.add(digest)
-        name = NAME_INTRO.search(transcript)
-        name_confirmed = bool(
-            name and name.group("name").casefold() == "shana")
+        name_confirmed = owner_name_spoken(transcript)
         # A named confirmation is an explicitly selectable *weaker*
         # convenience setting, and still requires a real matching voice.
         # Merely claiming the owner's name cannot issue private credentials.
