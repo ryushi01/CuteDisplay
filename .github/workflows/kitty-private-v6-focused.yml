@@ -36,4 +36,5 @@ jobs:
             server.test_kitty_owner_receipt_async_bridge_v6 \
             server.test_kitty_owner_gateway_event_gate_v6 \
             server.test_kitty_owner_gateway_preflight_v6 \
+            server.test_kitty_owner_sd_runtime_preflight_v6 \
             server.test_kitty_gateway_turn_adapter_v6
