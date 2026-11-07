@@ -24,3 +24,7 @@ jobs:
           PYTHONPATH: server
         run: |
           timeout 40s python -m unittest -v             server.test_kitty_semantic_authorization_v6             server.test_kitty_private_sd_boundary_v6             server.test_kitty_attested_live_call_v6             server.test_kitty_semantic_async_client_v6
+      - name: Broad-suite bounded diagnostic
+        env:
+          PYTHONPATH: server
+        run: timeout 45s python -m unittest discover -s server -p 'test_kitty_*v6.py' -v
