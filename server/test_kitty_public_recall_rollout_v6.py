@@ -138,6 +138,20 @@ class TransactionTests(unittest.TestCase):
                 d.preflight()
         self.assertFalse((self.root / "state.json").exists())
 
+    def test_live_probe_code_compiles_without_exposing_secrets(self):
+        captured = []
+        def probe(*argv, **kwargs):
+            script = argv[-1]
+            compile(script, "<kitty-read-only-probe>", "exec")
+            captured.append(script)
+            return b"yes\n"
+        with patch.object(d, "docker", side_effect=probe):
+            self.assertTrue(d.gateway_ok())
+            self.assertTrue(d.public_endpoint_ok())
+        self.assertEqual(len(captured), 2)
+        self.assertNotIn("print(u)", captured[1])
+        self.assertNotIn("print(t)", captured[1])
+
     def test_no_private_memory_or_realtime_route_modified(self):
         src = Path(d.__file__).read_text()
         self.assertNotIn("KITTY_OWNER_GRANT_SECRET_HEX=", src)
