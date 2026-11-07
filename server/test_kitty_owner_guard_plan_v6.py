@@ -49,13 +49,16 @@ class GuardPlanTests(unittest.TestCase):
     def test_real_main_has_exact_combined_guard(self):
         _,topology=_topology(SOURCE)
         self.assertEqual(topology,"combined")
-        self.assertIn("authorized_semantic_speaker(data,OWNER_PROOF)",SOURCE)
+        self.assertIn("authorized_semantic_speaker(", SOURCE)
+        self.assertIn("TRUSTED_TURN_SECRET",SOURCE)
 
     def test_only_old_split_semantic_handlers_qualify_for_candidate(self):
         old=live_old()
         ast.parse(old)
         self.assertEqual(_topology(old)[1],"split")
-        self.assertEqual(candidate(old,SOURCE),"yes")
+        # Obsolete two-route patch cannot safely deploy a new independent
+        # trusted-turn verifier. Full source rollout is a separate stage.
+        self.assertEqual(candidate(old,SOURCE),"no")
         self.assertEqual(candidate(SOURCE,SOURCE),"no")
 
     def test_unexpected_customizations_fail_closed(self):
@@ -68,7 +71,7 @@ class GuardPlanTests(unittest.TestCase):
 
     def test_summary_never_claims_ready_to_restart(self):
         result=summarize(live_old(),SOURCE,set(MODULES))
-        self.assertEqual(result["candidate_compiles"],"yes")
+        self.assertEqual(result["candidate_compiles"],"no")
         self.assertEqual(result["live_semantic_handlers"],"split")
         self.assertEqual(result["github_guard_handlers"],"combined")
         self.assertEqual(result["patch_applied"],"no")

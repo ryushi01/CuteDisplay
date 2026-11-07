@@ -14,10 +14,10 @@ from test_kitty_owner_guard_plan_v6 import SOURCE, live_old
 class OwnerGuardDeployTests(unittest.TestCase):
     def test_candidate_changes_only_split_semantic_route_branches(self):
         old = live_old()
-        replacement = deploy.build_candidate(old, SOURCE, plan)
-        self.assertEqual(replacement, SOURCE)
-        self.assertEqual(plan._topology(replacement)[1], "combined")
-        self.assertEqual(replacement.count("authorized_semantic_speaker(data,OWNER_PROOF)"), 1)
+        # A route-only transplant cannot deploy the independent trusted
+        # per-turn signer; the legacy installer must now refuse safely.
+        with self.assertRaises(deploy.DeploymentError):
+            deploy.build_candidate(old, SOURCE, plan)
 
     def test_unexpected_or_partial_sources_refused(self):
         for old in (
@@ -29,7 +29,9 @@ class OwnerGuardDeployTests(unittest.TestCase):
                 deploy.build_candidate(old, SOURCE, plan)
 
     def test_offline_403_routes_and_enrolled_owner_grant(self):
-        self.assertTrue(deploy.offline_security_smoke(SOURCE, Path(__file__).parent))
+        with self.assertRaisesRegex(deploy.DeploymentError,
+                                    "legacy_owner_guard_smoke_unsupported"):
+            deploy.offline_security_smoke(SOURCE, Path(__file__).parent)
 
     def test_atomic_backup_and_exact_rollback(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -10,6 +10,9 @@ TOKEN = os.environ.get("KITTY_MEMORY_TOKEN", "")
 WRITE_Q = queue.Queue(maxsize=256)
 LOCK = threading.Lock()
 OWNER_PROOF = None
+# Configured only alongside an actual independent human speaker verifier;
+# device/voice candidate or owner grant alone cannot enable private search.
+TRUSTED_TURN_SECRET = None
 # Optional, isolated CPU index refresh. Snapshot upload acknowledgement never
 # waits for embedding; a single worker coalesces bursts of completed snapshots.
 SEMANTIC_REFRESH_Q = queue.Queue(maxsize=1)
@@ -246,7 +249,8 @@ class Handler(BaseHTTPRequestHandler):
                 # *before* opening the semantic database or loading a model.
                 # No guest/probable-speaker grant issuer is wired yet.
                 from kitty_semantic_authorization_v6 import authorized_semantic_speaker
-                sid=authorized_semantic_speaker(data,OWNER_PROOF)
+                sid=authorized_semantic_speaker(
+                    data, OWNER_PROOF, TRUSTED_TURN_SECRET)
                 if sid is None:
                     return self._reply(403,{"error":"verified_owner_session_required"})
                 index=os.environ.get("KITTY_SEMANTIC_DB","")
@@ -295,6 +299,20 @@ def main():
             OWNER_PROOF=OwnerProof(secret,enrolled_key)
         except (ValueError,OSError) as exc:
             raise SystemExit("Invalid owner verification configuration") from exc
+    # Separate independent signer for EXACT verified spoken turns. Do not
+    # interpret phone pairing or X-vector scores as permission. Incomplete
+    # configuration stays fail-closed and never blocks working shared recall.
+    issuer_hex = os.environ.get("KITTY_TRUSTED_TURN_ISSUER_SECRET_HEX", "")
+    if issuer_hex:
+        try:
+            issuer = bytes.fromhex(issuer_hex)
+            if (len(issuer) < 32 or OWNER_PROOF is None
+                    or issuer == OWNER_PROOF.secret):
+                raise ValueError("missing independent owner verification")
+            global TRUSTED_TURN_SECRET
+            TRUSTED_TURN_SECRET = issuer
+        except (ValueError, TypeError) as exc:
+            raise SystemExit("Invalid independent speaker verifier configuration") from exc
     if legacy_memory_enabled():
         init()
         threading.Thread(target=writer,daemon=True).start()

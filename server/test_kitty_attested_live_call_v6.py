@@ -183,39 +183,43 @@ class AsyncAttestedHistoryTests(unittest.IsolatedAsyncioTestCase):
         grant=issue_grant(OWNER_KEY,True,self.call.session_id,
                           now=self.now,ttl=120)
         self.assertTrue(self.call.verify_turn("owner_item",ticket,owner_grant=grant))
-        return transcript,grant
+        return transcript,grant,ticket
 
     async def test_owner_lookups_use_only_verified_transcript(self):
-        transcript,grant=self.authorize_owner()
+        transcript,grant,ticket=self.authorize_owner()
         seen=[]
-        async def fake(url,token,query,sid,passed):
-            seen.append((query,sid,passed))
+        async def fake(url,token,query,sid,passed,**evidence):
+            seen.append((query,sid,passed,evidence))
             return "validated owner result"
         context=await self.call.owner_history_for_verified_turn(
             "owner_item","http://127.0.0.1:8766","local-token",grant,lookup=fake)
         self.assertEqual(context,"validated owner result")
-        self.assertEqual(seen,[(transcript,self.call.session_id,grant)])
+        self.assertEqual(seen,[(transcript,self.call.session_id,grant,{
+            "item_id":"owner_item", "transcript":transcript,
+            "turn_attestation":ticket})])
         self.assertEqual(await self.call.owner_history_for_verified_turn(
             "other_item","http://127.0.0.1:8766","local-token",grant,lookup=fake),"")
         self.assertEqual(len(seen),1)
 
     async def test_new_utterance_disallows_late_response(self):
-        _,grant=self.authorize_owner()
+        _,grant,_=self.authorize_owner()
         started=asyncio.Event()
         release=asyncio.Event()
-        async def fake(*args):
+        async def fake(*args, **kwargs):
             started.set()
             await release.wait()
             return "private note must not reach later speaker"
         task=asyncio.create_task(self.call.owner_history_for_verified_turn(
             "owner_item","http://127.0.0.1:8766","token",grant,lookup=fake))
-        await started.wait()
+        # A bad owner callback must fail a focused test quickly, not hang
+        # GitHub's entire privacy regression job indefinitely.
+        await asyncio.wait_for(started.wait(), timeout=0.5)
         self.call.upstream_speech_started()
         release.set()
         self.assertEqual(await task,"")
 
     async def test_expired_owner_grant_and_external_url_deny_lookup(self):
-        _,grant=self.authorize_owner()
+        _,grant,_=self.authorize_owner()
         async def forbidden(*args):
             raise AssertionError("no owner history access expected")
         self.now+=121

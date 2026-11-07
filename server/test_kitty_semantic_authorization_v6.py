@@ -15,6 +15,7 @@ from unittest import mock
 
 from server import kitty_memory_service as service
 from kitty_owner_session_v6 import issue_grant
+from kitty_attested_live_call_v6 import issue_external_attestation
 from kitty_semantic_authorization_v6 import authorized_semantic_speaker
 
 
@@ -34,11 +35,20 @@ class _OfflineRequest(service.Handler):
 class SemanticGrantTests(unittest.TestCase):
     def setUp(self):
         self.secret=b"G"*32
+        self.turn_secret=b"T"*32
         self.owner=SimpleNamespace(secret=self.secret)
         self.session="trusted-owner-session-1234"
         self.grant=issue_grant(self.secret,True,self.session,ttl=120)
+        self.query="last decision"
+        self.item="owner_item_1"
+        self.ticket=issue_external_attestation(
+            self.turn_secret, session_id=self.session, item_id=self.item,
+            transcript=self.query, speaker_id="person:owner",
+            speaker_role="owner")
         self.good={"speaker_id":"person:owner", "session_id":self.session,
-                   "owner_grant":self.grant, "query":"last decision"}
+                   "owner_grant":self.grant, "query":self.query,
+                   "item_id":self.item,"transcript":self.query,
+                   "turn_attestation":self.ticket}
         self.temp=tempfile.TemporaryDirectory()
         self.index=str(Path(self.temp.name)/"derived-index.sqlite3")
         Path(self.index).write_bytes(b"test")  # gate checks file presence, mock search
@@ -49,13 +59,15 @@ class SemanticGrantTests(unittest.TestCase):
     def request(self,endpoint,data,owner=None,token="device"):
         request=_OfflineRequest(endpoint,data,token)
         with mock.patch.object(service,"TOKEN","device"),mock.patch.object(
-                service,"OWNER_PROOF",owner),mock.patch.dict(
+                service,"OWNER_PROOF",owner),mock.patch.object(
+                service,"TRUSTED_TURN_SECRET",self.turn_secret),mock.patch.dict(
                 os.environ,{"KITTY_SEMANTIC_DB":self.index}):
             request.do_POST()
         return request.response
 
     def test_missing_owner_proof_fails_closed(self):
-        self.assertIsNone(authorized_semantic_speaker(self.good,None))
+        self.assertIsNone(authorized_semantic_speaker(
+            self.good,None,self.turn_secret))
         for endpoint in ("/semantic","/semantic/context"):
             status,_=self.request(endpoint,self.good)
             self.assertEqual(status,403)
@@ -82,7 +94,8 @@ class SemanticGrantTests(unittest.TestCase):
     def test_device_token_cannot_select_arbitrary_person(self):
         for sid in ("person:shana","person:guest","unknown","person:owner-admin",""):
             data={**self.good,"speaker_id":sid}
-            self.assertIsNone(authorized_semantic_speaker(data,self.owner))
+            self.assertIsNone(authorized_semantic_speaker(
+                data,self.owner,self.turn_secret))
             for endpoint in ("/semantic","/semantic/context"):
                 status,_=self.request(endpoint,data,self.owner)
                 self.assertEqual(status,403)
@@ -96,13 +109,51 @@ class SemanticGrantTests(unittest.TestCase):
             {**self.good,"session_id":""},
         )
         for data in invalid:
-            self.assertIsNone(authorized_semantic_speaker(data,self.owner))
+            self.assertIsNone(authorized_semantic_speaker(
+                data,self.owner,self.turn_secret))
             for endpoint in ("/semantic","/semantic/context"):
                 status,_=self.request(endpoint,data,self.owner)
                 self.assertEqual(status,403)
         expired=issue_grant(self.secret,True,self.session,now=int(time.time())-600)
         self.assertIsNone(authorized_semantic_speaker(
-            {**self.good,"owner_grant":expired},self.owner))
+            {**self.good,"owner_grant":expired},self.owner,self.turn_secret))
+
+    def test_owner_grant_alone_voice_score_and_self_claim_are_denied(self):
+        for changes in (
+            {"turn_attestation": ""},
+            {"turn_attestation": "person:owner"},
+            {"turn_attestation": self.ticket[:-3]+"bad"},
+            {"item_id": "different_item"},
+            {"transcript": "another transcript"},
+            {"query": "other private fact"},
+            {"session_id": "other_verified_session"},
+        ):
+            forged = {**self.good, **changes}
+            self.assertIsNone(authorized_semantic_speaker(
+                forged,self.owner,self.turn_secret))
+            for endpoint in ("/semantic", "/semantic/context"):
+                self.assertEqual(self.request(endpoint, forged, self.owner)[0],403)
+        self.assertIsNone(authorized_semantic_speaker(
+            self.good,self.owner,None))
+        self.assertIsNone(authorized_semantic_speaker(
+            self.good,self.owner,self.secret))  # no reused grant key
+        self.assertIsNone(authorized_semantic_speaker(
+            self.good,self.owner,b"wrong verifier key material 00000000"))
+
+    def test_guest_and_learning_ticket_can_never_unlock_owner(self):
+        for purpose,speaker,role in (
+                ("turn","person:guest","guest"),
+                ("learning","person:owner","owner")):
+            ticket=issue_external_attestation(
+                self.turn_secret,session_id=self.session,item_id=self.item,
+                transcript=self.query,speaker_id=speaker,
+                speaker_role=role,purpose=purpose,
+                audio_sha256="a"*64 if purpose=="learning" else None)
+            data={**self.good,"turn_attestation":ticket}
+            self.assertIsNone(authorized_semantic_speaker(
+                data,self.owner,self.turn_secret))
+            self.assertEqual(self.request(
+                "/semantic/context",data,self.owner)[0],403)
 
     def test_missing_device_authorization_denied_even_with_owner_grant(self):
         for endpoint in ("/semantic","/semantic/context"):
@@ -123,7 +174,8 @@ class SemanticGrantTests(unittest.TestCase):
         for data in (None,[],{"speaker_id":"person:owner","session_id":42,
                                "owner_grant":self.grant},
                      {**self.good,"owner_grant":"x"*1025}):
-            self.assertIsNone(authorized_semantic_speaker(data,self.owner))
+            self.assertIsNone(authorized_semantic_speaker(
+                data,self.owner,self.turn_secret))
 
 
 if __name__=="__main__":

@@ -36,6 +36,9 @@ def read_sidecar(sd_root):
             # session provenance handled in a future authenticated protocol.
             if role=="owner":
                 continue
+            if speaker_id=="person:owner":
+                # A guest-labeled SD row cannot impersonate the reserved owner.
+                continue
             mapping[(int(stamp),int(offset))] = {
                 "speaker_id":speaker_id,
                 "speaker_role":role,

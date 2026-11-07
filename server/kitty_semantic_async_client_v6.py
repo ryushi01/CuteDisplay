@@ -64,11 +64,16 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
 
 
 def _read_context(url, token, query, speaker_id, timeout,
-                  session_id=None, owner_grant=None):
+                  session_id=None, owner_grant=None,
+                  item_id=None, transcript=None, turn_attestation=None):
     payload={"query":query,"speaker_id":speaker_id}
     if session_id is not None and owner_grant is not None:
         payload["session_id"]=session_id
         payload["owner_grant"]=owner_grant
+    if item_id is not None and transcript is not None and turn_attestation is not None:
+        payload["item_id"]=item_id
+        payload["transcript"]=transcript
+        payload["turn_attestation"]=turn_attestation
     body = json.dumps(payload,ensure_ascii=False).encode("utf-8")
     if url.startswith("unix:///run/kitty-semantic/"):
         path = url[len("unix://"):]
@@ -129,29 +134,37 @@ async def semantic_context(url, token, query, speaker_id, *, timeout=ALLOWED_TIM
             json.JSONDecodeError, urllib.error.URLError):
         return ""
 
-async def owner_semantic_context(url, token, query, session_id, owner_grant,
-                                 *, timeout=ALLOWED_TIMEOUT,
-                                 request_fn=_read_context):
-    """One-shot owner-only lookup, never automatically called from voice IDs.
+async def owner_semantic_context(
+        url, token, query, session_id, owner_grant, *,
+        item_id=None, transcript=None, turn_attestation=None,
+        timeout=ALLOWED_TIMEOUT, request_fn=_read_context):
+    """One-shot owner SD lookup only for a separately signed exact voice turn.
 
-    The memory service verifies a cryptographic enrolled-key owner grant for
-    this particular session. An S3 API token or spoken name is insufficient.
-    No Mac inference or realtime audio worker is involved.
+    A valid device token or even an enrolled-owner session grant alone
+    cannot trigger lookup. The memory-service API revalidates the separate
+    trusted speaker issuer signature for the same query, session and item.
     """
-    if (not _local_memory_endpoint(url) or not isinstance(token,str) or not token
-            or not isinstance(query,str) or not query.strip()
-            or not isinstance(session_id,str) or not 8<=len(session_id)<=100
-            or not isinstance(owner_grant,str)
-            or not 1<=len(owner_grant)<=1024):
+    from kitty_attested_live_call_v6 import ITEM, SESSION
+    if (not _local_memory_endpoint(url) or not isinstance(token, str) or not token
+            or not isinstance(query, str) or not query.strip()
+            or not isinstance(session_id, str) or not SESSION.fullmatch(session_id)
+            or not isinstance(owner_grant, str) or not 1 <= len(owner_grant) <= 1024
+            or not isinstance(item_id, str) or not ITEM.fullmatch(item_id)
+            or not isinstance(transcript, str) or transcript != query
+            or not 1 <= len(transcript) <= MAX_QUERY
+            or not isinstance(turn_attestation, str)
+            or not 1 <= len(turn_attestation) <= 1024):
         return ""
     try:
-        limit=min(max(float(timeout),0.05),ALLOWED_TIMEOUT)
+        limit = min(max(float(timeout), 0.05), ALLOWED_TIMEOUT)
         return await asyncio.wait_for(
-            asyncio.to_thread(request_fn,url,token,query[:MAX_QUERY],
-                              "person:owner",limit,session_id,owner_grant),
+            asyncio.to_thread(
+                request_fn, url, token, query,
+                "person:owner", limit, session_id, owner_grant,
+                item_id, transcript, turn_attestation),
             timeout=limit)
-    except (TimeoutError,OSError,ValueError,TypeError,KeyError,
-            json.JSONDecodeError,urllib.error.URLError):
+    except (TimeoutError, OSError, ValueError, TypeError, KeyError,
+            json.JSONDecodeError, urllib.error.URLError):
         return ""
 
 

@@ -96,7 +96,8 @@ def build(sd, out, model_name=DEFAULT_MODEL, batch_size=32):
                     if len(cols) != 5:
                         continue
                     stamp, sid, key, value, provenance = cols
-                    if (not stamp.isdecimal() or not sid or sid == "unknown"
+                    if (not stamp.isdecimal() or not sid
+                            or sid in ("unknown", "person:owner")
                             or len(sid) >= 64 or any(ord(c) < 32 for c in sid)
                             or provenance not in ("voice_probable", "explicit_introduction")):
                         continue
@@ -179,6 +180,13 @@ def search(db_path, query, k=5, model_name=DEFAULT_MODEL, speaker_id=None):
                 continue
             attribution=speaker_rows.get(id,{"speaker_id":"unknown","speaker_role":"unknown","provenance":"unverified"})
             if attribution["speaker_id"] != speaker_id:
+                continue
+            if speaker_id == "person:owner" and (
+                    attribution["speaker_role"] != "owner" or
+                    attribution["provenance"] != "session_verified"):
+                # Only independently verified owner records are eligible.
+                # SD voice candidates or guest-labeled owner IDs must not
+                # become owner memory just because an owner grant is valid.
                 continue
             vec = np.frombuffer(raw, dtype="<f4")
             if vec.shape != q.shape:
