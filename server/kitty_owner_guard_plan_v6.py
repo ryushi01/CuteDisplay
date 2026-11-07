@@ -75,6 +75,13 @@ def _topology(source):
 
 def candidate(source_live,source_main):
     """Generate a compile-checked *in-memory* candidate, never write it."""
+    # The old installer can transplant two HTTP route branches ONLY. Once
+    # owner-private recall also requires a separately configured signed-turn
+    # issuer, that transplant would leave missing trust configuration and
+    # may crash the memory service. Refuse rather than deploying a partial
+    # or weaker private-memory guard over the working installation.
+    if isinstance(source_main,str) and "TRUSTED_TURN_SECRET" in source_main:
+        return "no"
     lt,layout=_topology(source_live)
     mt,modern=_topology(source_main)
     if not lt or not mt or modern!="combined" or layout!="split":
