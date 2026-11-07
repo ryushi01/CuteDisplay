@@ -28,4 +28,5 @@ jobs:
             server.test_kitty_private_sd_boundary_v6 \
             server.test_kitty_attested_live_call_v6 \
             server.test_kitty_semantic_async_client_v6 \
-            server.test_kitty_owner_sd_receipts_v6
+            server.test_kitty_owner_sd_receipts_v6 \
+            server.test_kitty_owner_voice_auto_verify_v6
