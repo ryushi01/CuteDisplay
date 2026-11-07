@@ -203,6 +203,10 @@ def valid_function(path, name):
 
 def offline_security_smoke(candidate_source, service_directory):
     """Validate both route handlers with a synthetic bearer; no server activity."""
+    if "TRUSTED_TURN_SECRET" in candidate_source:
+        # This pre-existing smoke test models owner-grant-only semantics.
+        # It must not approve (or deploy) the stronger two-proof version.
+        raise DeploymentError("legacy_owner_guard_smoke_unsupported")
     sys.path.insert(0, str(service_directory))
     try:
         import importlib
