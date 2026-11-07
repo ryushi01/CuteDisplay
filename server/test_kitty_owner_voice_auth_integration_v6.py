@@ -119,6 +119,35 @@ class VoiceRecallIntegration(unittest.IsolatedAsyncioTestCase):
             "mic_item_3", "http://127.0.0.1:8766",
             "local-token", issued["owner_grant"], lookup=local_lookup), "")
 
+    async def test_semantic_client_forwards_audio_hash_only_when_supplied(self):
+        from kitty_semantic_async_client_v6 import owner_semantic_context
+        seen = []
+        def fake(*args, **kwargs):
+            seen.append((args, kwargs))
+            return "private SD context"
+        params = {
+            "item_id": "observed_item_3", "transcript": "Recall my SD notes",
+            "turn_attestation": "signed.turn.ticket",
+        }
+        url = "http://127.0.0.1:8766"
+        result = await owner_semantic_context(
+            url, "service-token", "Recall my SD notes",
+            "some-gateway-session-12345", "grant", audio_sha256="a"*64,
+            request_fn=fake, **params)
+        self.assertEqual(result, "private SD context")
+        self.assertEqual(seen[0][1], {"audio_sha256": "a"*64})
+        result = await owner_semantic_context(
+            url, "service-token", "Recall my SD notes",
+            "some-gateway-session-12345", "grant", request_fn=fake, **params)
+        self.assertEqual(result, "private SD context")
+        self.assertEqual(seen[1][1], {})
+        result = await owner_semantic_context(
+            url, "service-token", "Recall my SD notes",
+            "some-gateway-session-12345", "grant", audio_sha256="not-a-hash",
+            request_fn=fake, **params)
+        self.assertEqual(result, "")
+        self.assertEqual(len(seen), 2)
+
     async def test_wrong_microphone_digest_rejected_before_owner_context(self):
         now = 1_900_000_000
         call = AttestedLiveCall(
